@@ -18,6 +18,13 @@ const throwingTool: Tool = {
   },
 };
 
+const mismatchedIdTool: Tool = {
+  definition: { name: "mismatched", description: "Returns a hardcoded id", inputSchema: { type: "object" } },
+  async execute() {
+    return { id: "tool-invented-id", output: "done" };
+  },
+};
+
 describe("InMemoryToolRegistry", () => {
   it("registers and lists tool definitions", () => {
     const registry = new InMemoryToolRegistry();
@@ -45,5 +52,13 @@ describe("InMemoryToolRegistry", () => {
     const result = await registry.execute({ id: "call-1", name: "boom", input: {} }, tenant);
     expect(result.isError).toBe(true);
     expect(result.output).toContain("kaboom");
+  });
+
+  it("overrides the tool's own id with the caller's call.id", async () => {
+    const registry = new InMemoryToolRegistry();
+    registry.register(mismatchedIdTool);
+    const result = await registry.execute({ id: "caller-id", name: "mismatched", input: {} }, tenant);
+    expect(result.id).toBe("caller-id");
+    expect(result.output).toBe("done");
   });
 });

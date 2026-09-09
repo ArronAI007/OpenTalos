@@ -21,7 +21,7 @@ export class InMemoryToolRegistry implements ToolRegistry {
       return { id: call.id, output: `Unknown tool: ${call.name}`, isError: true };
     }
     try {
-      return await tool.execute(call.input, ctx);
+      return { ...(await tool.execute(call.input, ctx)), id: call.id };
     } catch (error) {
       return { id: call.id, output: error instanceof Error ? error.message : String(error), isError: true };
     }
