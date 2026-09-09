@@ -119,6 +119,27 @@ importers:
         specifier: ^5.0.0
         version: 5.0.0(vite@8.2.2)
 
+  examples/research-agent:
+    dependencies:
+      '@opentalos/checkpoint':
+        specifier: workspace:*
+        version: link:../../packages/checkpoint
+      '@opentalos/core-graph':
+        specifier: workspace:*
+        version: link:../../packages/core-graph
+      '@opentalos/core-types':
+        specifier: workspace:*
+        version: link:../../packages/core-types
+      '@opentalos/multi-agent':
+        specifier: workspace:*
+        version: link:../../packages/multi-agent
+      '@opentalos/tool-registry':
+        specifier: workspace:*
+        version: link:../../packages/tool-registry
+      '@opentalos/tracing':
+        specifier: workspace:*
+        version: link:../../packages/tracing
+
   packages/checkpoint:
     dependencies:
       '@opentalos/core-types':

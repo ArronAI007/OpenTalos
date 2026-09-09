@@ -1,0 +1,19 @@
+{
+  "name": "@opentalos/example-research-agent",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@opentalos/core-types": "workspace:*",
+    "@opentalos/core-graph": "workspace:*",
+    "@opentalos/multi-agent": "workspace:*",
+    "@opentalos/checkpoint": "workspace:*",
+    "@opentalos/tracing": "workspace:*",
+    "@opentalos/tool-registry": "workspace:*"
+  }
+}
