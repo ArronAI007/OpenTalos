@@ -2430,6 +2430,57 @@ describe("createSubgraphNode", () => {
     const checkpoint = engine.start({ total: 1 }, tenant, "sub-run-2");
     await expect(engine.run(checkpoint)).rejects.toThrow(/not supported when nested/);
   });
+
+  it("invokes the same subgraph node repeatedly via a parent-graph loop without runId collisions", async () => {
+    interface LoopState {
+      total: number;
+      iterations: number;
+    }
+    const double: NodeFn<ChildState> = async function* (state) {
+      return { value: state.value * 2 };
+    };
+    const childGraph: GraphDefinition<ChildState> = {
+      id: "child-loop",
+      entryNode: "double",
+      nodes: { double },
+      edges: [],
+      reducer: shallowMergeReducer,
+    };
+    const deps = makeDeps();
+    const subgraphNode = createSubgraphNode<LoopState, ChildState>(
+      childGraph,
+      deps,
+      (parentState) => ({ value: parentState.total }),
+      (childState) => ({ total: childState.value }),
+    );
+    const countIteration: NodeFn<LoopState> = async function* (state) {
+      return { iterations: state.iterations + 1 };
+    };
+    const parentGraph: GraphDefinition<LoopState> = {
+      id: "loop-parent",
+      entryNode: "child",
+      nodes: { child: subgraphNode, count: countIteration },
+      edges: [
+        { from: "child", to: "count" },
+        { from: "count", to: "child", condition: (s) => s.iterations < 3 },
+      ],
+      reducer: shallowMergeReducer,
+    };
+    const engine = new GraphEngine(parentGraph, deps);
+    let checkpoint = engine.start({ total: 1, iterations: 0 }, tenant, "loop-run-1");
+    checkpoint = await engine.run(checkpoint);
+
+    expect(checkpoint.status).toBe("done");
+    expect(checkpoint.state.total).toBe(8); // doubled 3 times
+    expect(checkpoint.state.iterations).toBe(3);
+
+    // Each of the 3 subgraph invocations must have persisted under its own distinct runId —
+    // a collision in createSubgraphNode's runId scheme would silently overwrite one call's
+    // checkpoint with another's.
+    const childCheckpoints = (await deps.checkpointStore.list({})).filter((c) => c.graphId === "child-loop");
+    const distinctRunIds = new Set(childCheckpoints.map((c) => c.runId));
+    expect(distinctRunIds.size).toBe(3);
+  });
 });
 ```
 
@@ -2444,6 +2495,19 @@ Expected: FAIL — `createSubgraphNode` is not defined.
 import { GraphEngine, type EngineDeps } from "./engine.js";
 import type { GraphDefinition, NodeFn } from "./types.js";
 
+/**
+ * `deps` is shared as-is with the child engine, which has two consequences worth knowing:
+ * - Guardrails match by nodeId only (see engine.ts's wrapWithGuardrails), so a guardrail
+ *   configured for a nodeId in the parent graph will also apply if the child graph happens
+ *   to reuse that same nodeId — since subgraphs can't handle pauses, this surfaces as the
+ *   "not supported when nested" throw below, which can be confusing to debug if the real
+ *   cause is an unrelated guardrail rather than the child's own logic.
+ * - Every subgraph invocation persists its own checkpoints to the shared checkpointStore
+ *   under a synthetic runId that's never queried again once the subgraph completes — for
+ *   the in-memory store used in this phase that's harmless, but a real persistent store
+ *   would accumulate orphaned rows for each subgraph call (more so inside a loop or a
+ *   fan-out branch). Acceptable for now; worth revisiting when a real CheckpointStore lands.
+ */
 export function createSubgraphNode<TState, TSub>(
   childGraph: GraphDefinition<TSub>,
   deps: EngineDeps,
@@ -2468,7 +2532,7 @@ export function createSubgraphNode<TState, TSub>(
 - [ ] **Step 7: Run tests to verify they pass**
 
 Run: `pnpm --filter @opentalos/core-graph test -- subgraph`
-Expected: PASS — both tests green.
+Expected: PASS — all 3 tests green.
 
 - [ ] **Step 8: Update `packages/core-graph/src/index.ts` to export the new helper**
 
@@ -2482,7 +2546,7 @@ export type { EdgeDefinition, GraphDefinition, NodeContext, NodeCursor, NodeFn, 
 - [ ] **Step 9: Rebuild and run the full package test suite**
 
 Run: `pnpm --filter @opentalos/core-graph build && pnpm --filter @opentalos/core-graph test`
-Expected: PASS — all 14 tests in the package green (10 from Task 8, 2 fan-out, 2 subgraph).
+Expected: PASS — all 15 tests in the package green (10 from Task 8, 2 fan-out, 3 subgraph).
 
 - [ ] **Step 10: Commit**
 
