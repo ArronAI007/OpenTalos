@@ -4,7 +4,14 @@ import { createRouterNode } from "./router-node.js";
 export interface SupervisorConfig<TState> {
   id: string;
   agents: Record<string, NodeFn<TState>>;
-  /** Reads state and returns the key of the agent to call next, or "DONE" to finish. */
+  /**
+   * Reads state and returns the key of the agent to call next, or "DONE" to finish.
+   * Must be a cheap, pure, deterministic function of state — it may be called more than
+   * once per hop (once by the router node's validation check, once per edge condition
+   * evaluated during routing). Do not perform I/O or expensive computation here; if a
+   * decision requires an LLM call, do that inside an agent node and have route() merely
+   * read the field that node already wrote into state (as the research-agent example does).
+   */
   route: (state: TState) => string;
   reducer: (state: TState, partial: Partial<TState>) => TState;
 }

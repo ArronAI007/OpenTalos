@@ -128,6 +128,8 @@ export interface GuardrailInput {
   nodeId: string;
   phase: "before" | "after";
   state: unknown;
+  /** The node's own return value, populated only on the "after" phase (undefined on "before") — lets an after-phase guardrail actually inspect what the node produced, not just its input state. */
+  output?: unknown;
   ctx: TenantContext;
 }
 

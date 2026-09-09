@@ -275,4 +275,72 @@ describe("GraphEngine — sequential execution", () => {
       /different tenant\/session/,
     );
   });
+
+  it("passes the node's output to an \"after\" phase guardrail so it can validate results", async () => {
+    const produceBad: NodeFn<CounterState> = async function* () {
+      return { count: 999 };
+    };
+    const graph: GraphDefinition<CounterState> = {
+      id: "g11",
+      entryNode: "produce",
+      nodes: { produce: produceBad },
+      edges: [],
+      reducer: shallowMergeReducer,
+    };
+    const outputCheckingGuardrail: Guardrail = {
+      async check(input) {
+        if (input.phase === "after" && (input.output as Partial<CounterState> | undefined)?.count === 999) {
+          return "block";
+        }
+        return "allow";
+      },
+    };
+    const deps = { ...makeDeps(), guardrails: [outputCheckingGuardrail] };
+    const engine = new GraphEngine(graph, deps);
+    const checkpoint = engine.start({ count: 0 }, tenant, "run-11");
+    await expect(engine.run(checkpoint)).rejects.toThrow(/Guardrail blocked node "produce" after execution/);
+  });
+
+  it("runs two tenants' graphs concurrently on one shared engine instance without cross-contamination", async () => {
+    const tick: NodeFn<CounterState> = async function* (state) {
+      return { count: state.count + 1 };
+    };
+    const done: NodeFn<CounterState> = async function* () {
+      return {};
+    };
+    const graph: GraphDefinition<CounterState> = {
+      id: "concurrent-g",
+      entryNode: "tick",
+      nodes: { tick, done },
+      edges: [
+        { from: "tick", to: "tick", condition: (s) => s.count % 100 < 5 },
+        { from: "tick", to: "done", condition: (s) => s.count % 100 >= 5 },
+      ],
+      reducer: shallowMergeReducer,
+    };
+    const deps = makeDeps();
+    const engine = new GraphEngine(graph, deps);
+    const tenantA: TenantContext = { tenantId: "tenant-a", sessionId: "session-1" };
+    const tenantB: TenantContext = { tenantId: "tenant-b", sessionId: "session-1" };
+
+    const [resultA, resultB] = await Promise.all([
+      engine.run(engine.start({ count: 0 }, tenantA, "concurrent-run-a")),
+      engine.run(engine.start({ count: 100 }, tenantB, "concurrent-run-b")),
+    ]);
+
+    expect(resultA.status).toBe("done");
+    expect(resultA.state.count).toBe(5);
+    expect(resultA.tenantId).toBe("tenant-a");
+
+    expect(resultB.status).toBe("done");
+    expect(resultB.state.count).toBe(105);
+    expect(resultB.tenantId).toBe("tenant-b");
+
+    const persistedA = await deps.checkpointStore.load("concurrent-run-a");
+    const persistedB = await deps.checkpointStore.load("concurrent-run-b");
+    expect(persistedA?.tenantId).toBe("tenant-a");
+    expect(persistedA?.state).toEqual({ count: 5 });
+    expect(persistedB?.tenantId).toBe("tenant-b");
+    expect(persistedB?.state).toEqual({ count: 105 });
+  });
 });

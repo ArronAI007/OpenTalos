@@ -263,7 +263,7 @@ export class GraphEngine<TState> {
       }
       const partial = yield* nodeFn(state, ctx);
       for (const guardrail of guardrails) {
-        const decision = await guardrail.check({ nodeId, phase: "after", state, ctx: ctx.tenant });
+        const decision = await guardrail.check({ nodeId, phase: "after", state, output: partial, ctx: ctx.tenant });
         if (decision === "block") {
           throw new Error(`Guardrail blocked node "${nodeId}" after execution`);
         }
