@@ -127,6 +127,12 @@ importers:
 
   packages/core-types: {}
 
+  packages/memory:
+    dependencies:
+      '@opentalos/core-types':
+        specifier: workspace:*
+        version: link:../core-types
+
   packages/tracing:
     dependencies:
       '@opentalos/core-types':
