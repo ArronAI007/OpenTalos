@@ -174,6 +174,24 @@ importers:
         specifier: workspace:*
         version: link:../tracing
 
+  packages/sdk:
+    dependencies:
+      '@opentalos/checkpoint':
+        specifier: workspace:*
+        version: link:../checkpoint
+      '@opentalos/core-graph':
+        specifier: workspace:*
+        version: link:../core-graph
+      '@opentalos/core-types':
+        specifier: workspace:*
+        version: link:../core-types
+      '@opentalos/tool-registry':
+        specifier: workspace:*
+        version: link:../tool-registry
+      '@opentalos/tracing':
+        specifier: workspace:*
+        version: link:../tracing
+
   packages/tool-registry:
     dependencies:
       '@modelcontextprotocol/sdk':
