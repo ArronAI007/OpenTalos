@@ -1053,14 +1053,15 @@ Each adapter takes a minimal, structurally-typed client interface (`AnthropicCli
 }
 ```
 
-- [ ] **Step 2: Create `packages/model-providers/tsconfig.json`**
+- [ ] **Step 2: Create `packages/model-providers/tsconfig.json`** — includes a local `"lib": ["ES2022", "DOM"]` override: the Ollama adapter uses the Web Streams API (`ReadableStream`, `TextDecoder`), which are real Node 20+ globals at runtime but require the DOM lib for TypeScript to see their type declarations, since the shared `tsconfig.base.json` only sets `"lib": ["ES2022"]`.
 
 ```json
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "dist",
-    "rootDir": "src"
+    "rootDir": "src",
+    "lib": ["ES2022", "DOM"]
   },
   "include": ["src"],
   "exclude": ["src/**/*.test.ts"]
