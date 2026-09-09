@@ -46,4 +46,50 @@ describe("buildSupervisorGraph", () => {
     expect(checkpoint.status).toBe("done");
     expect(checkpoint.state.results).toEqual(["researched", "written"]);
   });
+
+  it("reaches done immediately when route returns DONE with no agents dispatched", async () => {
+    const researcher: NodeFn<PlanState> = async function* (state) {
+      return { results: [...state.results, "researched"], cursor: state.cursor + 1 };
+    };
+    const graph = buildSupervisorGraph<PlanState>({
+      id: "empty-plan-agent",
+      agents: { researcher },
+      route: (state) => state.plan[state.cursor] ?? "DONE",
+      reducer: (state, partial) => ({ ...state, ...partial }),
+    });
+    const engine = new GraphEngine(graph, makeDeps());
+    let checkpoint = engine.start({ plan: [], cursor: 0, results: [] }, tenant, "sup-run-2");
+    checkpoint = await engine.run(checkpoint);
+    expect(checkpoint.status).toBe("done");
+    expect(checkpoint.state.results).toEqual([]);
+  });
+
+  it('throws at construction time if an agent is named "DONE"', () => {
+    const noop: NodeFn<PlanState> = async function* () {
+      return {};
+    };
+    expect(() =>
+      buildSupervisorGraph<PlanState>({
+        id: "bad-agent",
+        agents: { DONE: noop },
+        route: () => "DONE",
+        reducer: (state, partial) => ({ ...state, ...partial }),
+      }),
+    ).toThrow(/reserved/);
+  });
+
+  it("throws when route() returns a value that matches no agent and isn't DONE", async () => {
+    const researcher: NodeFn<PlanState> = async function* (state) {
+      return { results: [...state.results, "researched"], cursor: state.cursor + 1 };
+    };
+    const graph = buildSupervisorGraph<PlanState>({
+      id: "bad-route-agent",
+      agents: { researcher },
+      route: () => "not-a-real-agent",
+      reducer: (state, partial) => ({ ...state, ...partial }),
+    });
+    const engine = new GraphEngine(graph, makeDeps());
+    const checkpoint = engine.start({ plan: [], cursor: 0, results: [] }, tenant, "sup-run-3");
+    await expect(engine.run(checkpoint)).rejects.toThrow(/not-a-real-agent/);
+  });
 });

@@ -34,6 +34,9 @@ describe("buildSwarmGraph", () => {
     // pristine pre-fan-out state, so the merge must dedupe by content rather than by array length
     // (GraphEngine folds branch partials sequentially, so a length-based slice would silently drop
     // whichever branch is folded second).
+    // This content-based dedup is only correct because "yes"/"no" are distinct test values —
+    // it's a test-fixture convenience, not a pattern to copy into a real reducer: two agents
+    // that legitimately produced the same value would have one silently dropped.
     const graph = buildSwarmGraph<SwarmState>({
       id: "swarm-agent",
       agents: { optimist, skeptic },
