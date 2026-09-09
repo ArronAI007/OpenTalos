@@ -125,6 +125,22 @@ importers:
         specifier: workspace:*
         version: link:../core-types
 
+  packages/core-graph:
+    dependencies:
+      '@opentalos/core-types':
+        specifier: workspace:*
+        version: link:../core-types
+    devDependencies:
+      '@opentalos/checkpoint':
+        specifier: workspace:*
+        version: link:../checkpoint
+      '@opentalos/tool-registry':
+        specifier: workspace:*
+        version: link:../tool-registry
+      '@opentalos/tracing':
+        specifier: workspace:*
+        version: link:../tracing
+
   packages/core-types: {}
 
   packages/memory:
