@@ -161,9 +161,17 @@ edges:
     to: low
     when: isLow
 `);
+    // "start" sets value to -10, so isHigh (value>=5) is FALSE and isLow (value<5) is TRUE.
+    // "high" is listed FIRST among start's outgoing edges — core-graph's edge lookup is
+    // `edges.find(e => !e.condition || e.condition(nextState))`, so if condition wiring were
+    // silently broken (e.g. `condition: edge.when ? ... : undefined` always fell through to
+    // undefined), the first edge would match unconditionally regardless of state, routing to
+    // "high" every time. Only a genuinely-wired, correctly-evaluated isHigh=false lets it fall
+    // through to the "low" edge — proving the condition factory actually gates traversal, not
+    // just that both nodes happen to be reachable.
     const setFlag = (): NodeFn<CondState> =>
       async function* () {
-        return { value: 5 };
+        return { value: -10 };
       };
     const setHigh = (): NodeFn<CondState> =>
       async function* () {
@@ -186,6 +194,6 @@ edges:
     });
     let checkpoint = engine.start({ value: 0 }, tenant, "cfg-run-2");
     checkpoint = await engine.run(checkpoint);
-    expect(checkpoint.state.value).toBe(100);
+    expect(checkpoint.state.value).toBe(-100);
   });
 });
