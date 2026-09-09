@@ -138,11 +138,13 @@ This package contains only interface/type declarations with no runtime code, so 
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "vitest run",
+    "test": "vitest run --passWithNoTests",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   }
 }
 ```
+
+`--passWithNoTests` is needed here specifically: this package has no test files by design (pure type declarations, see Step 3's note), and without this flag `vitest run` exits with code 1 ("No test files found"), which would otherwise make the repo-root `pnpm run test` aggregate command fail even though every other package's tests genuinely pass — a gap that surfaced during Task 13's final full-monorepo verification.
 
 - [ ] **Step 2: Create `packages/core-types/tsconfig.json`**
 
