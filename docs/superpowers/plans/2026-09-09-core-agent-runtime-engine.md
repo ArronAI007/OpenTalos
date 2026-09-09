@@ -3275,6 +3275,140 @@ edges: []
 `);
     expect(() => compileGraphConfig<State>(config, {}, {}, shallowMergeReducer)).toThrow(/doesNotExist/);
   });
+
+  it("throws a clear error when entryNode references an unknown node", () => {
+    const config = loadGraphConfig(`
+id: bad-entry
+entryNode: missing
+nodes:
+  n1:
+    use: noop
+edges: []
+`);
+    const noopFactory = (): NodeFn<State> =>
+      async function* () {
+        return {};
+      };
+    expect(() => compileGraphConfig<State>(config, { noop: noopFactory }, {}, shallowMergeReducer)).toThrow(
+      /entryNode "missing"/,
+    );
+  });
+
+  it("throws a clear error when an edge references an unknown \"to\" node", () => {
+    const config = loadGraphConfig(`
+id: bad-edge
+entryNode: n1
+nodes:
+  n1:
+    use: noop
+edges:
+  - from: n1
+    to: missingNode
+`);
+    const noopFactory = (): NodeFn<State> =>
+      async function* () {
+        return {};
+      };
+    expect(() => compileGraphConfig<State>(config, { noop: noopFactory }, {}, shallowMergeReducer)).toThrow(
+      /missingNode/,
+    );
+  });
+
+  it("throws when joinTo is set on a non-array \"to\" edge", () => {
+    const config = loadGraphConfig(`
+id: bad-jointo
+entryNode: n1
+nodes:
+  n1:
+    use: noop
+  n2:
+    use: noop
+edges:
+  - from: n1
+    to: n2
+    joinTo: n2
+`);
+    const noopFactory = (): NodeFn<State> =>
+      async function* () {
+        return {};
+      };
+    expect(() => compileGraphConfig<State>(config, { noop: noopFactory }, {}, shallowMergeReducer)).toThrow(
+      /joinTo/,
+    );
+  });
+
+  it("throws a clear error when an edge references an unregistered condition factory", () => {
+    const config = loadGraphConfig(`
+id: cond-bad
+entryNode: n1
+nodes:
+  n1:
+    use: noop
+  n2:
+    use: noop
+edges:
+  - from: n1
+    to: n2
+    when: missingCondition
+`);
+    const noopFactory = (): NodeFn<State> =>
+      async function* () {
+        return {};
+      };
+    expect(() => compileGraphConfig<State>(config, { noop: noopFactory }, {}, shallowMergeReducer)).toThrow(
+      /missingCondition/,
+    );
+  });
+
+  it("resolves a registered condition factory and uses it to gate edge traversal", async () => {
+    interface CondState {
+      value: number;
+    }
+    const config = loadGraphConfig(`
+id: cond-good
+entryNode: start
+nodes:
+  start:
+    use: setFlag
+  high:
+    use: setHigh
+  low:
+    use: setLow
+edges:
+  - from: start
+    to: high
+    when: isHigh
+  - from: start
+    to: low
+    when: isLow
+`);
+    const setFlag = (): NodeFn<CondState> =>
+      async function* () {
+        return { value: 5 };
+      };
+    const setHigh = (): NodeFn<CondState> =>
+      async function* () {
+        return { value: 100 };
+      };
+    const setLow = (): NodeFn<CondState> =>
+      async function* () {
+        return { value: -100 };
+      };
+    const graph = compileGraphConfig<CondState>(
+      config,
+      { setFlag, setHigh, setLow },
+      { isHigh: (s) => s.value >= 5, isLow: (s) => s.value < 5 },
+      shallowMergeReducer,
+    );
+    const engine = new GraphEngine(graph, {
+      toolRegistry: new InMemoryToolRegistry(),
+      eventBus: new InMemoryEventBus(),
+      checkpointStore: new InMemoryCheckpointStore(),
+    });
+    let checkpoint = engine.start({ value: 0 }, tenant, "cfg-run-2");
+    checkpoint = await engine.run(checkpoint);
+    expect(checkpoint.state.value).toBe(100);
+  });
 });
 ```
 
@@ -3298,6 +3432,14 @@ export function compileGraphConfig<TState>(
   conditionFactories: Record<string, ConditionFactory<TState>>,
   reducer: (state: TState, partial: Partial<TState>) => TState,
 ): GraphDefinition<TState> {
+  const nodeIds = new Set(Object.keys(config.nodes));
+
+  // Catch config-authoring mistakes (typo'd node ids) here, at compile time, rather than
+  // letting them surface later as an opaque "Unknown node" error from core-graph mid-run.
+  if (!nodeIds.has(config.entryNode)) {
+    throw new Error(`Unknown entryNode "${config.entryNode}": no node with that id is defined`);
+  }
+
   const nodes: Record<string, NodeFn<TState>> = {};
   for (const [nodeId, ref] of Object.entries(config.nodes)) {
     const factory = nodeFactories[ref.use];
@@ -3308,6 +3450,29 @@ export function compileGraphConfig<TState>(
   }
 
   const edges: EdgeDefinition<TState>[] = config.edges.map((edge) => {
+    if (!nodeIds.has(edge.from)) {
+      throw new Error(`Edge references unknown "from" node "${edge.from}"`);
+    }
+    const toIds = Array.isArray(edge.to) ? edge.to : [edge.to];
+    for (const toId of toIds) {
+      if (!nodeIds.has(toId)) {
+        throw new Error(`Edge from "${edge.from}" references unknown "to" node "${toId}"`);
+      }
+    }
+    if (edge.joinTo !== undefined) {
+      // core-graph only reads `joinTo` when `to` is an array (fan-out); on a plain-string
+      // `to` it's silently ignored, which is exactly the kind of copy-paste mistake (e.g.
+      // converting a fan-out edge back to a single edge and forgetting to remove joinTo)
+      // this compile step exists to catch instead of letting it silently do nothing.
+      if (!Array.isArray(edge.to)) {
+        throw new Error(
+          `Edge from "${edge.from}" sets "joinTo" but "to" is not an array — joinTo only applies to fan-out edges`,
+        );
+      }
+      if (!nodeIds.has(edge.joinTo)) {
+        throw new Error(`Edge from "${edge.from}" references unknown "joinTo" node "${edge.joinTo}"`);
+      }
+    }
     if (edge.when && !conditionFactories[edge.when]) {
       throw new Error(`Unknown condition factory "${edge.when}" referenced by edge from "${edge.from}"`);
     }
@@ -3326,7 +3491,7 @@ export function compileGraphConfig<TState>(
 - [ ] **Step 10: Run test to verify it passes**
 
 Run: `pnpm --filter @opentalos/config-loader test -- compile`
-Expected: PASS — both tests green.
+Expected: PASS — all 7 tests green.
 
 - [ ] **Step 11: Create `packages/config-loader/src/index.ts`**
 
@@ -3338,7 +3503,7 @@ export { compileGraphConfig, type ConditionFactory, type NodeFactory } from "./c
 - [ ] **Step 12: Rebuild and run the full package test suite**
 
 Run: `pnpm --filter @opentalos/config-loader build && pnpm --filter @opentalos/config-loader test`
-Expected: PASS — all 5 tests green.
+Expected: PASS — all 10 tests green (3 schema + 7 compile).
 
 - [ ] **Step 13: Commit**
 
