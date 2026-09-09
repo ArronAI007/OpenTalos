@@ -1831,9 +1831,14 @@ describe("GraphEngine — sequential execution", () => {
       edges: [],
       reducer: shallowMergeReducer,
     };
+    // Only the "before" phase requires approval here. If both phases required approval,
+    // a single resume() call could never reach "done" — resume() is designed to satisfy
+    // exactly one pending awaiting_approval yield per call (see the "second approval
+    // request" guard in engine.ts's resume()), not to silently reuse one decision across
+    // multiple pauses within the same node execution.
     const approvalGuardrail: Guardrail = {
-      async check() {
-        return "require_approval";
+      async check(input) {
+        return input.phase === "before" ? "require_approval" : "allow";
       },
     };
 
