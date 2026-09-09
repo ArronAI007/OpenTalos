@@ -3099,9 +3099,17 @@ Declarative config cannot embed arbitrary executable logic safely, so a config g
     "@opentalos/core-graph": "workspace:*",
     "js-yaml": "^5.4.1",
     "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@opentalos/core-types": "workspace:*",
+    "@opentalos/checkpoint": "workspace:*",
+    "@opentalos/tracing": "workspace:*",
+    "@opentalos/tool-registry": "workspace:*"
   }
 }
 ```
+
+`compile.test.ts` (Step 7 below) directly imports `@opentalos/core-types`, `@opentalos/checkpoint`, `@opentalos/tracing`, and `@opentalos/tool-registry` to construct a runnable `GraphEngine` for its test — same devDependency pattern already used by `core-graph`'s own package.json (test-only concrete implementations, never imported by `schema.ts`/`compile.ts` themselves).
 
 - [ ] **Step 2: Create `packages/config-loader/tsconfig.json`**
 
