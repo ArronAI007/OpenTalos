@@ -153,7 +153,8 @@ This package contains only interface/type declarations with no runtime code, so 
     "outDir": "dist",
     "rootDir": "src"
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
 }
 ```
 
@@ -350,7 +351,8 @@ git commit -m "feat(core-types): add shared engine interfaces"
     "outDir": "dist",
     "rootDir": "src"
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
 }
 ```
 
@@ -495,7 +497,8 @@ git commit -m "feat(checkpoint): add in-memory CheckpointStore"
     "outDir": "dist",
     "rootDir": "src"
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
 }
 ```
 
@@ -640,7 +643,8 @@ git commit -m "feat(tracing): add in-memory EventBus"
     "outDir": "dist",
     "rootDir": "src"
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
 }
 ```
 
@@ -786,7 +790,8 @@ git commit -m "feat(memory): add tenant-scoped in-memory MemoryStore"
     "outDir": "dist",
     "rootDir": "src"
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
 }
 ```
 
@@ -1054,7 +1059,8 @@ Each adapter takes a minimal, structurally-typed client interface (`AnthropicCli
     "outDir": "dist",
     "rootDir": "src"
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
 }
 ```
 
@@ -1521,7 +1527,8 @@ This is the heart of the system. It implements the `GraphEngine` class: sequenti
     "outDir": "dist",
     "rootDir": "src"
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
 }
 ```
 
@@ -2464,7 +2471,8 @@ git commit -m "feat(core-graph): add subgraph nesting via recursive GraphEngine 
     "outDir": "dist",
     "rootDir": "src"
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
 }
 ```
 
@@ -2729,7 +2737,8 @@ git commit -m "feat(multi-agent): add supervisor and swarm graph builders on top
     "outDir": "dist",
     "rootDir": "src"
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
 }
 ```
 
@@ -2892,7 +2901,8 @@ Declarative config cannot embed arbitrary executable logic safely, so a config g
     "outDir": "dist",
     "rootDir": "src"
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
 }
 ```
 
@@ -3165,7 +3175,8 @@ This proves the full stack together: multi-agent supervisor orchestration, autom
     "outDir": "dist",
     "rootDir": "src"
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
 }
 ```
 
