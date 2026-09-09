@@ -28,15 +28,19 @@
 
 1. 用 checkpoint 里保存的 `state` **重新调用**该节点函数，得到一个全新的 generator。
 2. 正常驱动它（自动解析 `awaiting_tool`，就像 `runNodeToCompletion` 已经做的那样）。
-3. 遇到**第一个** `awaiting_approval` yield 时，不是暂停，而是直接把外部传入的 `resumeValue` 喂给它，然后继续驱动。
-4. 如果节点在同一次执行里**再次**暂停（例如 guardrail 的 after 阶段又要求审批——这是第一阶段就支持的场景），就产生一个新的、正常的暂停 checkpoint，等待下一次外部决策。
+3. 遇到 `awaiting_approval` yield 时，按顺序喂给它一个"重放队列"里的值，而不是遇到第一个就直接暂停。
+4. 队列耗尽后遇到的下一个 `awaiting_approval` yield，才是真正需要暂停、等待外部新决策的那个。
+
+**关键细节（脑暴阶段遗漏、自查时补上的）**：一个节点在同一次执行里可能暂停不止一次（例如 guardrail 的 before 和 after 阶段都要求审批——这是第一阶段就支持、且已有测试覆盖的场景）。如果重放时只喂给"遇到的第一个" `awaiting_approval` yield 外部传入的新 `resumeValue`，而 checkpoint 实际暂停在这次执行的第二次（甚至更晚）的 yield 点，就会用新答案错误地回答一个早就回答过的旧问题，而真正待回答的问题反而没有被处理——静默产生错误语义，而不是报错。
+
+正确做法：`Checkpoint.pendingYields` 记录的不只是"当前待回答的问题"，而是"这次执行里已经被回答过的历史答案（按顺序）+ 当前待回答的问题"（数组的最后一个元素）。首次由 `step()` 产生的暂停 checkpoint，`pendingYields` 长度恒为 1（没有历史，是 Phase 1 就已经批准、且已有测试锁定的形状，不能改变）；如果 `resumeFromCheckpoint` 自己在重放中再次暂停，才会把 `pendingYields` 变成长度 >1 的数组（历史答案 + 新的待回答问题）。下一次 `resumeFromCheckpoint` 调用会先取出"除最后一个元素外的所有元素"作为重放队列的前缀（依次喂给重放过程中遇到的每一个 yield，逐一让节点重新确认），再把这次外部传入的新 `resumeValue` 追加在队列末尾——只有队列耗尽后遇到的下一个 yield，才是真正待处理的新暂停点。
 
 ### 2.3 对 `core-graph` 的增量扩展
 
-在 `packages/core-graph/src/engine.ts` 新增一个公开方法 `resumeFromCheckpoint`，并给私有方法 `runNodeToCompletion` 增加一个可选参数 `replayResumeValue`：
+在 `packages/core-graph/src/engine.ts` 新增一个公开方法 `resumeFromCheckpoint`，并给私有方法 `runNodeToCompletion` 增加一个可选参数 `replayQueue`（一个待消费的答案队列，而非单个值）：
 
-- `runNodeToCompletion` 遇到 `awaiting_approval` yield 时，如果 `replayResumeValue` 还没被消费过，就用它推进一步（然后清空，只消费一次）；否则维持原有行为（调用 `onApprovalPause` 并返回 paused）。
-- `resumeFromCheckpoint(checkpoint, resumeValue)`：校验 `status==="paused"`，取出 `nodeCursor`（节点 id）与 `graph.nodes[nodeCursor]`，用 `checkpoint.state` 重新构造该节点的（可能被 guardrail 包裹的）generator，调用 `runNodeToCompletion(..., replayResumeValue: resumeValue)`，得到的结果和 `resume()` 一样走 `completeNode` → 如果状态变为 running 就继续 `this.run()`。
+- `runNodeToCompletion` 遇到 `awaiting_approval` yield 时，如果 `replayQueue` 还有剩余元素，就 `shift()` 出队首值推进一步；队列耗尽后遇到的 yield，才维持原有行为（调用 `onApprovalPause` 并返回 paused）。
+- `resumeFromCheckpoint(checkpoint, resumeValue)`：校验 `status==="paused"`，取出 `nodeCursor`（节点 id）与 `graph.nodes[nodeCursor]`，用 `checkpoint.state` 重新构造该节点的（可能被 guardrail 包裹的）generator；从 `checkpoint.pendingYields`（去掉最后一个元素）恢复出历史答案，拼上这次的 `resumeValue` 作为 `replayQueue` 传给 `runNodeToCompletion`；得到的结果和 `resume()` 一样走 `completeNode` → 如果状态变为 running 就继续 `this.run()`；如果再次暂停，把完整的 `replayQueue` 加上新的待回答问题一起写回 `pendingYields`，供下一次 `resumeFromCheckpoint` 调用使用。
 
 这是对已批准的 `engine.ts` 的**纯增量**修改：所有既有方法（`step`、`resume`、`run`）的行为和签名完全不变，已有测试不受影响。`resume()`（同进程、内存 generator）和 `resumeFromCheckpoint()`（跨进程、重放）是两条并行的恢复路径，各自服务不同场景——前者留给单进程内的即时人机交互，后者是本子系统的调度层实际使用的路径。
 
