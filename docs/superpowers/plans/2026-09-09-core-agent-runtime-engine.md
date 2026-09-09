@@ -2753,11 +2753,17 @@ describe("buildSwarmGraph", () => {
     const skeptic: NodeFn<SwarmState> = async function* (state) {
       return { votes: [...state.votes, "no"] };
     };
-    // reducer concatenates votes arrays instead of overwriting, since both branches read the same starting state
+    // Both branches compute their partial from the same pristine pre-fan-out state, so each
+    // partial's `votes` array independently contains just its own one vote (not a running
+    // total) — the reducer folds them by appending only values not already present, rather
+    // than by array length/position (an index-based slice breaks here: the second partial
+    // folded in would have its only element sliced away since state.votes.length is already 1).
     const graph = buildSwarmGraph<SwarmState>({
       id: "swarm-agent",
       agents: { optimist, skeptic },
-      reducer: (state, partial) => ({ votes: [...state.votes, ...(partial.votes ?? []).slice(state.votes.length)] }),
+      reducer: (state, partial) => ({
+        votes: [...state.votes, ...(partial.votes ?? []).filter((vote) => !state.votes.includes(vote))],
+      }),
     });
     const engine = new GraphEngine(graph, makeDeps());
     let checkpoint = engine.start({ votes: [] }, tenant, "swarm-run-1");
