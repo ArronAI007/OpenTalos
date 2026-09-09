@@ -20,7 +20,9 @@ export interface EdgeDefinition<TState> {
   from: string;
   to: string | string[];
   condition?: (state: TState) => boolean;
-  /** Required when `to` is an array: the node the fan-out branches converge back into. */
+  /** Optional when `to` is an array: the node the fan-out branches converge back into. If
+   * omitted, the fan-out is treated as the terminal step of the graph (status becomes "done"
+   * once all branches complete). */
   joinTo?: string;
 }
 

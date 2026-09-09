@@ -36,10 +36,7 @@ describe("GraphEngine — sequential execution", () => {
       id: "g1",
       entryNode: "a",
       nodes: { a: increment, b: increment },
-      edges: [
-        { from: "a", to: "b" },
-        { from: "b", to: undefined as unknown as string }, // no edge from b; overwritten below
-      ].filter((e) => e.to !== undefined),
+      edges: [{ from: "a", to: "b" }],
       reducer: shallowMergeReducer,
     };
     const engine = new GraphEngine(graph, makeDeps());
@@ -225,14 +222,12 @@ describe("GraphEngine — sequential execution", () => {
       edges: [],
       reducer: shallowMergeReducer,
     };
-    // Only the "before" phase requires approval here. If both phases required approval,
-    // a single resume() call could never reach "done" — resume() is designed to satisfy
-    // exactly one pending awaiting_approval yield per call (see the "second approval
-    // request" guard in engine.ts's resume()), not to silently reuse one decision across
-    // multiple pauses within the same node execution.
+    // Requires approval on BOTH the "before" and "after" guardrail phases, exercising the
+    // engine's support for a node pausing more than once within a single logical execution
+    // (resume() can itself pause again — see engine.ts).
     const approvalGuardrail: Guardrail = {
-      async check(input) {
-        return input.phase === "before" ? "require_approval" : "allow";
+      async check() {
+        return "require_approval";
       },
     };
 
@@ -240,7 +235,11 @@ describe("GraphEngine — sequential execution", () => {
     const engineApproved = new GraphEngine(graph, depsApproved);
     let approvedCheckpoint = engineApproved.start({ count: 0 }, tenant, "run-9a");
     approvedCheckpoint = await engineApproved.run(approvedCheckpoint);
-    expect(approvedCheckpoint.status).toBe("paused");
+    expect(approvedCheckpoint.status).toBe("paused"); // before-phase pause
+
+    approvedCheckpoint = await engineApproved.resume(approvedCheckpoint, { type: "approval", approved: true });
+    expect(approvedCheckpoint.status).toBe("paused"); // after-phase pause; node body already ran
+
     approvedCheckpoint = await engineApproved.resume(approvedCheckpoint, { type: "approval", approved: true });
     expect(approvedCheckpoint.status).toBe("done");
     expect(approvedCheckpoint.state.count).toBe(1);
@@ -251,6 +250,29 @@ describe("GraphEngine — sequential execution", () => {
     deniedCheckpoint = await engineDenied.run(deniedCheckpoint);
     await expect(engineDenied.resume(deniedCheckpoint, { type: "approval", approved: false })).rejects.toThrow(
       /Guardrail approval was denied/,
+    );
+  });
+
+  it("refuses to resume a paused run under a different tenant/session than it was paused with", async () => {
+    const askApproval: NodeFn<CounterState> = async function* () {
+      yield { type: "awaiting_approval", reason: "please confirm" };
+      return {};
+    };
+    const graph: GraphDefinition<CounterState> = {
+      id: "g10",
+      entryNode: "ask",
+      nodes: { ask: askApproval },
+      edges: [],
+      reducer: shallowMergeReducer,
+    };
+    const deps = makeDeps();
+    const engine = new GraphEngine(graph, deps);
+    let checkpoint = engine.start({ count: 0 }, tenant, "run-10");
+    checkpoint = await engine.run(checkpoint);
+
+    const spoofedCheckpoint = { ...checkpoint, tenantId: "tenant-b" };
+    await expect(engine.resume(spoofedCheckpoint, { type: "approval", approved: true })).rejects.toThrow(
+      /different tenant\/session/,
     );
   });
 });

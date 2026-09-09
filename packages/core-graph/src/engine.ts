@@ -23,8 +23,18 @@ export class NodeError extends Error {
 
 type NodeOutcome<TState> = { status: "done"; partial: Partial<TState> } | { status: "paused"; reason: string };
 
+interface PausedEntry<TState> {
+  tenant: TenantContext;
+  generator: NodeGenerator<TState>;
+}
+
 export class GraphEngine<TState> {
-  private readonly paused = new Map<string, NodeGenerator<TState>>();
+  // The one deliberate exception to "the engine holds no cross-call state": a live, paused
+  // generator can only be resumed within the same process (see the "Cross-process resume is
+  // not supported" error in resume() below). Keyed by runId, with the originating tenant
+  // recorded alongside it so resume() can refuse a runId reused/spoofed under a different
+  // tenant — see resume()'s tenant-match check.
+  private readonly paused = new Map<string, PausedEntry<TState>>();
 
   constructor(
     private readonly graph: GraphDefinition<TState>,
@@ -58,20 +68,37 @@ export class GraphEngine<TState> {
       throw new Error(`Run ${checkpoint.runId} is not in a resumable paused state`);
     }
     const nodeId = checkpoint.nodeCursor;
-    const generator = this.paused.get(checkpoint.runId);
-    if (!generator) {
+    const pausedEntry = this.paused.get(checkpoint.runId);
+    if (!pausedEntry) {
       throw new Error(
         `No in-memory paused generator found for run ${checkpoint.runId}. Cross-process resume is not supported in this version.`,
       );
     }
     const tenant: TenantContext = { tenantId: checkpoint.tenantId, sessionId: checkpoint.sessionId };
-    const outcome = await this.runNodeToCompletion(nodeId, generator, tenant, checkpoint.runId, resumeValue, () => {
-      throw new Error("Node yielded a second approval request before the first was resolved");
-    });
-    this.paused.delete(checkpoint.runId);
-    if (outcome.status === "paused") {
-      throw new Error("Unexpected: node paused again immediately after resume");
+    if (pausedEntry.tenant.tenantId !== tenant.tenantId || pausedEntry.tenant.sessionId !== tenant.sessionId) {
+      throw new Error(`Run ${checkpoint.runId} was paused under a different tenant/session; refusing to resume`);
     }
+    // Tentatively remove; re-added below (via onApprovalPause) if the node pauses again.
+    this.paused.delete(checkpoint.runId);
+    const outcome = await this.runNodeToCompletion(nodeId, pausedEntry.generator, tenant, checkpoint.runId, resumeValue, (g) => {
+      this.paused.set(checkpoint.runId, { tenant, generator: g });
+    });
+
+    if (outcome.status === "paused") {
+      // A node (or a guardrail wrapping it) can legitimately pause more than once within a
+      // single logical execution — e.g. a guardrail requiring approval both before and after
+      // the node body runs. Each pause is persisted exactly like step()'s own pause handling.
+      this.emitTrace("hitl_interrupt", checkpoint.runId, tenant, { nodeId, reason: outcome.reason });
+      const pausedCheckpoint: Checkpoint<TState> = {
+        ...checkpoint,
+        nodeCursor: nodeId,
+        status: "paused",
+        pendingYields: [{ type: "awaiting_approval", reason: outcome.reason }],
+      };
+      await this.deps.checkpointStore.save(pausedCheckpoint);
+      return pausedCheckpoint;
+    }
+
     this.emitTrace("node_exit", checkpoint.runId, tenant, { nodeId });
     const advanced = await this.completeNode(nodeId, outcome.partial, checkpoint);
     return advanced.status === "running" ? this.run(advanced) : advanced;
@@ -94,7 +121,7 @@ export class GraphEngine<TState> {
     const guardedNodeFn = this.wrapWithGuardrails(nodeId, nodeFn);
     const generator = guardedNodeFn(checkpoint.state, { tenant, eventBus: this.deps.eventBus });
     const outcome = await this.runNodeToCompletion(nodeId, generator, tenant, checkpoint.runId, undefined, (g) => {
-      this.paused.set(checkpoint.runId, g);
+      this.paused.set(checkpoint.runId, { tenant, generator: g });
     });
 
     if (outcome.status === "paused") {
