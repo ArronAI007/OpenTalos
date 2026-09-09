@@ -138,11 +138,13 @@ This package contains only interface/type declarations with no runtime code, so 
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "vitest run",
+    "test": "vitest run --passWithNoTests",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   }
 }
 ```
+
+`--passWithNoTests` is needed here specifically: this package has no test files by design (pure type declarations, see Step 3's note), and without this flag `vitest run` exits with code 1 ("No test files found"), which would otherwise make the repo-root `pnpm run test` aggregate command fail even though every other package's tests genuinely pass — a gap that surfaced during Task 13's final full-monorepo verification.
 
 - [ ] **Step 2: Create `packages/core-types/tsconfig.json`**
 
@@ -153,7 +155,8 @@ This package contains only interface/type declarations with no runtime code, so 
     "outDir": "dist",
     "rootDir": "src"
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
 }
 ```
 
@@ -290,6 +293,8 @@ export interface GuardrailInput {
   nodeId: string;
   phase: "before" | "after";
   state: unknown;
+  /** The node's own return value, populated only on the "after" phase (undefined on "before") — lets an after-phase guardrail actually inspect what the node produced, not just its input state. */
+  output?: unknown;
   ctx: TenantContext;
 }
 
@@ -350,7 +355,8 @@ git commit -m "feat(core-types): add shared engine interfaces"
     "outDir": "dist",
     "rootDir": "src"
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
 }
 ```
 
@@ -495,7 +501,8 @@ git commit -m "feat(checkpoint): add in-memory CheckpointStore"
     "outDir": "dist",
     "rootDir": "src"
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
 }
 ```
 
@@ -640,7 +647,8 @@ git commit -m "feat(tracing): add in-memory EventBus"
     "outDir": "dist",
     "rootDir": "src"
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
 }
 ```
 
@@ -786,7 +794,8 @@ git commit -m "feat(memory): add tenant-scoped in-memory MemoryStore"
     "outDir": "dist",
     "rootDir": "src"
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
 }
 ```
 
@@ -877,7 +886,10 @@ export class InMemoryToolRegistry implements ToolRegistry {
       return { id: call.id, output: `Unknown tool: ${call.name}`, isError: true };
     }
     try {
-      return await tool.execute(call.input, ctx);
+      // Always return the caller's call.id, not whatever id the Tool implementation
+      // invented — result/call id correlation matters for threading tool results
+      // back into an LLM conversation correctly.
+      return { ...(await tool.execute(call.input, ctx)), id: call.id };
     } catch (error) {
       return { id: call.id, output: error instanceof Error ? error.message : String(error), isError: true };
     }
@@ -1045,16 +1057,18 @@ Each adapter takes a minimal, structurally-typed client interface (`AnthropicCli
 }
 ```
 
-- [ ] **Step 2: Create `packages/model-providers/tsconfig.json`**
+- [ ] **Step 2: Create `packages/model-providers/tsconfig.json`** — includes a local `"lib": ["ES2022", "DOM"]` override: the Ollama adapter uses the Web Streams API (`ReadableStream`, `TextDecoder`), which are real Node 20+ globals at runtime but require the DOM lib for TypeScript to see their type declarations, since the shared `tsconfig.base.json` only sets `"lib": ["ES2022"]`.
 
 ```json
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "dist",
-    "rootDir": "src"
+    "rootDir": "src",
+    "lib": ["ES2022", "DOM"]
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
 }
 ```
 
@@ -1435,6 +1449,16 @@ export function createOllamaProvider(fetchFn: OllamaFetchLike, options: OllamaPr
           }
         }
       }
+      // Flush a final unterminated line (no trailing "\n") so the last chunk isn't silently dropped.
+      if (buffer.trim()) {
+        const parsed = JSON.parse(buffer) as OllamaChatLine;
+        if (parsed.message?.content) {
+          yield { type: "text_delta", textDelta: parsed.message.content };
+        }
+        if (parsed.done) {
+          yield { type: "message_stop" };
+        }
+      }
     },
   };
 }
@@ -1521,7 +1545,8 @@ This is the heart of the system. It implements the `GraphEngine` class: sequenti
     "outDir": "dist",
     "rootDir": "src"
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
 }
 ```
 
@@ -1550,7 +1575,9 @@ export interface EdgeDefinition<TState> {
   from: string;
   to: string | string[];
   condition?: (state: TState) => boolean;
-  /** Required when `to` is an array: the node the fan-out branches converge back into. */
+  /** Optional when `to` is an array: the node the fan-out branches converge back into. If
+   * omitted, the fan-out is treated as the terminal step of the graph (status becomes "done"
+   * once all branches complete). */
   joinTo?: string;
 }
 
@@ -1620,10 +1647,7 @@ describe("GraphEngine — sequential execution", () => {
       id: "g1",
       entryNode: "a",
       nodes: { a: increment, b: increment },
-      edges: [
-        { from: "a", to: "b" },
-        { from: "b", to: undefined as unknown as string }, // no edge from b; overwritten below
-      ].filter((e) => e.to !== undefined),
+      edges: [{ from: "a", to: "b" }],
       reducer: shallowMergeReducer,
     };
     const engine = new GraphEngine(graph, makeDeps());
@@ -1810,6 +1834,9 @@ describe("GraphEngine — sequential execution", () => {
       edges: [],
       reducer: shallowMergeReducer,
     };
+    // Requires approval on BOTH the "before" and "after" guardrail phases, exercising the
+    // engine's support for a node pausing more than once within a single logical execution
+    // (resume() can itself pause again — see engine.ts).
     const approvalGuardrail: Guardrail = {
       async check() {
         return "require_approval";
@@ -1820,7 +1847,11 @@ describe("GraphEngine — sequential execution", () => {
     const engineApproved = new GraphEngine(graph, depsApproved);
     let approvedCheckpoint = engineApproved.start({ count: 0 }, tenant, "run-9a");
     approvedCheckpoint = await engineApproved.run(approvedCheckpoint);
-    expect(approvedCheckpoint.status).toBe("paused");
+    expect(approvedCheckpoint.status).toBe("paused"); // before-phase pause
+
+    approvedCheckpoint = await engineApproved.resume(approvedCheckpoint, { type: "approval", approved: true });
+    expect(approvedCheckpoint.status).toBe("paused"); // after-phase pause; node body already ran
+
     approvedCheckpoint = await engineApproved.resume(approvedCheckpoint, { type: "approval", approved: true });
     expect(approvedCheckpoint.status).toBe("done");
     expect(approvedCheckpoint.state.count).toBe(1);
@@ -1832,6 +1863,97 @@ describe("GraphEngine — sequential execution", () => {
     await expect(engineDenied.resume(deniedCheckpoint, { type: "approval", approved: false })).rejects.toThrow(
       /Guardrail approval was denied/,
     );
+  });
+
+  it("refuses to resume a paused run under a different tenant/session than it was paused with", async () => {
+    const askApproval: NodeFn<CounterState> = async function* () {
+      yield { type: "awaiting_approval", reason: "please confirm" };
+      return {};
+    };
+    const graph: GraphDefinition<CounterState> = {
+      id: "g10",
+      entryNode: "ask",
+      nodes: { ask: askApproval },
+      edges: [],
+      reducer: shallowMergeReducer,
+    };
+    const deps = makeDeps();
+    const engine = new GraphEngine(graph, deps);
+    let checkpoint = engine.start({ count: 0 }, tenant, "run-10");
+    checkpoint = await engine.run(checkpoint);
+
+    const spoofedCheckpoint = { ...checkpoint, tenantId: "tenant-b" };
+    await expect(engine.resume(spoofedCheckpoint, { type: "approval", approved: true })).rejects.toThrow(
+      /different tenant\/session/,
+    );
+  });
+
+  it("passes the node's output to an \"after\" phase guardrail so it can validate results", async () => {
+    const produceBad: NodeFn<CounterState> = async function* () {
+      return { count: 999 };
+    };
+    const graph: GraphDefinition<CounterState> = {
+      id: "g11",
+      entryNode: "produce",
+      nodes: { produce: produceBad },
+      edges: [],
+      reducer: shallowMergeReducer,
+    };
+    const outputCheckingGuardrail: Guardrail = {
+      async check(input) {
+        if (input.phase === "after" && (input.output as Partial<CounterState> | undefined)?.count === 999) {
+          return "block";
+        }
+        return "allow";
+      },
+    };
+    const deps = { ...makeDeps(), guardrails: [outputCheckingGuardrail] };
+    const engine = new GraphEngine(graph, deps);
+    const checkpoint = engine.start({ count: 0 }, tenant, "run-11");
+    await expect(engine.run(checkpoint)).rejects.toThrow(/Guardrail blocked node "produce" after execution/);
+  });
+
+  it("runs two tenants' graphs concurrently on one shared engine instance without cross-contamination", async () => {
+    const tick: NodeFn<CounterState> = async function* (state) {
+      return { count: state.count + 1 };
+    };
+    const done: NodeFn<CounterState> = async function* () {
+      return {};
+    };
+    const graph: GraphDefinition<CounterState> = {
+      id: "concurrent-g",
+      entryNode: "tick",
+      nodes: { tick, done },
+      edges: [
+        { from: "tick", to: "tick", condition: (s) => s.count % 100 < 5 },
+        { from: "tick", to: "done", condition: (s) => s.count % 100 >= 5 },
+      ],
+      reducer: shallowMergeReducer,
+    };
+    const deps = makeDeps();
+    const engine = new GraphEngine(graph, deps);
+    const tenantA: TenantContext = { tenantId: "tenant-a", sessionId: "session-1" };
+    const tenantB: TenantContext = { tenantId: "tenant-b", sessionId: "session-1" };
+
+    const [resultA, resultB] = await Promise.all([
+      engine.run(engine.start({ count: 0 }, tenantA, "concurrent-run-a")),
+      engine.run(engine.start({ count: 100 }, tenantB, "concurrent-run-b")),
+    ]);
+
+    expect(resultA.status).toBe("done");
+    expect(resultA.state.count).toBe(5);
+    expect(resultA.tenantId).toBe("tenant-a");
+
+    expect(resultB.status).toBe("done");
+    expect(resultB.state.count).toBe(105);
+    expect(resultB.tenantId).toBe("tenant-b");
+
+    const persistedA = await deps.checkpointStore.load("concurrent-run-a");
+    const persistedB = await deps.checkpointStore.load("concurrent-run-b");
+    expect(persistedA?.tenantId).toBe("tenant-a");
+    expect(persistedA?.state).toEqual({ count: 5 });
+    expect(persistedB?.tenantId).toBe("tenant-b");
+    expect(persistedB?.state).toEqual({ count: 105 });
   });
 });
 ```
@@ -1871,8 +1993,18 @@ export class NodeError extends Error {
 
 type NodeOutcome<TState> = { status: "done"; partial: Partial<TState> } | { status: "paused"; reason: string };
 
+interface PausedEntry<TState> {
+  tenant: TenantContext;
+  generator: NodeGenerator<TState>;
+}
+
 export class GraphEngine<TState> {
-  private readonly paused = new Map<string, NodeGenerator<TState>>();
+  // The one deliberate exception to "the engine holds no cross-call state": a live, paused
+  // generator can only be resumed within the same process (see the "Cross-process resume is
+  // not supported" error in resume() below). Keyed by runId, with the originating tenant
+  // recorded alongside it so resume() can refuse a runId reused/spoofed under a different
+  // tenant — see resume()'s tenant-match check.
+  private readonly paused = new Map<string, PausedEntry<TState>>();
 
   constructor(
     private readonly graph: GraphDefinition<TState>,
@@ -1906,20 +2038,37 @@ export class GraphEngine<TState> {
       throw new Error(`Run ${checkpoint.runId} is not in a resumable paused state`);
     }
     const nodeId = checkpoint.nodeCursor;
-    const generator = this.paused.get(checkpoint.runId);
-    if (!generator) {
+    const pausedEntry = this.paused.get(checkpoint.runId);
+    if (!pausedEntry) {
       throw new Error(
         `No in-memory paused generator found for run ${checkpoint.runId}. Cross-process resume is not supported in this version.`,
       );
     }
     const tenant: TenantContext = { tenantId: checkpoint.tenantId, sessionId: checkpoint.sessionId };
-    const outcome = await this.runNodeToCompletion(nodeId, generator, tenant, checkpoint.runId, resumeValue, () => {
-      throw new Error("Node yielded a second approval request before the first was resolved");
-    });
-    this.paused.delete(checkpoint.runId);
-    if (outcome.status === "paused") {
-      throw new Error("Unexpected: node paused again immediately after resume");
+    if (pausedEntry.tenant.tenantId !== tenant.tenantId || pausedEntry.tenant.sessionId !== tenant.sessionId) {
+      throw new Error(`Run ${checkpoint.runId} was paused under a different tenant/session; refusing to resume`);
     }
+    // Tentatively remove; re-added below (via onApprovalPause) if the node pauses again.
+    this.paused.delete(checkpoint.runId);
+    const outcome = await this.runNodeToCompletion(nodeId, pausedEntry.generator, tenant, checkpoint.runId, resumeValue, (g) => {
+      this.paused.set(checkpoint.runId, { tenant, generator: g });
+    });
+
+    if (outcome.status === "paused") {
+      // A node (or a guardrail wrapping it) can legitimately pause more than once within a
+      // single logical execution — e.g. a guardrail requiring approval both before and after
+      // the node body runs. Each pause is persisted exactly like step()'s own pause handling.
+      this.emitTrace("hitl_interrupt", checkpoint.runId, tenant, { nodeId, reason: outcome.reason });
+      const pausedCheckpoint: Checkpoint<TState> = {
+        ...checkpoint,
+        nodeCursor: nodeId,
+        status: "paused",
+        pendingYields: [{ type: "awaiting_approval", reason: outcome.reason }],
+      };
+      await this.deps.checkpointStore.save(pausedCheckpoint);
+      return pausedCheckpoint;
+    }
+
     this.emitTrace("node_exit", checkpoint.runId, tenant, { nodeId });
     const advanced = await this.completeNode(nodeId, outcome.partial, checkpoint);
     return advanced.status === "running" ? this.run(advanced) : advanced;
@@ -1942,7 +2091,7 @@ export class GraphEngine<TState> {
     const guardedNodeFn = this.wrapWithGuardrails(nodeId, nodeFn);
     const generator = guardedNodeFn(checkpoint.state, { tenant, eventBus: this.deps.eventBus });
     const outcome = await this.runNodeToCompletion(nodeId, generator, tenant, checkpoint.runId, undefined, (g) => {
-      this.paused.set(checkpoint.runId, g);
+      this.paused.set(checkpoint.runId, { tenant, generator: g });
     });
 
     if (outcome.status === "paused") {
@@ -2084,7 +2233,7 @@ export class GraphEngine<TState> {
       }
       const partial = yield* nodeFn(state, ctx);
       for (const guardrail of guardrails) {
-        const decision = await guardrail.check({ nodeId, phase: "after", state, ctx: ctx.tenant });
+        const decision = await guardrail.check({ nodeId, phase: "after", state, output: partial, ctx: ctx.tenant });
         if (decision === "block") {
           throw new Error(`Guardrail blocked node "${nodeId}" after execution`);
         }
@@ -2123,7 +2272,7 @@ export class GraphEngine<TState> {
 - [ ] **Step 8: Run tests to verify they pass**
 
 Run: `pnpm --filter @opentalos/core-graph test`
-Expected: PASS — all 9 tests green (3 sequential/branch/loop + 1 tool-call + 1 HITL pause/resume + 1 cross-process resume error + 1 NodeError/error-event + 2 guardrail).
+Expected: PASS — all 10 tests green (3 sequential/branch/loop + 1 tool-call + 1 HITL pause/resume + 1 cross-process resume error + 1 NodeError/error-event + 2 guardrail + 1 tenant-mismatch resume guard).
 
 - [ ] **Step 9: Create `packages/core-graph/src/index.ts`**
 
@@ -2353,6 +2502,57 @@ describe("createSubgraphNode", () => {
     const checkpoint = engine.start({ total: 1 }, tenant, "sub-run-2");
     await expect(engine.run(checkpoint)).rejects.toThrow(/not supported when nested/);
   });
+
+  it("invokes the same subgraph node repeatedly via a parent-graph loop without runId collisions", async () => {
+    interface LoopState {
+      total: number;
+      iterations: number;
+    }
+    const double: NodeFn<ChildState> = async function* (state) {
+      return { value: state.value * 2 };
+    };
+    const childGraph: GraphDefinition<ChildState> = {
+      id: "child-loop",
+      entryNode: "double",
+      nodes: { double },
+      edges: [],
+      reducer: shallowMergeReducer,
+    };
+    const deps = makeDeps();
+    const subgraphNode = createSubgraphNode<LoopState, ChildState>(
+      childGraph,
+      deps,
+      (parentState) => ({ value: parentState.total }),
+      (childState) => ({ total: childState.value }),
+    );
+    const countIteration: NodeFn<LoopState> = async function* (state) {
+      return { iterations: state.iterations + 1 };
+    };
+    const parentGraph: GraphDefinition<LoopState> = {
+      id: "loop-parent",
+      entryNode: "child",
+      nodes: { child: subgraphNode, count: countIteration },
+      edges: [
+        { from: "child", to: "count" },
+        { from: "count", to: "child", condition: (s) => s.iterations < 3 },
+      ],
+      reducer: shallowMergeReducer,
+    };
+    const engine = new GraphEngine(parentGraph, deps);
+    let checkpoint = engine.start({ total: 1, iterations: 0 }, tenant, "loop-run-1");
+    checkpoint = await engine.run(checkpoint);
+
+    expect(checkpoint.status).toBe("done");
+    expect(checkpoint.state.total).toBe(8); // doubled 3 times
+    expect(checkpoint.state.iterations).toBe(3);
+
+    // Each of the 3 subgraph invocations must have persisted under its own distinct runId —
+    // a collision in createSubgraphNode's runId scheme would silently overwrite one call's
+    // checkpoint with another's.
+    const childCheckpoints = (await deps.checkpointStore.list({})).filter((c) => c.graphId === "child-loop");
+    const distinctRunIds = new Set(childCheckpoints.map((c) => c.runId));
+    expect(distinctRunIds.size).toBe(3);
+  });
 });
 ```
 
@@ -2367,6 +2567,19 @@ Expected: FAIL — `createSubgraphNode` is not defined.
 import { GraphEngine, type EngineDeps } from "./engine.js";
 import type { GraphDefinition, NodeFn } from "./types.js";
 
+/**
+ * `deps` is shared as-is with the child engine, which has two consequences worth knowing:
+ * - Guardrails match by nodeId only (see engine.ts's wrapWithGuardrails), so a guardrail
+ *   configured for a nodeId in the parent graph will also apply if the child graph happens
+ *   to reuse that same nodeId — since subgraphs can't handle pauses, this surfaces as the
+ *   "not supported when nested" throw below, which can be confusing to debug if the real
+ *   cause is an unrelated guardrail rather than the child's own logic.
+ * - Every subgraph invocation persists its own checkpoints to the shared checkpointStore
+ *   under a synthetic runId that's never queried again once the subgraph completes — for
+ *   the in-memory store used in this phase that's harmless, but a real persistent store
+ *   would accumulate orphaned rows for each subgraph call (more so inside a loop or a
+ *   fan-out branch). Acceptable for now; worth revisiting when a real CheckpointStore lands.
+ */
 export function createSubgraphNode<TState, TSub>(
   childGraph: GraphDefinition<TSub>,
   deps: EngineDeps,
@@ -2391,7 +2604,7 @@ export function createSubgraphNode<TState, TSub>(
 - [ ] **Step 7: Run tests to verify they pass**
 
 Run: `pnpm --filter @opentalos/core-graph test -- subgraph`
-Expected: PASS — both tests green.
+Expected: PASS — all 3 tests green.
 
 - [ ] **Step 8: Update `packages/core-graph/src/index.ts` to export the new helper**
 
@@ -2405,7 +2618,7 @@ export type { EdgeDefinition, GraphDefinition, NodeContext, NodeCursor, NodeFn, 
 - [ ] **Step 9: Rebuild and run the full package test suite**
 
 Run: `pnpm --filter @opentalos/core-graph build && pnpm --filter @opentalos/core-graph test`
-Expected: PASS — all 13 tests in the package green (9 from Task 8, 2 fan-out, 2 subgraph).
+Expected: PASS — all 15 tests in the package green (10 from Task 8, 2 fan-out, 3 subgraph).
 
 - [ ] **Step 10: Commit**
 
@@ -2464,7 +2677,8 @@ git commit -m "feat(core-graph): add subgraph nesting via recursive GraphEngine 
     "outDir": "dist",
     "rootDir": "src"
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
 }
 ```
 
@@ -2532,6 +2746,52 @@ describe("buildSupervisorGraph", () => {
     expect(checkpoint.status).toBe("done");
     expect(checkpoint.state.results).toEqual(["researched", "written"]);
   });
+
+  it("reaches done immediately when route returns DONE with no agents dispatched", async () => {
+    const researcher: NodeFn<PlanState> = async function* (state) {
+      return { results: [...state.results, "researched"], cursor: state.cursor + 1 };
+    };
+    const graph = buildSupervisorGraph<PlanState>({
+      id: "empty-plan-agent",
+      agents: { researcher },
+      route: (state) => state.plan[state.cursor] ?? "DONE",
+      reducer: (state, partial) => ({ ...state, ...partial }),
+    });
+    const engine = new GraphEngine(graph, makeDeps());
+    let checkpoint = engine.start({ plan: [], cursor: 0, results: [] }, tenant, "sup-run-2");
+    checkpoint = await engine.run(checkpoint);
+    expect(checkpoint.status).toBe("done");
+    expect(checkpoint.state.results).toEqual([]);
+  });
+
+  it('throws at construction time if an agent is named "DONE"', () => {
+    const noop: NodeFn<PlanState> = async function* () {
+      return {};
+    };
+    expect(() =>
+      buildSupervisorGraph<PlanState>({
+        id: "bad-agent",
+        agents: { DONE: noop },
+        route: () => "DONE",
+        reducer: (state, partial) => ({ ...state, ...partial }),
+      }),
+    ).toThrow(/reserved/);
+  });
+
+  it("throws when route() returns a value that matches no agent and isn't DONE", async () => {
+    const researcher: NodeFn<PlanState> = async function* (state) {
+      return { results: [...state.results, "researched"], cursor: state.cursor + 1 };
+    };
+    const graph = buildSupervisorGraph<PlanState>({
+      id: "bad-route-agent",
+      agents: { researcher },
+      route: () => "not-a-real-agent",
+      reducer: (state, partial) => ({ ...state, ...partial }),
+    });
+    const engine = new GraphEngine(graph, makeDeps());
+    const checkpoint = engine.start({ plan: [], cursor: 0, results: [] }, tenant, "sup-run-3");
+    await expect(engine.run(checkpoint)).rejects.toThrow(/not-a-real-agent/);
+  });
 });
 ```
 
@@ -2549,20 +2809,49 @@ import { createRouterNode } from "./router-node.js";
 export interface SupervisorConfig<TState> {
   id: string;
   agents: Record<string, NodeFn<TState>>;
-  /** Reads state and returns the key of the agent to call next, or "DONE" to finish. */
+  /**
+   * Reads state and returns the key of the agent to call next, or "DONE" to finish.
+   * Must be a cheap, pure, deterministic function of state — it may be called more than
+   * once per hop (once by the router node's validation check, once per edge condition
+   * evaluated during routing). Do not perform I/O or expensive computation here; if a
+   * decision requires an LLM call, do that inside an agent node and have route() merely
+   * read the field that node already wrote into state (as the research-agent example does).
+   */
   route: (state: TState) => string;
   reducer: (state: TState, partial: Partial<TState>) => TState;
 }
 
 export function buildSupervisorGraph<TState>(config: SupervisorConfig<TState>): GraphDefinition<TState> {
+  // "DONE" is a reserved sentinel meaning "finish" — an agent using that name would collide
+  // with the router->done edge below (edges are matched in array order, and the agent's own
+  // router->agentKey edge would always win first), silently breaking termination.
+  if ("DONE" in config.agents) {
+    throw new Error('buildSupervisorGraph: an agent cannot be named "DONE" — that name is reserved to signal completion');
+  }
+  const agentKeys = new Set(Object.keys(config.agents));
+
+  // A bespoke router (rather than the generic createRouterNode) so a typo'd/unrecognized
+  // route() return value fails loudly instead of silently completing the run — completeNode
+  // treats "no matching edge" as normal completion, which is indistinguishable from an actual
+  // typo'd route() value unless this node validates it first.
+  const router: NodeFn<TState> = async function* routerNode(state) {
+    const next = config.route(state);
+    if (next !== "DONE" && !agentKeys.has(next)) {
+      throw new Error(
+        `buildSupervisorGraph: route() returned "${next}", which is neither a known agent key (${[...agentKeys].join(", ")}) nor "DONE"`,
+      );
+    }
+    return {};
+  };
+
   const nodes: Record<string, NodeFn<TState>> = {
-    router: createRouterNode<TState>(),
+    router,
     done: createRouterNode<TState>(),
     ...config.agents,
   };
 
   const edges: EdgeDefinition<TState>[] = [];
-  for (const agentKey of Object.keys(config.agents)) {
+  for (const agentKey of agentKeys) {
     edges.push({ from: "router", to: agentKey, condition: (state) => config.route(state) === agentKey });
     edges.push({ from: agentKey, to: "router" });
   }
@@ -2611,11 +2900,20 @@ describe("buildSwarmGraph", () => {
     const skeptic: NodeFn<SwarmState> = async function* (state) {
       return { votes: [...state.votes, "no"] };
     };
-    // reducer concatenates votes arrays instead of overwriting, since both branches read the same starting state
+    // Both branches compute their partial from the same pristine pre-fan-out state, so each
+    // partial's `votes` array independently contains just its own one vote (not a running
+    // total) — the reducer folds them by appending only values not already present, rather
+    // than by array length/position (an index-based slice breaks here: the second partial
+    // folded in would have its only element sliced away since state.votes.length is already 1).
+    // This content-based dedup is only correct because "yes"/"no" are distinct test values —
+    // it's a test-fixture convenience, not a pattern to copy into a real reducer: two agents
+    // that legitimately produced the same value would have one silently dropped.
     const graph = buildSwarmGraph<SwarmState>({
       id: "swarm-agent",
       agents: { optimist, skeptic },
-      reducer: (state, partial) => ({ votes: [...state.votes, ...(partial.votes ?? []).slice(state.votes.length)] }),
+      reducer: (state, partial) => ({
+        votes: [...state.votes, ...(partial.votes ?? []).filter((vote) => !state.votes.includes(vote))],
+      }),
     });
     const engine = new GraphEngine(graph, makeDeps());
     let checkpoint = engine.start({ votes: [] }, tenant, "swarm-run-1");
@@ -2676,7 +2974,7 @@ export { buildSwarmGraph, type SwarmConfig } from "./swarm.js";
 - [ ] **Step 13: Rebuild and run the full package test suite**
 
 Run: `pnpm --filter @opentalos/multi-agent build && pnpm --filter @opentalos/multi-agent test`
-Expected: PASS — both tests green.
+Expected: PASS — all 5 tests green (4 supervisor + 1 swarm).
 
 - [ ] **Step 14: Commit**
 
@@ -2729,7 +3027,8 @@ git commit -m "feat(multi-agent): add supervisor and swarm graph builders on top
     "outDir": "dist",
     "rootDir": "src"
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
 }
 ```
 
@@ -2879,9 +3178,17 @@ Declarative config cannot embed arbitrary executable logic safely, so a config g
     "@opentalos/core-graph": "workspace:*",
     "js-yaml": "^5.4.1",
     "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@opentalos/core-types": "workspace:*",
+    "@opentalos/checkpoint": "workspace:*",
+    "@opentalos/tracing": "workspace:*",
+    "@opentalos/tool-registry": "workspace:*"
   }
 }
 ```
+
+`compile.test.ts` (Step 7 below) directly imports `@opentalos/core-types`, `@opentalos/checkpoint`, `@opentalos/tracing`, and `@opentalos/tool-registry` to construct a runnable `GraphEngine` for its test — same devDependency pattern already used by `core-graph`'s own package.json (test-only concrete implementations, never imported by `schema.ts`/`compile.ts` themselves).
 
 - [ ] **Step 2: Create `packages/config-loader/tsconfig.json`**
 
@@ -2892,7 +3199,8 @@ Declarative config cannot embed arbitrary executable logic safely, so a config g
     "outDir": "dist",
     "rootDir": "src"
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
 }
 ```
 
@@ -3046,6 +3354,148 @@ edges: []
 `);
     expect(() => compileGraphConfig<State>(config, {}, {}, shallowMergeReducer)).toThrow(/doesNotExist/);
   });
+
+  it("throws a clear error when entryNode references an unknown node", () => {
+    const config = loadGraphConfig(`
+id: bad-entry
+entryNode: missing
+nodes:
+  n1:
+    use: noop
+edges: []
+`);
+    const noopFactory = (): NodeFn<State> =>
+      async function* () {
+        return {};
+      };
+    expect(() => compileGraphConfig<State>(config, { noop: noopFactory }, {}, shallowMergeReducer)).toThrow(
+      /entryNode "missing"/,
+    );
+  });
+
+  it("throws a clear error when an edge references an unknown \"to\" node", () => {
+    const config = loadGraphConfig(`
+id: bad-edge
+entryNode: n1
+nodes:
+  n1:
+    use: noop
+edges:
+  - from: n1
+    to: missingNode
+`);
+    const noopFactory = (): NodeFn<State> =>
+      async function* () {
+        return {};
+      };
+    expect(() => compileGraphConfig<State>(config, { noop: noopFactory }, {}, shallowMergeReducer)).toThrow(
+      /missingNode/,
+    );
+  });
+
+  it("throws when joinTo is set on a non-array \"to\" edge", () => {
+    const config = loadGraphConfig(`
+id: bad-jointo
+entryNode: n1
+nodes:
+  n1:
+    use: noop
+  n2:
+    use: noop
+edges:
+  - from: n1
+    to: n2
+    joinTo: n2
+`);
+    const noopFactory = (): NodeFn<State> =>
+      async function* () {
+        return {};
+      };
+    expect(() => compileGraphConfig<State>(config, { noop: noopFactory }, {}, shallowMergeReducer)).toThrow(
+      /joinTo/,
+    );
+  });
+
+  it("throws a clear error when an edge references an unregistered condition factory", () => {
+    const config = loadGraphConfig(`
+id: cond-bad
+entryNode: n1
+nodes:
+  n1:
+    use: noop
+  n2:
+    use: noop
+edges:
+  - from: n1
+    to: n2
+    when: missingCondition
+`);
+    const noopFactory = (): NodeFn<State> =>
+      async function* () {
+        return {};
+      };
+    expect(() => compileGraphConfig<State>(config, { noop: noopFactory }, {}, shallowMergeReducer)).toThrow(
+      /missingCondition/,
+    );
+  });
+
+  it("resolves a registered condition factory and uses it to gate edge traversal", async () => {
+    interface CondState {
+      value: number;
+    }
+    const config = loadGraphConfig(`
+id: cond-good
+entryNode: start
+nodes:
+  start:
+    use: setFlag
+  high:
+    use: setHigh
+  low:
+    use: setLow
+edges:
+  - from: start
+    to: high
+    when: isHigh
+  - from: start
+    to: low
+    when: isLow
+`);
+    // "start" sets value to -10, so isHigh (value>=5) is FALSE and isLow (value<5) is TRUE.
+    // "high" is listed FIRST among start's outgoing edges — core-graph's edge lookup is
+    // `edges.find(e => !e.condition || e.condition(nextState))`, so if condition wiring were
+    // silently broken (e.g. `condition: edge.when ? ... : undefined` always fell through to
+    // undefined), the first edge would match unconditionally regardless of state, routing to
+    // "high" every time. Only a genuinely-wired, correctly-evaluated isHigh=false lets it fall
+    // through to the "low" edge — proving the condition factory actually gates traversal, not
+    // just that both nodes happen to be reachable.
+    const setFlag = (): NodeFn<CondState> =>
+      async function* () {
+        return { value: -10 };
+      };
+    const setHigh = (): NodeFn<CondState> =>
+      async function* () {
+        return { value: 100 };
+      };
+    const setLow = (): NodeFn<CondState> =>
+      async function* () {
+        return { value: -100 };
+      };
+    const graph = compileGraphConfig<CondState>(
+      config,
+      { setFlag, setHigh, setLow },
+      { isHigh: (s) => s.value >= 5, isLow: (s) => s.value < 5 },
+      shallowMergeReducer,
+    );
+    const engine = new GraphEngine(graph, {
+      toolRegistry: new InMemoryToolRegistry(),
+      eventBus: new InMemoryEventBus(),
+      checkpointStore: new InMemoryCheckpointStore(),
+    });
+    let checkpoint = engine.start({ value: 0 }, tenant, "cfg-run-2");
+    checkpoint = await engine.run(checkpoint);
+    expect(checkpoint.state.value).toBe(-100);
+  });
 });
 ```
 
@@ -3069,6 +3519,14 @@ export function compileGraphConfig<TState>(
   conditionFactories: Record<string, ConditionFactory<TState>>,
   reducer: (state: TState, partial: Partial<TState>) => TState,
 ): GraphDefinition<TState> {
+  const nodeIds = new Set(Object.keys(config.nodes));
+
+  // Catch config-authoring mistakes (typo'd node ids) here, at compile time, rather than
+  // letting them surface later as an opaque "Unknown node" error from core-graph mid-run.
+  if (!nodeIds.has(config.entryNode)) {
+    throw new Error(`Unknown entryNode "${config.entryNode}": no node with that id is defined`);
+  }
+
   const nodes: Record<string, NodeFn<TState>> = {};
   for (const [nodeId, ref] of Object.entries(config.nodes)) {
     const factory = nodeFactories[ref.use];
@@ -3079,6 +3537,29 @@ export function compileGraphConfig<TState>(
   }
 
   const edges: EdgeDefinition<TState>[] = config.edges.map((edge) => {
+    if (!nodeIds.has(edge.from)) {
+      throw new Error(`Edge references unknown "from" node "${edge.from}"`);
+    }
+    const toIds = Array.isArray(edge.to) ? edge.to : [edge.to];
+    for (const toId of toIds) {
+      if (!nodeIds.has(toId)) {
+        throw new Error(`Edge from "${edge.from}" references unknown "to" node "${toId}"`);
+      }
+    }
+    if (edge.joinTo !== undefined) {
+      // core-graph only reads `joinTo` when `to` is an array (fan-out); on a plain-string
+      // `to` it's silently ignored, which is exactly the kind of copy-paste mistake (e.g.
+      // converting a fan-out edge back to a single edge and forgetting to remove joinTo)
+      // this compile step exists to catch instead of letting it silently do nothing.
+      if (!Array.isArray(edge.to)) {
+        throw new Error(
+          `Edge from "${edge.from}" sets "joinTo" but "to" is not an array — joinTo only applies to fan-out edges`,
+        );
+      }
+      if (!nodeIds.has(edge.joinTo)) {
+        throw new Error(`Edge from "${edge.from}" references unknown "joinTo" node "${edge.joinTo}"`);
+      }
+    }
     if (edge.when && !conditionFactories[edge.when]) {
       throw new Error(`Unknown condition factory "${edge.when}" referenced by edge from "${edge.from}"`);
     }
@@ -3097,7 +3578,7 @@ export function compileGraphConfig<TState>(
 - [ ] **Step 10: Run test to verify it passes**
 
 Run: `pnpm --filter @opentalos/config-loader test -- compile`
-Expected: PASS — both tests green.
+Expected: PASS — all 7 tests green.
 
 - [ ] **Step 11: Create `packages/config-loader/src/index.ts`**
 
@@ -3109,7 +3590,7 @@ export { compileGraphConfig, type ConditionFactory, type NodeFactory } from "./c
 - [ ] **Step 12: Rebuild and run the full package test suite**
 
 Run: `pnpm --filter @opentalos/config-loader build && pnpm --filter @opentalos/config-loader test`
-Expected: PASS — all 5 tests green.
+Expected: PASS — all 10 tests green (3 schema + 7 compile).
 
 - [ ] **Step 13: Commit**
 
@@ -3165,7 +3646,8 @@ This proves the full stack together: multi-agent supervisor orchestration, autom
     "outDir": "dist",
     "rootDir": "src"
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
 }
 ```
 
