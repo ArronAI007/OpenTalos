@@ -1571,7 +1571,9 @@ export interface EdgeDefinition<TState> {
   from: string;
   to: string | string[];
   condition?: (state: TState) => boolean;
-  /** Required when `to` is an array: the node the fan-out branches converge back into. */
+  /** Optional when `to` is an array: the node the fan-out branches converge back into. If
+   * omitted, the fan-out is treated as the terminal step of the graph (status becomes "done"
+   * once all branches complete). */
   joinTo?: string;
 }
 
@@ -1641,10 +1643,7 @@ describe("GraphEngine — sequential execution", () => {
       id: "g1",
       entryNode: "a",
       nodes: { a: increment, b: increment },
-      edges: [
-        { from: "a", to: "b" },
-        { from: "b", to: undefined as unknown as string }, // no edge from b; overwritten below
-      ].filter((e) => e.to !== undefined),
+      edges: [{ from: "a", to: "b" }],
       reducer: shallowMergeReducer,
     };
     const engine = new GraphEngine(graph, makeDeps());
@@ -1831,14 +1830,12 @@ describe("GraphEngine — sequential execution", () => {
       edges: [],
       reducer: shallowMergeReducer,
     };
-    // Only the "before" phase requires approval here. If both phases required approval,
-    // a single resume() call could never reach "done" — resume() is designed to satisfy
-    // exactly one pending awaiting_approval yield per call (see the "second approval
-    // request" guard in engine.ts's resume()), not to silently reuse one decision across
-    // multiple pauses within the same node execution.
+    // Requires approval on BOTH the "before" and "after" guardrail phases, exercising the
+    // engine's support for a node pausing more than once within a single logical execution
+    // (resume() can itself pause again — see engine.ts).
     const approvalGuardrail: Guardrail = {
-      async check(input) {
-        return input.phase === "before" ? "require_approval" : "allow";
+      async check() {
+        return "require_approval";
       },
     };
 
@@ -1846,7 +1843,11 @@ describe("GraphEngine — sequential execution", () => {
     const engineApproved = new GraphEngine(graph, depsApproved);
     let approvedCheckpoint = engineApproved.start({ count: 0 }, tenant, "run-9a");
     approvedCheckpoint = await engineApproved.run(approvedCheckpoint);
-    expect(approvedCheckpoint.status).toBe("paused");
+    expect(approvedCheckpoint.status).toBe("paused"); // before-phase pause
+
+    approvedCheckpoint = await engineApproved.resume(approvedCheckpoint, { type: "approval", approved: true });
+    expect(approvedCheckpoint.status).toBe("paused"); // after-phase pause; node body already ran
+
     approvedCheckpoint = await engineApproved.resume(approvedCheckpoint, { type: "approval", approved: true });
     expect(approvedCheckpoint.status).toBe("done");
     expect(approvedCheckpoint.state.count).toBe(1);
@@ -1857,6 +1858,29 @@ describe("GraphEngine — sequential execution", () => {
     deniedCheckpoint = await engineDenied.run(deniedCheckpoint);
     await expect(engineDenied.resume(deniedCheckpoint, { type: "approval", approved: false })).rejects.toThrow(
       /Guardrail approval was denied/,
+    );
+  });
+
+  it("refuses to resume a paused run under a different tenant/session than it was paused with", async () => {
+    const askApproval: NodeFn<CounterState> = async function* () {
+      yield { type: "awaiting_approval", reason: "please confirm" };
+      return {};
+    };
+    const graph: GraphDefinition<CounterState> = {
+      id: "g10",
+      entryNode: "ask",
+      nodes: { ask: askApproval },
+      edges: [],
+      reducer: shallowMergeReducer,
+    };
+    const deps = makeDeps();
+    const engine = new GraphEngine(graph, deps);
+    let checkpoint = engine.start({ count: 0 }, tenant, "run-10");
+    checkpoint = await engine.run(checkpoint);
+
+    const spoofedCheckpoint = { ...checkpoint, tenantId: "tenant-b" };
+    await expect(engine.resume(spoofedCheckpoint, { type: "approval", approved: true })).rejects.toThrow(
+      /different tenant\/session/,
     );
   });
 });
@@ -1897,8 +1921,18 @@ export class NodeError extends Error {
 
 type NodeOutcome<TState> = { status: "done"; partial: Partial<TState> } | { status: "paused"; reason: string };
 
+interface PausedEntry<TState> {
+  tenant: TenantContext;
+  generator: NodeGenerator<TState>;
+}
+
 export class GraphEngine<TState> {
-  private readonly paused = new Map<string, NodeGenerator<TState>>();
+  // The one deliberate exception to "the engine holds no cross-call state": a live, paused
+  // generator can only be resumed within the same process (see the "Cross-process resume is
+  // not supported" error in resume() below). Keyed by runId, with the originating tenant
+  // recorded alongside it so resume() can refuse a runId reused/spoofed under a different
+  // tenant — see resume()'s tenant-match check.
+  private readonly paused = new Map<string, PausedEntry<TState>>();
 
   constructor(
     private readonly graph: GraphDefinition<TState>,
@@ -1932,20 +1966,37 @@ export class GraphEngine<TState> {
       throw new Error(`Run ${checkpoint.runId} is not in a resumable paused state`);
     }
     const nodeId = checkpoint.nodeCursor;
-    const generator = this.paused.get(checkpoint.runId);
-    if (!generator) {
+    const pausedEntry = this.paused.get(checkpoint.runId);
+    if (!pausedEntry) {
       throw new Error(
         `No in-memory paused generator found for run ${checkpoint.runId}. Cross-process resume is not supported in this version.`,
       );
     }
     const tenant: TenantContext = { tenantId: checkpoint.tenantId, sessionId: checkpoint.sessionId };
-    const outcome = await this.runNodeToCompletion(nodeId, generator, tenant, checkpoint.runId, resumeValue, () => {
-      throw new Error("Node yielded a second approval request before the first was resolved");
-    });
-    this.paused.delete(checkpoint.runId);
-    if (outcome.status === "paused") {
-      throw new Error("Unexpected: node paused again immediately after resume");
+    if (pausedEntry.tenant.tenantId !== tenant.tenantId || pausedEntry.tenant.sessionId !== tenant.sessionId) {
+      throw new Error(`Run ${checkpoint.runId} was paused under a different tenant/session; refusing to resume`);
     }
+    // Tentatively remove; re-added below (via onApprovalPause) if the node pauses again.
+    this.paused.delete(checkpoint.runId);
+    const outcome = await this.runNodeToCompletion(nodeId, pausedEntry.generator, tenant, checkpoint.runId, resumeValue, (g) => {
+      this.paused.set(checkpoint.runId, { tenant, generator: g });
+    });
+
+    if (outcome.status === "paused") {
+      // A node (or a guardrail wrapping it) can legitimately pause more than once within a
+      // single logical execution — e.g. a guardrail requiring approval both before and after
+      // the node body runs. Each pause is persisted exactly like step()'s own pause handling.
+      this.emitTrace("hitl_interrupt", checkpoint.runId, tenant, { nodeId, reason: outcome.reason });
+      const pausedCheckpoint: Checkpoint<TState> = {
+        ...checkpoint,
+        nodeCursor: nodeId,
+        status: "paused",
+        pendingYields: [{ type: "awaiting_approval", reason: outcome.reason }],
+      };
+      await this.deps.checkpointStore.save(pausedCheckpoint);
+      return pausedCheckpoint;
+    }
+
     this.emitTrace("node_exit", checkpoint.runId, tenant, { nodeId });
     const advanced = await this.completeNode(nodeId, outcome.partial, checkpoint);
     return advanced.status === "running" ? this.run(advanced) : advanced;
@@ -1968,7 +2019,7 @@ export class GraphEngine<TState> {
     const guardedNodeFn = this.wrapWithGuardrails(nodeId, nodeFn);
     const generator = guardedNodeFn(checkpoint.state, { tenant, eventBus: this.deps.eventBus });
     const outcome = await this.runNodeToCompletion(nodeId, generator, tenant, checkpoint.runId, undefined, (g) => {
-      this.paused.set(checkpoint.runId, g);
+      this.paused.set(checkpoint.runId, { tenant, generator: g });
     });
 
     if (outcome.status === "paused") {
@@ -2149,7 +2200,7 @@ export class GraphEngine<TState> {
 - [ ] **Step 8: Run tests to verify they pass**
 
 Run: `pnpm --filter @opentalos/core-graph test`
-Expected: PASS — all 9 tests green (3 sequential/branch/loop + 1 tool-call + 1 HITL pause/resume + 1 cross-process resume error + 1 NodeError/error-event + 2 guardrail).
+Expected: PASS — all 10 tests green (3 sequential/branch/loop + 1 tool-call + 1 HITL pause/resume + 1 cross-process resume error + 1 NodeError/error-event + 2 guardrail + 1 tenant-mismatch resume guard).
 
 - [ ] **Step 9: Create `packages/core-graph/src/index.ts`**
 
@@ -2431,7 +2482,7 @@ export type { EdgeDefinition, GraphDefinition, NodeContext, NodeCursor, NodeFn, 
 - [ ] **Step 9: Rebuild and run the full package test suite**
 
 Run: `pnpm --filter @opentalos/core-graph build && pnpm --filter @opentalos/core-graph test`
-Expected: PASS — all 13 tests in the package green (9 from Task 8, 2 fan-out, 2 subgraph).
+Expected: PASS — all 14 tests in the package green (10 from Task 8, 2 fan-out, 2 subgraph).
 
 - [ ] **Step 10: Commit**
 
