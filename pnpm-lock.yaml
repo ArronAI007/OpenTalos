@@ -155,6 +155,25 @@ importers:
         specifier: workspace:*
         version: link:../core-types
 
+  packages/multi-agent:
+    dependencies:
+      '@opentalos/core-graph':
+        specifier: workspace:*
+        version: link:../core-graph
+      '@opentalos/core-types':
+        specifier: workspace:*
+        version: link:../core-types
+    devDependencies:
+      '@opentalos/checkpoint':
+        specifier: workspace:*
+        version: link:../checkpoint
+      '@opentalos/tool-registry':
+        specifier: workspace:*
+        version: link:../tool-registry
+      '@opentalos/tracing':
+        specifier: workspace:*
+        version: link:../tracing
+
   packages/tool-registry:
     dependencies:
       '@modelcontextprotocol/sdk':
