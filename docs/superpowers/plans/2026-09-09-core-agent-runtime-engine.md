@@ -882,7 +882,10 @@ export class InMemoryToolRegistry implements ToolRegistry {
       return { id: call.id, output: `Unknown tool: ${call.name}`, isError: true };
     }
     try {
-      return await tool.execute(call.input, ctx);
+      // Always return the caller's call.id, not whatever id the Tool implementation
+      // invented — result/call id correlation matters for threading tool results
+      // back into an LLM conversation correctly.
+      return { ...(await tool.execute(call.input, ctx)), id: call.id };
     } catch (error) {
       return { id: call.id, output: error instanceof Error ? error.message : String(error), isError: true };
     }
