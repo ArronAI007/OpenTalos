@@ -29,6 +29,10 @@ export function createAnthropicProvider(client: AnthropicClientLike, options: An
   return {
     async *complete(request: ModelRequest): AsyncIterable<ModelResponseChunk> {
       const system = request.messages.find((m) => m.role === "system");
+      // NOTE: role: "tool" messages are intentionally dropped here (unlike the OpenAI-compatible
+      // and Ollama adapters, which pass them through). Anthropic's API needs a tool_result content
+      // block correlated to a specific tool_use id, but Message (core-types) has no such id field
+      // yet. Wiring a real tool-calling loop through this adapter requires that design change first.
       const conversation = request.messages
         .filter((m) => m.role === "user" || m.role === "assistant")
         .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));

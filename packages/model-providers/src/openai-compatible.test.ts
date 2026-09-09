@@ -16,6 +16,23 @@ function fakeClient(chunks: unknown[]): OpenAIClientLike {
   };
 }
 
+function capturingClient(chunks: unknown[]): { client: OpenAIClientLike; getCapturedParams: () => unknown } {
+  let capturedParams: unknown;
+  const client: OpenAIClientLike = {
+    chat: {
+      completions: {
+        create(params) {
+          capturedParams = params;
+          return (async function* () {
+            for (const chunk of chunks) yield chunk as never;
+          })();
+        },
+      },
+    },
+  };
+  return { client, getCapturedParams: () => capturedParams };
+}
+
 const request: ModelRequest = { messages: [{ role: "user", content: "hi" }] };
 
 describe("createOpenAICompatibleProvider", () => {
@@ -42,5 +59,24 @@ describe("createOpenAICompatibleProvider", () => {
     const chunks = [];
     for await (const chunk of provider.complete(request)) chunks.push(chunk);
     expect(chunks).toEqual([{ type: "tool_call", toolCall: { id: "call-1", name: "search", input: { q: "x" } } }]);
+  });
+
+  it("maps tool definitions to function.parameters matching inputSchema", async () => {
+    const requestWithTools: ModelRequest = {
+      messages: [{ role: "user", content: "hi" }],
+      tools: [{ name: "search", description: "search the web", inputSchema: { type: "object" } }],
+    };
+    const { client, getCapturedParams } = capturingClient([{ choices: [{ delta: {}, finish_reason: "stop" }] }]);
+    const provider = createOpenAICompatibleProvider(client, { model: "gpt-test" });
+    for await (const _chunk of provider.complete(requestWithTools)) {
+      // draining the iterator to trigger the create() call
+    }
+    const params = getCapturedParams() as {
+      tools?: { type: "function"; function: { name: string; description: string; parameters: unknown } }[];
+    };
+    expect(params.tools?.[0]).toEqual({
+      type: "function",
+      function: { name: "search", description: "search the web", parameters: { type: "object" } },
+    });
   });
 });

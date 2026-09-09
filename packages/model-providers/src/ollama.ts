@@ -58,6 +58,15 @@ export function createOllamaProvider(fetchFn: OllamaFetchLike, options: OllamaPr
           }
         }
       }
+      if (buffer.trim()) {
+        const parsed = JSON.parse(buffer) as OllamaChatLine;
+        if (parsed.message?.content) {
+          yield { type: "text_delta", textDelta: parsed.message.content };
+        }
+        if (parsed.done) {
+          yield { type: "message_stop" };
+        }
+      }
     },
   };
 }
