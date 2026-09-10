@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { Pool } from "pg";
 import { PostgresCheckpointStore } from "@opentalos/postgres-checkpoint";
-import { PostgresEventBus } from "@opentalos/postgres-tracing";
+import { PostgresEventBus, listEventsSince } from "@opentalos/postgres-tracing";
 import { Scheduler, Worker } from "@opentalos/scheduler";
 import { buildWorkerRegistry } from "./index.js";
 
@@ -79,5 +79,8 @@ describe("apps/worker registry wiring", () => {
 
     const checkpoint = await checkpointStore.load("worker-app-run-1");
     expect(checkpoint?.status).toBe("paused");
+
+    const events = await listEventsSince(pool, "worker-app-run-1", 0);
+    expect(events.length).toBeGreaterThan(0);
   });
 });
