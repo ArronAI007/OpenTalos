@@ -44,7 +44,13 @@ export class Worker {
     if (this.stopped) return;
     this.pollTimer = setTimeout(() => {
       this.pollOnce()
-        .catch(() => undefined)
+        .catch((error) => {
+          // Never silently swallow errors: this is the continuous-polling path (start()/stop()),
+          // untested directly, so at minimum make a poll-cycle failure visible instead of
+          // discarding it entirely. A full EventBus-based reporting path is a larger API change
+          // than this fix warrants.
+          console.error(`Worker poll cycle failed: ${error instanceof Error ? error.message : String(error)}`);
+        })
         .finally(() => this.scheduleNextPoll(this.options.pollIntervalMs ?? 100));
     }, delayMs);
   }
