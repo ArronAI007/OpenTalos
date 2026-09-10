@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { pathToFileURL } from "node:url";
 import { Pool } from "pg";
 import type { EventBus } from "@opentalos/core-types";
 import { PostgresCheckpointStore } from "@opentalos/postgres-checkpoint";
@@ -19,7 +20,7 @@ export function buildWorkerRegistry(eventBus: EventBus): GraphRegistry {
 }
 
 function isMain(): boolean {
-  return process.argv[1] === new URL(import.meta.url).pathname;
+  return import.meta.url === pathToFileURL(process.argv[1]).href;
 }
 
 if (isMain()) {
