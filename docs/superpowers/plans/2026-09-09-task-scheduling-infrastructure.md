@@ -1103,7 +1103,7 @@ export class Scheduler {
 - [ ] **Step 12: Run tests to verify they pass**
 
 Run: `pnpm --filter @opentalos/scheduler test`
-Expected: PASS — all 11 tests green (4 graph-registry + 7 enqueue).
+Expected: PASS — all 9 tests green (4 graph-registry + 5 enqueue).
 
 - [ ] **Step 13: Create `packages/scheduler/src/index.ts`**
 
