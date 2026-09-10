@@ -8,6 +8,7 @@ export function useRunEvents(runId: string | undefined) {
 
   useEffect(() => {
     if (!runId) return;
+    dispatch({ kind: "reset" });
     setConnectionError(false);
     const source = new EventSource(eventsUrl(runId));
 

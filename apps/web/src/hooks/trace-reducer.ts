@@ -11,9 +11,13 @@ export const initialTraceTimelineState: TraceTimelineState = { events: [], statu
 export type TraceTimelineAction =
   | { kind: "trace"; event: TraceEventDto }
   | { kind: "status"; status: RunStatus }
-  | { kind: "final"; state: Record<string, unknown> };
+  | { kind: "final"; state: Record<string, unknown> }
+  | { kind: "reset" };
 
 export function traceTimelineReducer(state: TraceTimelineState, action: TraceTimelineAction): TraceTimelineState {
+  if (action.kind === "reset") {
+    return initialTraceTimelineState;
+  }
   if (action.kind === "trace") {
     return { ...state, events: [...state.events, action.event] };
   }

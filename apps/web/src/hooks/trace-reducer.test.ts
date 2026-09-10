@@ -39,4 +39,18 @@ describe("traceTimelineReducer", () => {
     const next = traceTimelineReducer(initialTraceTimelineState, { kind: "final", state: { reply: "done" } });
     expect(next.finalState).toEqual({ reply: "done" });
   });
+
+  it("resets to the initial state regardless of accumulated events, status, or finalState", () => {
+    let state = initialTraceTimelineState;
+    state = traceTimelineReducer(state, { kind: "trace", event: sampleEvent });
+    state = traceTimelineReducer(state, {
+      kind: "trace",
+      event: { ...sampleEvent, id: 2, type: "tool_call_start" },
+    });
+    state = traceTimelineReducer(state, { kind: "status", status: "paused" });
+    state = traceTimelineReducer(state, { kind: "final", state: { reply: "done" } });
+
+    const next = traceTimelineReducer(state, { kind: "reset" });
+    expect(next).toEqual(initialTraceTimelineState);
+  });
 });
