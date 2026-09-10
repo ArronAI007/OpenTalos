@@ -1,8 +1,9 @@
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import type { Pool } from "pg";
 import type { TenantContext } from "@opentalos/core-types";
-import { GraphEngine, type NodeResumeValue } from "@opentalos/core-graph";
+import type { NodeResumeValue } from "@opentalos/core-graph";
 import type { PostgresCheckpointStore } from "@opentalos/postgres-checkpoint";
+import { buildEngine } from "./build-engine.js";
 import type { GraphRegistry } from "./graph-registry.js";
 import { tasks } from "./schema.js";
 
@@ -40,10 +41,7 @@ export class Scheduler {
       throw new Error(`Cannot enqueue start: run "${runId}" already exists (status: "${existing.status}")`);
     }
 
-    const registration = this.registry.getOrThrow(graphId);
-    const graph = registration.buildGraph();
-    const deps = registration.buildDeps();
-    const engine = new GraphEngine(graph, { ...deps, checkpointStore: this.checkpointStore });
+    const engine = buildEngine(this.registry, this.checkpointStore, graphId);
     const checkpoint = engine.start(initialState, tenant, runId);
     // checkpointStore.save() and the tasks insert below are two independent writes (no shared
     // transaction) — if the task insert fails after the checkpoint save succeeds, the run is left

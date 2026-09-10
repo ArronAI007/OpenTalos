@@ -1,8 +1,9 @@
 import { and, asc, desc, eq, lte, sql } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import type { Pool } from "pg";
-import { GraphEngine, type NodeResumeValue } from "@opentalos/core-graph";
+import type { NodeResumeValue } from "@opentalos/core-graph";
 import type { PostgresCheckpointStore } from "@opentalos/postgres-checkpoint";
+import { buildEngine } from "./build-engine.js";
 import type { GraphRegistry } from "./graph-registry.js";
 import { tasks } from "./schema.js";
 
@@ -144,10 +145,7 @@ export class Worker {
   }
 
   private async runTask(task: TaskRow): Promise<void> {
-    const registration = this.registry.getOrThrow(task.graphId);
-    const graph = registration.buildGraph();
-    const deps = registration.buildDeps();
-    const engine = new GraphEngine(graph, { ...deps, checkpointStore: this.checkpointStore });
+    const engine = buildEngine(this.registry, this.checkpointStore, task.graphId);
 
     const checkpoint = await this.checkpointStore.load(task.runId);
     if (!checkpoint) {
