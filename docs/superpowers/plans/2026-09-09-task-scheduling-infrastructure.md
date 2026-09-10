@@ -1493,6 +1493,8 @@ function errorMessage(error: unknown): string {
 Run: `pnpm --filter @opentalos/scheduler test -- worker`
 Expected: PASS — all 6 tests green. (These tests exercise real concurrent Postgres transactions and real timeouts — if any test is flaky, re-run once before investigating; if it fails consistently, the claiming transaction or timeout logic has a real bug, not a timing fluke.)
 
+Note: the enqueue.test.ts suite has 5 tests (not 7, per Task 3's corrected count), so the running total after this task is 4 (graph-registry) + 5 (enqueue) + 6 (worker) = 15, not 17 — see Step 6 below.
+
 - [ ] **Step 5: Update `packages/scheduler/src/index.ts`**
 
 ```ts
@@ -1505,7 +1507,7 @@ export { tasks } from "./schema.js";
 - [ ] **Step 6: Rebuild and run the full package test suite**
 
 Run: `pnpm --filter @opentalos/scheduler build && pnpm --filter @opentalos/scheduler test`
-Expected: PASS — all 17 tests green (4 graph-registry + 7 enqueue + 6 worker).
+Expected: PASS — all 15 tests green (4 graph-registry + 5 enqueue + 6 worker).
 
 - [ ] **Step 7: Commit**
 
@@ -1638,7 +1640,7 @@ Expected: PASS — the single test green. If it fails, the bug is almost certain
 - [ ] **Step 3: Run the full package suite one more time**
 
 Run: `pnpm --filter @opentalos/scheduler build && pnpm --filter @opentalos/scheduler test`
-Expected: PASS — all 18 tests green (4 graph-registry + 7 enqueue + 6 worker + 1 cross-instance).
+Expected: PASS — all 16 tests green (4 graph-registry + 5 enqueue + 6 worker + 1 cross-instance).
 
 - [ ] **Step 4: Commit**
 
