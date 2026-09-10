@@ -63,6 +63,15 @@ export class GraphEngine<TState> {
     return current;
   }
 
+  /**
+   * Do not mix resume() and resumeFromCheckpoint() for the same run across a process boundary:
+   * a re-pause here records a length-1 `pendingYields` (discarding replay history), while
+   * resumeFromCheckpoint() depends on that history being present to correctly replay prior
+   * answers. Mixing them can cause a later resumeFromCheckpoint() call to misattribute a new
+   * answer to the wrong pending question. Once a run has been resumed via
+   * resumeFromCheckpoint(), keep using resumeFromCheckpoint() for that run — this is naturally
+   * what the scheduler does, since it never calls resume().
+   */
   async resume(checkpoint: Checkpoint<TState>, resumeValue: NodeResumeValue): Promise<Checkpoint<TState>> {
     if (checkpoint.status !== "paused" || typeof checkpoint.nodeCursor !== "string") {
       throw new Error(`Run ${checkpoint.runId} is not in a resumable paused state`);
@@ -120,6 +129,11 @@ export class GraphEngine<TState> {
    * directly. Tenant authorization for who may trigger a resume for a given runId is the
    * responsibility of whoever loads the checkpoint and calls this method (the scheduler's
    * enqueueResume, built in a later task).
+   *
+   * Do not mix this with resume() for the same run across a process boundary: resume()'s
+   * re-pause records only a length-1 `pendingYields` (discarding replay history), which this
+   * method depends on being present to correctly replay prior answers. Once a run has been
+   * resumed via resumeFromCheckpoint(), keep using resumeFromCheckpoint() for that run.
    */
   async resumeFromCheckpoint(checkpoint: Checkpoint<TState>, resumeValue: NodeResumeValue): Promise<Checkpoint<TState>> {
     if (checkpoint.status !== "paused" || typeof checkpoint.nodeCursor !== "string") {
