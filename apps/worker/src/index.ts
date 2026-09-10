@@ -45,8 +45,17 @@ if (isMain()) {
     console.log(`apps/worker: health check listening on :${healthPort}`);
   });
 
-  process.on("SIGTERM", () => {
+  async function shutdown(): Promise<void> {
     worker.stop();
+    await eventBus.flush();
+    await pool.end();
     process.exit(0);
+  }
+
+  process.on("SIGTERM", () => {
+    void shutdown();
+  });
+  process.on("SIGINT", () => {
+    void shutdown();
   });
 }
