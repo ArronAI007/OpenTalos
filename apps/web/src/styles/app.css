@@ -455,3 +455,45 @@ body {
     animation: none;
   }
 }
+
+.gate-card {
+  max-width: 360px;
+  margin: 120px auto;
+  background: var(--color-surface-solid);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-soft);
+  padding: var(--space-lg);
+  text-align: center;
+}
+
+.gate-input {
+  width: 100%;
+  box-sizing: border-box;
+  border: none;
+  border-radius: var(--radius-pill);
+  padding: 9px 16px;
+  font-size: 13px;
+  box-shadow: var(--shadow-soft);
+  margin: var(--space-md) 0;
+}
+
+.gate-button {
+  background: linear-gradient(135deg, var(--color-accent-start), var(--color-accent-end));
+  color: var(--color-on-accent);
+  border: none;
+  border-radius: var(--radius-pill);
+  padding: 9px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter var(--duration-fast) ease;
+}
+
+.gate-button:hover {
+  filter: brightness(1.08);
+}
+
+.gate-button:focus-visible {
+  outline: 2px solid var(--color-accent-start);
+  outline-offset: 2px;
+}

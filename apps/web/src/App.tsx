@@ -1,13 +1,16 @@
 import { useEffect, useState } from "react";
-import { startRun, resumeRun } from "./api.js";
+import { startRun, resumeRun, getApiKey, ApiAuthError } from "./api.js";
 import { useRunEvents } from "./hooks/useRunEvents.js";
 import { ChatPanel } from "./components/ChatPanel.js";
 import { TraceDrawer } from "./components/TraceDrawer.js";
+import { ApiKeyGate } from "./components/ApiKeyGate.js";
 import type { ChatMessage } from "./types.js";
 import "./styles/tokens.css";
 import "./styles/app.css";
 
 export function App() {
+  const [hasApiKey, setHasApiKey] = useState(() => getApiKey() !== null);
+  const [authError, setAuthError] = useState<string>();
   const [runId, setRunId] = useState<string>();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -43,7 +46,12 @@ export function App() {
       const { runId: newRunId } = await startRun(text);
       setRunId(newRunId);
       setError(undefined);
-    } catch {
+    } catch (err) {
+      if (err instanceof ApiAuthError) {
+        setHasApiKey(false);
+        setAuthError("密钥无效或已被吊销，请重新输入");
+        return;
+      }
       setError("发送失败，请重试");
     }
   }
@@ -52,9 +60,28 @@ export function App() {
     if (!runId) return;
     try {
       await resumeRun(runId, approved);
-    } catch {
+    } catch (err) {
+      if (err instanceof ApiAuthError) {
+        setHasApiKey(false);
+        setAuthError("密钥无效或已被吊销，请重新输入");
+        return;
+      }
       setError("操作失败，请重试");
     }
+  }
+
+  if (!hasApiKey) {
+    return (
+      <main className="app-shell">
+        <ApiKeyGate
+          error={authError}
+          onSubmit={() => {
+            setAuthError(undefined);
+            setHasApiKey(true);
+          }}
+        />
+      </main>
+    );
   }
 
   return (
