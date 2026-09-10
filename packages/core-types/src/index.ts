@@ -9,6 +9,10 @@ export type MessageRole = "system" | "user" | "assistant" | "tool";
 export interface Message {
   role: MessageRole;
   content: string;
+  /** Set on an assistant message that requested one or more tool calls in this turn. */
+  toolCalls?: ToolCall[];
+  /** Set on a role: "tool" message — correlates this result back to the ToolCall.id it answers. */
+  toolCallId?: string;
 }
 
 export type JSONSchema = Record<string, unknown>;
