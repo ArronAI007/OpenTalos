@@ -7,6 +7,11 @@ export interface GraphRegistration<TState> {
   buildDeps: () => Omit<EngineDeps, "checkpointStore">;
 }
 
+// Type safety note: `register<TState>` erases to `GraphRegistration<unknown>` internally, so
+// nothing here (or in Scheduler.enqueueStart) checks that a caller's initialState actually
+// matches the graph registered under a given graphId — a mismatch fails at runtime inside node
+// execution, not at compile time. Inherent to a string-keyed heterogeneous registry; not fixable
+// without giving up the plain-string graphId that needs to persist in a DB row.
 export class GraphRegistry {
   private readonly registrations = new Map<string, GraphRegistration<unknown>>();
 

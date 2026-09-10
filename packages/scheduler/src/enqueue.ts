@@ -35,6 +35,10 @@ export class Scheduler {
     const deps = registration.buildDeps();
     const engine = new GraphEngine(graph, { ...deps, checkpointStore: this.checkpointStore });
     const checkpoint = engine.start(initialState, tenant, runId);
+    // checkpointStore.save() and the tasks insert below are two independent writes (no shared
+    // transaction) — if the task insert fails after the checkpoint save succeeds, the run is left
+    // "running" with no queued task to claim it. Accepted simplification for this phase; a real fix
+    // would require PostgresCheckpointStore to accept an externally-supplied transaction/client.
     await this.checkpointStore.save(checkpoint);
 
     await this.db.insert(tasks).values({
