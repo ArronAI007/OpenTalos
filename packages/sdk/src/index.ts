@@ -38,3 +38,5 @@ export function createEngine<TState>(graph: GraphDefinition<TState>, deps: Creat
 
 export { GraphEngine, shallowMergeReducer } from "@opentalos/core-graph";
 export type { EdgeDefinition, GraphDefinition, NodeContext, NodeFn, NodeGenerator, NodeResumeValue, NodeYield } from "@opentalos/core-graph";
+
+export { runModelWithTools, type AgentTurnResult } from "./run-model-with-tools.js";
