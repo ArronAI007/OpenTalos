@@ -23,6 +23,18 @@ function isMain(): boolean {
   return import.meta.url === pathToFileURL(process.argv[1]).href;
 }
 
+/** Parses a positive-integer environment variable, throwing a clear error rather than
+ * silently falling back to NaN (which would disable concurrency caps or break `.listen()`). */
+function parsePositiveInt(envVar: string, defaultValue: number): number {
+  const raw = process.env[envVar];
+  if (raw === undefined) return defaultValue;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(`Invalid ${envVar}: "${raw}" is not a positive number`);
+  }
+  return parsed;
+}
+
 if (isMain()) {
   const pool = new Pool({
     connectionString: process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/opentalos",
@@ -32,13 +44,13 @@ if (isMain()) {
   const registry = buildWorkerRegistry(eventBus);
 
   const worker = new Worker(pool, registry, checkpointStore, {
-    globalConcurrency: Number(process.env.WORKER_GLOBAL_CONCURRENCY ?? 10),
-    tenantConcurrency: Number(process.env.WORKER_TENANT_CONCURRENCY ?? 5),
+    globalConcurrency: parsePositiveInt("WORKER_GLOBAL_CONCURRENCY", 10),
+    tenantConcurrency: parsePositiveInt("WORKER_TENANT_CONCURRENCY", 5),
   });
   worker.start();
   console.log("apps/worker: started, polling for tasks...");
 
-  const healthPort = Number(process.env.HEALTH_PORT ?? 3002);
+  const healthPort = parsePositiveInt("HEALTH_PORT", 3002);
   createServer((_req, res) => {
     res.writeHead(200, { "Content-Type": "text/plain" });
     res.end("ok");
