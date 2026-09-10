@@ -354,6 +354,25 @@ importers:
         specifier: ^12.1.0
         version: 12.1.0
 
+  packages/postgres-tenancy:
+    dependencies:
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@types/pg@8.23.1)(pg@8.23.0)
+      pg:
+        specifier: ^8.23.0
+        version: 8.23.0
+    devDependencies:
+      '@testcontainers/postgresql':
+        specifier: ^12.1.0
+        version: 12.1.0
+      '@types/pg':
+        specifier: ^8.23.1
+        version: 8.23.1
+      testcontainers:
+        specifier: ^12.1.0
+        version: 12.1.0
+
   packages/postgres-tracing:
     dependencies:
       '@opentalos/core-types':
