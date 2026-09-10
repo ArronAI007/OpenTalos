@@ -10,12 +10,19 @@ export interface OpenAIStreamChunk {
   }[];
 }
 
+interface OpenAIOutMessage {
+  role: string;
+  content: string;
+  tool_calls?: { id: string; type: "function"; function: { name: string; arguments: string } }[];
+  tool_call_id?: string;
+}
+
 export interface OpenAIClientLike {
   chat: {
     completions: {
       create(params: {
         model: string;
-        messages: { role: string; content: string }[];
+        messages: OpenAIOutMessage[];
         tools?: { type: "function"; function: { name: string; description: string; parameters: JSONSchema } }[];
         stream: true;
       }): AsyncIterable<OpenAIStreamChunk>;
@@ -35,7 +42,20 @@ export function createOpenAICompatibleProvider(
     async *complete(request: ModelRequest): AsyncIterable<ModelResponseChunk> {
       const stream = client.chat.completions.create({
         model: options.model,
-        messages: request.messages.map((m) => ({ role: m.role, content: m.content })),
+        messages: request.messages.map((m): OpenAIOutMessage => ({
+          role: m.role,
+          content: m.content,
+          ...(m.toolCalls
+            ? {
+                tool_calls: m.toolCalls.map((tc) => ({
+                  id: tc.id,
+                  type: "function" as const,
+                  function: { name: tc.name, arguments: JSON.stringify(tc.input) },
+                })),
+              }
+            : {}),
+          ...(m.toolCallId ? { tool_call_id: m.toolCallId } : {}),
+        })),
         tools: request.tools?.map((t) => ({
           type: "function",
           function: { name: t.name, description: t.description, parameters: t.inputSchema },

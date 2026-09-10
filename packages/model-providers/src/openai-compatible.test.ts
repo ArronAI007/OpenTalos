@@ -79,4 +79,32 @@ describe("createOpenAICompatibleProvider", () => {
       function: { name: "search", description: "search the web", parameters: { type: "object" } },
     });
   });
+
+  it("sends tool_calls on an assistant message and tool_call_id on a tool message", async () => {
+    const requestWithHistory: ModelRequest = {
+      messages: [
+        { role: "user", content: "what's the rate?" },
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [{ id: "call-1", name: "lookup_rate", input: { pair: "USD/CNY" } }],
+        },
+        { role: "tool", content: "7.13", toolCallId: "call-1" },
+      ],
+    };
+    const { client, getCapturedParams } = capturingClient([{ choices: [{ delta: {}, finish_reason: "stop" }] }]);
+    const provider = createOpenAICompatibleProvider(client, { model: "gpt-test" });
+    for await (const _chunk of provider.complete(requestWithHistory)) {
+      // draining the iterator to trigger the create() call
+    }
+    const params = getCapturedParams() as {
+      messages: { role: string; content: string; tool_calls?: unknown; tool_call_id?: string }[];
+    };
+    expect(params.messages[1]).toEqual({
+      role: "assistant",
+      content: "",
+      tool_calls: [{ id: "call-1", type: "function", function: { name: "lookup_rate", arguments: JSON.stringify({ pair: "USD/CNY" }) } }],
+    });
+    expect(params.messages[2]).toEqual({ role: "tool", content: "7.13", tool_call_id: "call-1" });
+  });
 });

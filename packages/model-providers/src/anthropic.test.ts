@@ -79,4 +79,34 @@ describe("createAnthropicProvider", () => {
     expect(params.system).toBe("be concise");
     expect(params.tools?.[0]).toEqual({ name: "search", description: "search the web", input_schema: { type: "object" } });
   });
+
+  it("builds tool_use and tool_result content blocks from toolCalls/toolCallId", async () => {
+    const requestWithHistory: ModelRequest = {
+      messages: [
+        { role: "user", content: "what's the rate?" },
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [{ id: "call-1", name: "lookup_rate", input: { pair: "USD/CNY" } }],
+        },
+        { role: "tool", content: "7.13", toolCallId: "call-1" },
+      ],
+    };
+    const { client, getCapturedParams } = capturingClient([{ type: "message_stop" }]);
+    const provider = createAnthropicProvider(client, { model: "claude-test" });
+    for await (const _chunk of provider.complete(requestWithHistory)) {
+      // draining the iterator to trigger the stream() call
+    }
+    const params = getCapturedParams() as {
+      messages: { role: string; content: string | unknown[] }[];
+    };
+    expect(params.messages[1]).toEqual({
+      role: "assistant",
+      content: [{ type: "tool_use", id: "call-1", name: "lookup_rate", input: { pair: "USD/CNY" } }],
+    });
+    expect(params.messages[2]).toEqual({
+      role: "user",
+      content: [{ type: "tool_result", tool_use_id: "call-1", content: "7.13" }],
+    });
+  });
 });

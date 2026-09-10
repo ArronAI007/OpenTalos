@@ -94,4 +94,35 @@ describe("createOllamaProvider", () => {
       stream: true,
     });
   });
+
+  it("sends tools in the request body and parses tool_calls out of a response line", async () => {
+    let capturedInit: { method: string; body: string; headers: Record<string, string> } | undefined;
+    const fetchFn: OllamaFetchLike = async (_url, init) => {
+      capturedInit = init;
+      return {
+        ok: true,
+        status: 200,
+        body: streamFromLines([
+          JSON.stringify({ message: { tool_calls: [{ id: "call-1", function: { name: "search", arguments: '{"q":"x"}' } }] } }),
+          JSON.stringify({ done: true }),
+        ]),
+      };
+    };
+    const requestWithTools: ModelRequest = {
+      messages: [{ role: "user", content: "hi" }],
+      tools: [{ name: "search", description: "search the web", inputSchema: { type: "object" } }],
+    };
+    const provider = createOllamaProvider(fetchFn, { baseUrl: "http://localhost:11434", model: "llama-test" });
+    const chunks = [];
+    for await (const chunk of provider.complete(requestWithTools)) chunks.push(chunk);
+
+    const sentBody = JSON.parse(capturedInit?.body ?? "{}");
+    expect(sentBody.tools).toEqual([
+      { type: "function", function: { name: "search", description: "search the web", parameters: { type: "object" } } },
+    ]);
+    expect(chunks).toEqual([
+      { type: "tool_call", toolCall: { id: "call-1", name: "search", input: { q: "x" } } },
+      { type: "message_stop" },
+    ]);
+  });
 });
