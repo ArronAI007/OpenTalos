@@ -9,6 +9,10 @@ import { buildWorkerRegistry } from "./index.js";
 let container: StartedPostgreSqlContainer;
 let pool: Pool;
 
+beforeAll(() => {
+  process.env.MODEL_PROVIDER = "mock";
+});
+
 beforeAll(async () => {
   container = await new PostgreSqlContainer("postgres:16-alpine").start();
   pool = new Pool({ connectionString: container.getConnectionUri() });
@@ -62,7 +66,7 @@ afterAll(async () => {
 });
 
 describe("apps/worker registry wiring", () => {
-  it("registers chat-demo-agent and can run it to the HITL pause via a real Worker", async () => {
+  it("registers chat-agent and can run it to the HITL pause via a real Worker", async () => {
     const checkpointStore = new PostgresCheckpointStore(pool);
     const eventBus = new PostgresEventBus(pool);
     const registry = buildWorkerRegistry(eventBus);
@@ -70,7 +74,7 @@ describe("apps/worker registry wiring", () => {
     const worker = new Worker(pool, registry, checkpointStore, { globalConcurrency: 5, tenantConcurrency: 5 });
 
     await scheduler.enqueueStart(
-      "chat-demo-agent",
+      "chat-agent",
       { message: "test" },
       { tenantId: "tenant-a", sessionId: "s1" },
       "worker-app-run-1",
@@ -89,7 +93,7 @@ describe("apps/worker registry wiring", () => {
 
     const events = await listEventsSince(pool, "worker-app-run-1", 0);
     // Mirrors the expected event-type sequence already established in
-    // examples/chat-demo-agent/src/index.test.ts for this same graph reaching its HITL pause.
+    // packages/chat-agent/src/index.test.ts for this same graph reaching its HITL pause.
     const eventTypes = events.map((event) => event.type);
     expect(eventTypes).toContain("node_enter");
     expect(eventTypes).toContain("tool_call_start");

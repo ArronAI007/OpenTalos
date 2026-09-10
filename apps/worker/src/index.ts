@@ -6,7 +6,8 @@ import { PostgresCheckpointStore } from "@opentalos/postgres-checkpoint";
 import { PostgresEventBus } from "@opentalos/postgres-tracing";
 import { TenantStore } from "@opentalos/postgres-tenancy";
 import { GraphRegistry, Worker } from "@opentalos/scheduler";
-import { buildChatDemoAgentGraph, createChatDemoAgentToolRegistry } from "@opentalos/example-chat-demo-agent";
+import { buildChatAgentGraph, createChatAgentToolRegistry } from "@opentalos/chat-agent";
+import { createModelProviderFromEnv } from "@opentalos/model-providers";
 import { createTenantConcurrencyResolver } from "./tenant-quota.js";
 
 /** Builds and registers every graph this worker process knows how to run. Split out from the
@@ -14,9 +15,10 @@ import { createTenantConcurrencyResolver } from "./tenant-quota.js";
  * continuous polling loop or the health-check HTTP server. */
 export function buildWorkerRegistry(eventBus: EventBus): GraphRegistry {
   const registry = new GraphRegistry();
-  registry.register("chat-demo-agent", {
-    buildGraph: buildChatDemoAgentGraph,
-    buildDeps: () => ({ toolRegistry: createChatDemoAgentToolRegistry(), eventBus }),
+  const modelProvider = createModelProviderFromEnv();
+  registry.register("chat-agent", {
+    buildGraph: () => buildChatAgentGraph(modelProvider, createChatAgentToolRegistry()),
+    buildDeps: () => ({ toolRegistry: createChatAgentToolRegistry(), eventBus }),
   });
   return registry;
 }

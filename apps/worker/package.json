@@ -16,7 +16,8 @@
     "@opentalos/postgres-tenancy": "workspace:*",
     "@opentalos/postgres-tracing": "workspace:*",
     "@opentalos/scheduler": "workspace:*",
-    "@opentalos/example-chat-demo-agent": "workspace:*",
+    "@opentalos/chat-agent": "workspace:*",
+    "@opentalos/model-providers": "workspace:*",
     "pg": "^8.23.0"
   },
   "devDependencies": {

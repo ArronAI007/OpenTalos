@@ -87,7 +87,7 @@ export function App() {
   return (
     <main className="app-shell">
       <header className="app-header">
-        <span className="app-title">OpenTalos · chat-demo-agent</span>
+        <span className="app-title">OpenTalos · chat-agent</span>
         <button className="drawer-trigger" onClick={() => setDrawerOpen((value) => !value)}>
           📊 轨迹 ({timeline.events.length})
         </button>

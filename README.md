@@ -56,7 +56,7 @@ trace stream in over Server-Sent Events, approve a paused tool call, see the fin
 |---|---|
 | `apps/api` | Fastify REST API: `POST /runs`, `POST /runs/:id/resume`, `GET /runs/:id`, `GET /runs/:id/events` (SSE). |
 | `apps/web` | React + Vite chat UI, with a live trace drawer and human-approval controls. |
-| `examples/chat-demo-agent` | The demo graph served by `apps/api` — plans, calls a tool, pauses for human approval, replies. |
+| `packages/chat-agent` | The chat graph served by `apps/api` — calls a real model (with tools), pauses for human approval, replies. |
 | `examples/research-agent` | A second example graph showing the `multi-agent` supervisor pattern (researcher → writer). |
 
 ### 4. Platform Services Layer

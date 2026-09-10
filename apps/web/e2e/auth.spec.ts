@@ -79,7 +79,7 @@ test("two tenants with different quotas get differentiated concurrency in the sa
 
   // NOTE (deviation from the plan text): the plan started 3 runs per tenant and waited
   // 1000ms (bumpable to 2000-3000ms) expecting the quota=1 tenant to have claimed at most 1 run
-  // by then. Empirically, a single chat-demo-agent run reaches "paused" in ~100-140ms end to
+  // by then. Empirically, a single chat-agent run reaches "paused" in ~100-140ms end to
   // end — the same order of magnitude as the worker's 100ms poll interval — so with only 3 runs
   // *any* wait long enough to reliably observe a status change (needed to avoid false negatives
   // from polling too early) is also long enough for a quota=1 tenant to have serially finished
@@ -114,7 +114,7 @@ test("two tenants with different quotas get differentiated concurrency in the sa
       });
       // A run that was claimed and started executing has left "running"'s initial insert state
       // in some observable way; simplest reliable signal here is status !== "running" OR the
-      // run's checkpoint having moved past the entry node — for the chat-demo-agent graph, the
+      // run's checkpoint having moved past the entry node — for the chat-agent graph, the
       // fastest observable divergence within ~1s is whether the run is still exactly at its
       // initial state. Since every run uses the same trivial-ish graph and we only need a COUNT
       // comparison (not exact status), treat any run whose GET succeeds with status "paused" or

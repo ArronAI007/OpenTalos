@@ -7,7 +7,8 @@ import { PostgresCheckpointStore } from "@opentalos/postgres-checkpoint";
 import { PostgresEventBus, listEventsSince } from "@opentalos/postgres-tracing";
 import { GraphRegistry, Scheduler } from "@opentalos/scheduler";
 import { TenantStore } from "@opentalos/postgres-tenancy";
-import { buildChatDemoAgentGraph, createChatDemoAgentToolRegistry } from "@opentalos/example-chat-demo-agent";
+import { buildChatAgentGraph, createChatAgentToolRegistry } from "@opentalos/chat-agent";
+import { createMockProvider } from "@opentalos/model-providers";
 import { buildServer } from "../server.js";
 import { closeAllSseConnections, getActiveSseConnectionCountForTests } from "./runs.js";
 
@@ -56,9 +57,10 @@ beforeAll(async () => {
   checkpointStore = new PostgresCheckpointStore(pool);
   const eventBus = new PostgresEventBus(pool);
   const registry = new GraphRegistry();
-  registry.register("chat-demo-agent", {
-    buildGraph: buildChatDemoAgentGraph,
-    buildDeps: () => ({ toolRegistry: createChatDemoAgentToolRegistry(), eventBus }),
+  const modelProvider = createMockProvider();
+  registry.register("chat-agent", {
+    buildGraph: () => buildChatAgentGraph(modelProvider, createChatAgentToolRegistry()),
+    buildDeps: () => ({ toolRegistry: createChatAgentToolRegistry(), eventBus }),
   });
   const scheduler = new Scheduler(pool, registry, checkpointStore);
 
@@ -268,7 +270,7 @@ describe("POST /runs/:runId/resume", () => {
     const runId = randomUUID();
     await checkpointStore.save({
       runId,
-      graphId: "chat-demo-agent",
+      graphId: "chat-agent",
       tenantId: tenant.id,
       sessionId: "s7",
       nodeCursor: "confirm",
@@ -422,7 +424,7 @@ describe("GET /runs/:runId/events (real SSE connection lifecycle)", () => {
     const mockCheckpointStore = {
       load: async () => ({
         runId,
-        graphId: "chat-demo-agent",
+        graphId: "chat-agent",
         tenantId: tenant.id,
         sessionId,
         nodeCursor: "respond",

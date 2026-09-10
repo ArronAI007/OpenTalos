@@ -3,7 +3,8 @@ import { PostgresCheckpointStore } from "@opentalos/postgres-checkpoint";
 import { PostgresEventBus, listEventsSince } from "@opentalos/postgres-tracing";
 import { GraphRegistry, Scheduler } from "@opentalos/scheduler";
 import { TenantStore } from "@opentalos/postgres-tenancy";
-import { buildChatDemoAgentGraph, createChatDemoAgentToolRegistry } from "@opentalos/example-chat-demo-agent";
+import { buildChatAgentGraph, createChatAgentToolRegistry } from "@opentalos/chat-agent";
+import { createModelProviderFromEnv } from "@opentalos/model-providers";
 import { buildServer } from "./server.js";
 import { closeAllSseConnections } from "./routes/runs.js";
 
@@ -36,10 +37,11 @@ pool.on("error", (error) => {
 const checkpointStore = new PostgresCheckpointStore(pool);
 const eventBus = new PostgresEventBus(pool);
 const tenantStore = new TenantStore(pool);
+const modelProvider = createModelProviderFromEnv();
 const registry = new GraphRegistry();
-registry.register("chat-demo-agent", {
-  buildGraph: buildChatDemoAgentGraph,
-  buildDeps: () => ({ toolRegistry: createChatDemoAgentToolRegistry(), eventBus }),
+registry.register("chat-agent", {
+  buildGraph: () => buildChatAgentGraph(modelProvider, createChatAgentToolRegistry()),
+  buildDeps: () => ({ toolRegistry: createChatAgentToolRegistry(), eventBus }),
 });
 const scheduler = new Scheduler(pool, registry, checkpointStore);
 

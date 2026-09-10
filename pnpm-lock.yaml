@@ -143,9 +143,12 @@ importers:
 
   apps/api:
     dependencies:
-      '@opentalos/example-chat-demo-agent':
+      '@opentalos/chat-agent':
         specifier: workspace:*
-        version: link:../../examples/chat-demo-agent
+        version: link:../../packages/chat-agent
+      '@opentalos/model-providers':
+        specifier: workspace:*
+        version: link:../../packages/model-providers
       '@opentalos/postgres-checkpoint':
         specifier: workspace:*
         version: link:../../packages/postgres-checkpoint
@@ -211,12 +214,15 @@ importers:
 
   apps/worker:
     dependencies:
+      '@opentalos/chat-agent':
+        specifier: workspace:*
+        version: link:../../packages/chat-agent
       '@opentalos/core-types':
         specifier: workspace:*
         version: link:../../packages/core-types
-      '@opentalos/example-chat-demo-agent':
+      '@opentalos/model-providers':
         specifier: workspace:*
-        version: link:../../examples/chat-demo-agent
+        version: link:../../packages/model-providers
       '@opentalos/postgres-checkpoint':
         specifier: workspace:*
         version: link:../../packages/postgres-checkpoint
@@ -243,25 +249,6 @@ importers:
         specifier: ^12.1.0
         version: 12.1.0
 
-  examples/chat-demo-agent:
-    dependencies:
-      '@opentalos/core-graph':
-        specifier: workspace:*
-        version: link:../../packages/core-graph
-      '@opentalos/core-types':
-        specifier: workspace:*
-        version: link:../../packages/core-types
-      '@opentalos/tool-registry':
-        specifier: workspace:*
-        version: link:../../packages/tool-registry
-    devDependencies:
-      '@opentalos/checkpoint':
-        specifier: workspace:*
-        version: link:../../packages/checkpoint
-      '@opentalos/tracing':
-        specifier: workspace:*
-        version: link:../../packages/tracing
-
   examples/research-agent:
     dependencies:
       '@opentalos/checkpoint':
@@ -282,6 +269,28 @@ importers:
       '@opentalos/tracing':
         specifier: workspace:*
         version: link:../../packages/tracing
+
+  packages/chat-agent:
+    dependencies:
+      '@opentalos/core-graph':
+        specifier: workspace:*
+        version: link:../core-graph
+      '@opentalos/core-types':
+        specifier: workspace:*
+        version: link:../core-types
+      '@opentalos/sdk':
+        specifier: workspace:*
+        version: link:../sdk
+      '@opentalos/tool-registry':
+        specifier: workspace:*
+        version: link:../tool-registry
+    devDependencies:
+      '@opentalos/checkpoint':
+        specifier: workspace:*
+        version: link:../checkpoint
+      '@opentalos/tracing':
+        specifier: workspace:*
+        version: link:../tracing
 
   packages/checkpoint:
     dependencies:

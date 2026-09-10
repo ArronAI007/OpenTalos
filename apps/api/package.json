@@ -14,7 +14,8 @@
     "@opentalos/postgres-checkpoint": "workspace:*",
     "@opentalos/postgres-tracing": "workspace:*",
     "@opentalos/scheduler": "workspace:*",
-    "@opentalos/example-chat-demo-agent": "workspace:*",
+    "@opentalos/chat-agent": "workspace:*",
+    "@opentalos/model-providers": "workspace:*",
     "@opentalos/postgres-tenancy": "workspace:*",
     "fastify": "^5.0.0",
     "pg": "^8.23.0"

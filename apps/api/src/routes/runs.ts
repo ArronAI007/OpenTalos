@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { randomUUID } from "node:crypto";
 import type { ServerResponse } from "node:http";
-import type { ChatState } from "@opentalos/example-chat-demo-agent";
+import type { ChatState } from "@opentalos/chat-agent";
 import type { ServerDeps } from "../server.js";
 import { requireTenantId } from "../auth.js";
 
@@ -55,7 +55,7 @@ export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void 
     const runId = randomUUID();
     const initialState: ChatState = { message };
     await scheduler.enqueueStart(
-      "chat-demo-agent",
+      "chat-agent",
       initialState,
       { tenantId: requireTenantId(request), sessionId },
       runId,
