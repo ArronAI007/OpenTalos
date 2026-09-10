@@ -127,6 +127,9 @@ importers:
       '@opentalos/postgres-checkpoint':
         specifier: workspace:*
         version: link:../../packages/postgres-checkpoint
+      '@opentalos/postgres-tenancy':
+        specifier: workspace:*
+        version: link:../../packages/postgres-tenancy
       '@opentalos/postgres-tracing':
         specifier: workspace:*
         version: link:../../packages/postgres-tracing

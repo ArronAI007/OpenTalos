@@ -2,14 +2,13 @@ import { Pool } from "pg";
 import { PostgresCheckpointStore } from "@opentalos/postgres-checkpoint";
 import { PostgresEventBus, listEventsSince } from "@opentalos/postgres-tracing";
 import { GraphRegistry, Scheduler } from "@opentalos/scheduler";
+import { TenantStore } from "@opentalos/postgres-tenancy";
 import { buildChatDemoAgentGraph, createChatDemoAgentToolRegistry } from "@opentalos/example-chat-demo-agent";
 import { buildServer } from "./server.js";
 import { closeAllSseConnections } from "./routes/runs.js";
 
 /** Parses a positive-integer environment variable, throwing a clear error rather than
- * silently falling back to NaN (which would disable concurrency caps or break `.listen()`).
- * Mirrors apps/worker's parsePositiveInt — duplicated locally since there's no shared utils
- * package yet; a future refactor task can consolidate if a third copy comes up. */
+ * silently falling back to NaN (which would disable concurrency caps or break `.listen()`). */
 function parsePositiveInt(envVar: string, defaultValue: number): number {
   const raw = process.env[envVar];
   if (raw === undefined) return defaultValue;
@@ -18,6 +17,13 @@ function parsePositiveInt(envVar: string, defaultValue: number): number {
     throw new Error(`Invalid ${envVar}: "${raw}" is not a positive number`);
   }
   return parsed;
+}
+
+// No default: running with no admin protection at all would be a real security hole, not a
+// convenience worth silently falling back for — fail fast and loud instead.
+const adminApiKey = process.env.ADMIN_API_KEY;
+if (!adminApiKey) {
+  throw new Error("ADMIN_API_KEY environment variable is required");
 }
 
 const pool = new Pool({
@@ -29,6 +35,7 @@ pool.on("error", (error) => {
 
 const checkpointStore = new PostgresCheckpointStore(pool);
 const eventBus = new PostgresEventBus(pool);
+const tenantStore = new TenantStore(pool);
 const registry = new GraphRegistry();
 registry.register("chat-demo-agent", {
   buildGraph: buildChatDemoAgentGraph,
@@ -41,6 +48,8 @@ const app = buildServer({
   checkpointStore,
   scheduler,
   listEventsSince: (runId, afterId) => listEventsSince(pool, runId, afterId),
+  tenantStore,
+  adminApiKey,
 });
 
 const port = parsePositiveInt("PORT", 3001);

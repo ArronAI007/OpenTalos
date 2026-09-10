@@ -6,15 +6,22 @@ import type { FastifyInstance } from "fastify";
 import { PostgresCheckpointStore } from "@opentalos/postgres-checkpoint";
 import { PostgresEventBus, listEventsSince } from "@opentalos/postgres-tracing";
 import { GraphRegistry, Scheduler } from "@opentalos/scheduler";
+import { TenantStore } from "@opentalos/postgres-tenancy";
 import { buildChatDemoAgentGraph, createChatDemoAgentToolRegistry } from "@opentalos/example-chat-demo-agent";
 import { buildServer } from "../server.js";
 import { closeAllSseConnections, getActiveSseConnectionCountForTests } from "./runs.js";
-import { DEV_TENANT_ID } from "../dev-tenant.js";
 
 let container: StartedPostgreSqlContainer;
 let pool: Pool;
 let app: FastifyInstance;
 let checkpointStore: PostgresCheckpointStore;
+let tenantStore: TenantStore;
+let tenant: { id: string };
+let apiKey: string;
+
+function authHeaders() {
+  return { authorization: `Bearer ${apiKey}` };
+}
 
 beforeAll(async () => {
   container = await new PostgreSqlContainer("postgres:16-alpine").start();
@@ -36,6 +43,14 @@ beforeAll(async () => {
       id SERIAL PRIMARY KEY, run_id TEXT NOT NULL, tenant_id TEXT NOT NULL, session_id TEXT NOT NULL,
       type TEXT NOT NULL, payload JSONB, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+    CREATE TABLE tenants (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, status TEXT NOT NULL, max_concurrency INTEGER,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE TABLE api_keys (
+      id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, key_hash TEXT NOT NULL, key_prefix TEXT NOT NULL,
+      status TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), last_used_at TIMESTAMPTZ
+    );
   `);
 
   checkpointStore = new PostgresCheckpointStore(pool);
@@ -46,11 +61,19 @@ beforeAll(async () => {
     buildDeps: () => ({ toolRegistry: createChatDemoAgentToolRegistry(), eventBus }),
   });
   const scheduler = new Scheduler(pool, registry, checkpointStore);
+
+  tenantStore = new TenantStore(pool);
+  tenant = await tenantStore.createTenant("runs-test-tenant");
+  const created = await tenantStore.createApiKey(tenant.id);
+  apiKey = created.rawKey;
+
   app = buildServer({
     pool,
     checkpointStore,
     scheduler,
     listEventsSince: (runId, afterId) => listEventsSince(pool, runId, afterId),
+    tenantStore,
+    adminApiKey: "unused-in-this-file",
   });
 }, 120_000);
 
@@ -65,6 +88,7 @@ describe("POST /runs", () => {
     const res = await app.inject({
       method: "POST",
       url: "/runs?sessionId=s1",
+      headers: authHeaders(),
       payload: { message: "hello" },
     });
     expect(res.statusCode).toBe(201);
@@ -72,27 +96,76 @@ describe("POST /runs", () => {
     expect(body.runId).toBeTypeOf("string");
 
     const checkpoint = await checkpointStore.load(body.runId);
-    expect(checkpoint?.tenantId).toBe(DEV_TENANT_ID);
+    expect(checkpoint?.tenantId).toBe(tenant.id);
     expect(checkpoint?.sessionId).toBe("s1");
   });
 
   it("returns 400 when sessionId query param is missing", async () => {
-    const res = await app.inject({ method: "POST", url: "/runs", payload: { message: "hello" } });
+    const res = await app.inject({
+      method: "POST",
+      url: "/runs",
+      headers: authHeaders(),
+      payload: { message: "hello" },
+    });
     expect(res.statusCode).toBe(400);
   });
 
   it("returns 400 when message body field is missing", async () => {
-    const res = await app.inject({ method: "POST", url: "/runs?sessionId=s1", payload: {} });
+    const res = await app.inject({
+      method: "POST",
+      url: "/runs?sessionId=s1",
+      headers: authHeaders(),
+      payload: {},
+    });
     expect(res.statusCode).toBe(400);
+  });
+
+  it("returns 401 when no Authorization header is present", async () => {
+    const res = await app.inject({ method: "POST", url: "/runs?sessionId=noauth", payload: { message: "hi" } });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("returns 401 for an invalid API key", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/runs?sessionId=badauth",
+      headers: { authorization: "Bearer tk_not-a-real-key" },
+      payload: { message: "hi" },
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("returns 403 (not 401) for a key whose tenant has been disabled", async () => {
+    // Exercises the auth hook's "tenant_disabled" branch end-to-end through real HTTP, backed by
+    // a real Postgres-backed TenantStore — not just at the TenantStore.lookupApiKey unit level.
+    // This is the exact 401-vs-403 distinction the task's clarification note calls out: a
+    // genuinely valid credential whose tenant is disabled must be told plainly "you're blocked"
+    // (403), not lumped in with "this credential means nothing to us" (401).
+    const disabledTenant = await tenantStore.createTenant("disabled-tenant");
+    const { rawKey: disabledKey } = await tenantStore.createApiKey(disabledTenant.id);
+    await tenantStore.setTenantStatus(disabledTenant.id, "disabled");
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/runs?sessionId=disabled-test",
+      headers: { authorization: `Bearer ${disabledKey}` },
+      payload: { message: "hi" },
+    });
+    expect(res.statusCode).toBe(403);
   });
 });
 
 describe("GET /runs/:runId", () => {
   it("returns the current checkpoint status and state", async () => {
-    const start = await app.inject({ method: "POST", url: "/runs?sessionId=s2", payload: { message: "hi" } });
+    const start = await app.inject({
+      method: "POST",
+      url: "/runs?sessionId=s2",
+      headers: authHeaders(),
+      payload: { message: "hi" },
+    });
     const { runId } = start.json();
 
-    const res = await app.inject({ method: "GET", url: `/runs/${runId}?sessionId=s2` });
+    const res = await app.inject({ method: "GET", url: `/runs/${runId}?sessionId=s2`, headers: authHeaders() });
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.runId).toBe(runId);
@@ -100,27 +173,46 @@ describe("GET /runs/:runId", () => {
   });
 
   it("returns 404 for an unknown runId", async () => {
-    const res = await app.inject({ method: "GET", url: "/runs/does-not-exist?sessionId=s1" });
+    const res = await app.inject({
+      method: "GET",
+      url: "/runs/does-not-exist?sessionId=s1",
+      headers: authHeaders(),
+    });
     expect(res.statusCode).toBe(404);
   });
 
   it("returns 403 when sessionId does not match the run's session", async () => {
-    const start = await app.inject({ method: "POST", url: "/runs?sessionId=s3", payload: { message: "hi" } });
+    const start = await app.inject({
+      method: "POST",
+      url: "/runs?sessionId=s3",
+      headers: authHeaders(),
+      payload: { message: "hi" },
+    });
     const { runId } = start.json();
 
-    const res = await app.inject({ method: "GET", url: `/runs/${runId}?sessionId=someone-else` });
+    const res = await app.inject({
+      method: "GET",
+      url: `/runs/${runId}?sessionId=someone-else`,
+      headers: authHeaders(),
+    });
     expect(res.statusCode).toBe(403);
   });
 });
 
 describe("POST /runs/:runId/resume", () => {
   it("returns 409 when the run is not yet paused", async () => {
-    const start = await app.inject({ method: "POST", url: "/runs?sessionId=s4", payload: { message: "hi" } });
+    const start = await app.inject({
+      method: "POST",
+      url: "/runs?sessionId=s4",
+      headers: authHeaders(),
+      payload: { message: "hi" },
+    });
     const { runId } = start.json();
 
     const res = await app.inject({
       method: "POST",
       url: `/runs/${runId}/resume?sessionId=s4`,
+      headers: authHeaders(),
       payload: { approved: true },
     });
     expect(res.statusCode).toBe(409);
@@ -130,16 +222,27 @@ describe("POST /runs/:runId/resume", () => {
     const res = await app.inject({
       method: "POST",
       url: "/runs/does-not-exist/resume?sessionId=s1",
+      headers: authHeaders(),
       payload: { approved: true },
     });
     expect(res.statusCode).toBe(404);
   });
 
   it("returns 400 when approved body field is missing", async () => {
-    const start = await app.inject({ method: "POST", url: "/runs?sessionId=s5", payload: { message: "hi" } });
+    const start = await app.inject({
+      method: "POST",
+      url: "/runs?sessionId=s5",
+      headers: authHeaders(),
+      payload: { message: "hi" },
+    });
     const { runId } = start.json();
 
-    const res = await app.inject({ method: "POST", url: `/runs/${runId}/resume?sessionId=s5`, payload: {} });
+    const res = await app.inject({
+      method: "POST",
+      url: `/runs/${runId}/resume?sessionId=s5`,
+      headers: authHeaders(),
+      payload: {},
+    });
     expect(res.statusCode).toBe(400);
   });
 
@@ -150,12 +253,14 @@ describe("POST /runs/:runId/resume", () => {
     // /resume on it always 409s before the tenant check is ever reached. To actually exercise
     // the tenant-mismatch 403 path through the HTTP layer, the checkpoint has to already be
     // "paused" when /resume is called, so it's written directly here rather than produced by a
-    // real graph run (no Worker is wired into these tests).
+    // real graph run (no Worker is wired into these tests). This test itself only exercises the
+    // sessionId mismatch — tenantId mismatch is covered by admin.test.ts and the tenant-disabled
+    // auth tests.
     const runId = randomUUID();
     await checkpointStore.save({
       runId,
       graphId: "chat-demo-agent",
-      tenantId: DEV_TENANT_ID,
+      tenantId: tenant.id,
       sessionId: "s7",
       nodeCursor: "confirm",
       state: { message: "hi" },
@@ -167,6 +272,7 @@ describe("POST /runs/:runId/resume", () => {
     const res = await app.inject({
       method: "POST",
       url: `/runs/${runId}/resume?sessionId=someone-else`,
+      headers: authHeaders(),
       payload: { approved: true },
     });
     expect(res.statusCode).toBe(403);
@@ -175,14 +281,27 @@ describe("POST /runs/:runId/resume", () => {
 
 describe("GET /runs/:runId/events", () => {
   it("returns 404 for an unknown runId before upgrading to SSE", async () => {
-    const res = await app.inject({ method: "GET", url: "/runs/does-not-exist/events?sessionId=s1" });
+    const res = await app.inject({
+      method: "GET",
+      url: "/runs/does-not-exist/events?sessionId=s1",
+      headers: authHeaders(),
+    });
     expect(res.statusCode).toBe(404);
   });
 
   it("returns 403 when sessionId does not match", async () => {
-    const start = await app.inject({ method: "POST", url: "/runs?sessionId=s6", payload: { message: "hi" } });
+    const start = await app.inject({
+      method: "POST",
+      url: "/runs?sessionId=s6",
+      headers: authHeaders(),
+      payload: { message: "hi" },
+    });
     const { runId } = start.json();
-    const res = await app.inject({ method: "GET", url: `/runs/${runId}/events?sessionId=wrong` });
+    const res = await app.inject({
+      method: "GET",
+      url: `/runs/${runId}/events?sessionId=wrong`,
+      headers: authHeaders(),
+    });
     expect(res.statusCode).toBe(403);
   });
 });
@@ -208,12 +327,17 @@ describe("GET /runs/:runId/events (real SSE connection lifecycle)", () => {
     // tenant-mismatch test above), so this run's status stays "running" forever: the SSE stream
     // will not reach its own "done" branch on its own, which is exactly what's needed to prove
     // closeAllSseConnections() is what ended it, not the run finishing naturally.
-    const start = await app.inject({ method: "POST", url: "/runs?sessionId=sse1", payload: { message: "hi" } });
+    const start = await app.inject({
+      method: "POST",
+      url: "/runs?sessionId=sse1",
+      headers: authHeaders(),
+      payload: { message: "hi" },
+    });
     const { runId } = start.json();
 
     const countBefore = getActiveSseConnectionCountForTests();
 
-    const response = await fetch(`${baseUrl}/runs/${runId}/events?sessionId=sse1`);
+    const response = await fetch(`${baseUrl}/runs/${runId}/events?sessionId=sse1`, { headers: authHeaders() });
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("text/event-stream");
     expect(response.body).not.toBeNull();
@@ -247,13 +371,21 @@ describe("GET /runs/:runId/events (real SSE connection lifecycle)", () => {
   }, 10_000);
 
   it("unregisters the connection when the client disconnects", async () => {
-    const start = await app.inject({ method: "POST", url: "/runs?sessionId=sse2", payload: { message: "hi" } });
+    const start = await app.inject({
+      method: "POST",
+      url: "/runs?sessionId=sse2",
+      headers: authHeaders(),
+      payload: { message: "hi" },
+    });
     const { runId } = start.json();
 
     const countBefore = getActiveSseConnectionCountForTests();
 
     const controller = new AbortController();
-    const response = await fetch(`${baseUrl}/runs/${runId}/events?sessionId=sse2`, { signal: controller.signal });
+    const response = await fetch(`${baseUrl}/runs/${runId}/events?sessionId=sse2`, {
+      headers: authHeaders(),
+      signal: controller.signal,
+    });
     expect(response.status).toBe(200);
     expect(getActiveSseConnectionCountForTests()).toBe(countBefore + 1);
 
@@ -282,7 +414,7 @@ describe("GET /runs/:runId/events (real SSE connection lifecycle)", () => {
       load: async () => ({
         runId,
         graphId: "chat-demo-agent",
-        tenantId: DEV_TENANT_ID,
+        tenantId: tenant.id,
         sessionId,
         nodeCursor: "respond",
         state: {},
@@ -296,7 +428,7 @@ describe("GET /runs/:runId/events (real SSE connection lifecycle)", () => {
       id: 1,
       type: "node_exit",
       runId,
-      tenantId: DEV_TENANT_ID,
+      tenantId: tenant.id,
       sessionId,
       timestamp: new Date().toISOString(),
       payload: undefined,
@@ -315,6 +447,8 @@ describe("GET /runs/:runId/events (real SSE connection lifecycle)", () => {
       checkpointStore: mockCheckpointStore,
       scheduler: {} as unknown as Scheduler,
       listEventsSince: mockListEventsSince,
+      tenantStore,
+      adminApiKey: "unused-in-this-file",
     });
     await testApp.listen({ port: 0, host: "127.0.0.1" });
     const address = testApp.server.address();
@@ -324,7 +458,9 @@ describe("GET /runs/:runId/events (real SSE connection lifecycle)", () => {
     const baseUrl = `http://127.0.0.1:${address.port}`;
 
     try {
-      const response = await fetch(`${baseUrl}/runs/${runId}/events?sessionId=${sessionId}`);
+      const response = await fetch(`${baseUrl}/runs/${runId}/events?sessionId=${sessionId}`, {
+        headers: authHeaders(),
+      });
       expect(response.status).toBe(200);
 
       const reader = response.body!.getReader();

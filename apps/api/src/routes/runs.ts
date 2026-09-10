@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { ServerResponse } from "node:http";
 import type { ChatState } from "@opentalos/example-chat-demo-agent";
 import type { ServerDeps } from "../server.js";
-import { DEV_TENANT_ID } from "../dev-tenant.js";
+import { requireTenantId } from "../auth.js";
 
 /** Every currently-open SSE response, tracked so graceful shutdown can end them proactively.
  * Without this, a hijacked SSE response stays open until its run finishes or the client
@@ -54,7 +54,12 @@ export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void 
 
     const runId = randomUUID();
     const initialState: ChatState = { message };
-    await scheduler.enqueueStart("chat-demo-agent", initialState, { tenantId: DEV_TENANT_ID, sessionId }, runId);
+    await scheduler.enqueueStart(
+      "chat-demo-agent",
+      initialState,
+      { tenantId: requireTenantId(request), sessionId },
+      runId,
+    );
     return reply.code(201).send({ runId });
   });
 
@@ -67,7 +72,7 @@ export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void 
     if (!checkpoint) {
       return reply.code(404).send({ error: `Run "${request.params.runId}" not found` });
     }
-    if (checkpoint.tenantId !== DEV_TENANT_ID || checkpoint.sessionId !== sessionId) {
+    if (checkpoint.tenantId !== requireTenantId(request) || checkpoint.sessionId !== sessionId) {
       return reply.code(403).send({ error: "Run belongs to a different session" });
     }
     return reply.send({ runId: checkpoint.runId, status: checkpoint.status, state: checkpoint.state });
@@ -88,7 +93,7 @@ export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void 
         await scheduler.enqueueResume(
           request.params.runId,
           { type: "approval", approved },
-          { tenantId: DEV_TENANT_ID, sessionId },
+          { tenantId: requireTenantId(request), sessionId },
         );
       } catch (error) {
         const messageText = error instanceof Error ? error.message : String(error);
@@ -117,7 +122,7 @@ export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void 
     if (!checkpoint) {
       return reply.code(404).send({ error: `Run "${runId}" not found` });
     }
-    if (checkpoint.tenantId !== DEV_TENANT_ID || checkpoint.sessionId !== sessionId) {
+    if (checkpoint.tenantId !== requireTenantId(request) || checkpoint.sessionId !== sessionId) {
       return reply.code(403).send({ error: "Run belongs to a different session" });
     }
 
