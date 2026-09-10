@@ -143,11 +143,20 @@ export class Worker {
       throw new Error(`No checkpoint found for run "${task.runId}"`);
     }
 
-    if (task.kind === "start") {
-      await engine.run(checkpoint);
+    // Dispatch on the CHECKPOINT's actual status, not blindly on task.kind: a "resume" task
+    // whose first attempt already replayed past the paused node (advancing the checkpoint to
+    // "running") must continue via run(), not resumeFromCheckpoint() again — the latter requires
+    // status "paused" and would otherwise throw "not in a resumable paused state" on every retry,
+    // destroying the real error and getting the run permanently stuck. See Fix 1 in the
+    // post-review notes for the full failure mode.
+    if (checkpoint.status === "done") {
+      return; // Already complete (e.g. a prior attempt finished after this attempt's timeout raced it); nothing to do.
+    }
+    if (task.kind === "resume" && checkpoint.status === "paused") {
+      await engine.resumeFromCheckpoint(checkpoint, task.resumeValue as NodeResumeValue);
       return;
     }
-    await engine.resumeFromCheckpoint(checkpoint, task.resumeValue as NodeResumeValue);
+    await engine.run(checkpoint);
   }
 }
 

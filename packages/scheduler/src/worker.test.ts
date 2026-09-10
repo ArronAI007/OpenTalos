@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { EngineDeps, NodeFn } from "@opentalos/core-graph";
 import { shallowMergeReducer, type GraphDefinition } from "@opentalos/core-graph";
 import { PostgresCheckpointStore } from "@opentalos/postgres-checkpoint";
@@ -28,6 +28,12 @@ function makeDeps(): Omit<EngineDeps, "checkpointStore"> {
 }
 
 let executionCount = 0;
+let flakyNodeHasFailedOnce = false;
+
+interface ApprovalCounterState {
+  count: number;
+  approved: boolean;
+}
 
 beforeAll(async () => {
   testDb = await startTestDatabase();
@@ -75,6 +81,30 @@ beforeAll(async () => {
   };
   registry.register("hangs-forever", { buildGraph: () => hangingGraph, buildDeps: makeDeps });
 
+  // Two-node graph: "ask" pauses for HITL approval; "flaky" (the node reached only AFTER a
+  // resume replays "ask") throws on its first invocation and succeeds on every subsequent one.
+  // Used by the Fix 1 regression test to prove a resume-task retry after the checkpoint has
+  // advanced past the pause dispatches on checkpoint.status, not blindly on task.kind.
+  const askApproval: NodeFn<ApprovalCounterState> = async function* (state) {
+    const resume = yield { type: "awaiting_approval", reason: "please approve" };
+    return { approved: resume?.type === "approval" ? resume.approved : false };
+  };
+  const flakyNode: NodeFn<ApprovalCounterState> = async function* (state) {
+    if (!flakyNodeHasFailedOnce) {
+      flakyNodeHasFailedOnce = true;
+      throw new Error("boom-once");
+    }
+    return { count: state.count + 1 };
+  };
+  const resumeThenFlakyGraph: GraphDefinition<ApprovalCounterState> = {
+    id: "resume-then-flaky",
+    entryNode: "ask",
+    nodes: { ask: askApproval, flaky: flakyNode },
+    edges: [{ from: "ask", to: "flaky" }],
+    reducer: shallowMergeReducer,
+  };
+  registry.register("resume-then-flaky", { buildGraph: () => resumeThenFlakyGraph, buildDeps: makeDeps });
+
   scheduler = new Scheduler(testDb.pool, registry, checkpointStore);
 }, 120_000);
 
@@ -84,6 +114,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   executionCount = 0;
+  flakyNodeHasFailedOnce = false;
   // Each test enqueues and polls against the same shared testDb/tasks table; without clearing
   // it between tests, a prior test's un-claimed "queued" rows (e.g. tenant-cap's leftover 3
   // from the tenant-concurrency test) would compete for a later test's concurrency budget and
@@ -192,5 +223,53 @@ describe("Worker", () => {
     const rows = await db.select().from(tasks).where(eq(tasks.runId, "worker-timeout-run"));
     expect(rows[0].status).toBe("queued");
     expect(rows[0].error).toContain("timed out");
+  });
+
+  it("retries a resume task whose retry-worthy failure happens AFTER the paused node has already advanced (Fix 1)", async () => {
+    await scheduler.enqueueStart(
+      "resume-then-flaky",
+      { count: 0, approved: false },
+      { tenantId: "tenant-fix1", sessionId: "s1" },
+      "fix1-run",
+      { maxAttempts: 3 },
+    );
+    const worker = new Worker(testDb.pool, registry, checkpointStore, { globalConcurrency: 10, tenantConcurrency: 10 });
+
+    // Reaches the HITL pause at "ask".
+    await worker.pollOnce();
+    let checkpoint = await checkpointStore.load("fix1-run");
+    expect(checkpoint?.status).toBe("paused");
+
+    // Resume: replays "ask" (auto-answering with the approval), advances to "flaky", which
+    // throws on this first invocation. The checkpoint has already advanced past the pause
+    // (status "running", nodeCursor "flaky") by the time the error propagates.
+    await scheduler.enqueueResume("fix1-run", { type: "approval", approved: true });
+    await worker.pollOnce();
+
+    // enqueueResume inserts a NEW task row (kind "resume") rather than updating the original
+    // "start" row, so filter to the resume row specifically.
+    let rows = await db.select().from(tasks).where(and(eq(tasks.runId, "fix1-run"), eq(tasks.kind, "resume")));
+    expect(rows[0].status).toBe("queued");
+    expect(rows[0].error).toContain("boom-once");
+    checkpoint = await checkpointStore.load("fix1-run");
+    expect(checkpoint?.status).toBe("running");
+
+    // Simulate the backoff period elapsing (same pattern as the retry-backoff test above).
+    await db
+      .update(tasks)
+      .set({ availableAt: new Date(Date.now() - 5_000) })
+      .where(and(eq(tasks.runId, "fix1-run"), eq(tasks.kind, "resume")));
+    await worker.pollOnce();
+
+    // The retry must dispatch on the checkpoint's actual ("running") status rather than blindly
+    // re-calling resumeFromCheckpoint (which would throw "not in a resumable paused state" and
+    // destroy the real "boom-once" error) — proving the fix. The task completes successfully.
+    // (The stale `error` field left over from the earlier failed attempt is addressed separately
+    // by Fix 4, which extends this same assertion block with an `error: null` check.)
+    rows = await db.select().from(tasks).where(and(eq(tasks.runId, "fix1-run"), eq(tasks.kind, "resume")));
+    expect(rows[0].status).toBe("done");
+    checkpoint = await checkpointStore.load("fix1-run");
+    expect(checkpoint?.status).toBe("done");
+    expect(checkpoint?.state).toEqual({ count: 1, approved: true });
   });
 });
