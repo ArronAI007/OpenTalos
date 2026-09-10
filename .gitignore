@@ -5,6 +5,7 @@ dist
 .claude/worktrees
 /docs
 .superpowers
+/CLAUDE.md
 
 apps/web/e2e/screenshots
 apps/web/playwright-report
