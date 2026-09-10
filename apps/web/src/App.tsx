@@ -13,6 +13,7 @@ export function App() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [error, setError] = useState<string>();
   const timeline = useRunEvents(runId);
+  const isRunInFlight = runId !== undefined && (timeline.status === "running" || timeline.status === "paused");
 
   useEffect(() => {
     const reply = timeline.finalState?.reply;
@@ -55,7 +56,7 @@ export function App() {
           📊 轨迹 ({timeline.events.length})
         </button>
       </header>
-      <ChatPanel messages={messages} onSend={handleSend} error={error} />
+      <ChatPanel messages={messages} onSend={handleSend} error={error} disabled={isRunInFlight} />
       <TraceDrawer
         open={drawerOpen}
         timeline={timeline}

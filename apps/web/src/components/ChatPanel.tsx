@@ -5,13 +5,15 @@ interface ChatPanelProps {
   messages: ChatMessage[];
   onSend: (text: string) => void;
   error?: string;
+  disabled?: boolean;
 }
 
-export function ChatPanel({ messages, onSend, error }: ChatPanelProps) {
+export function ChatPanel({ messages, onSend, error, disabled }: ChatPanelProps) {
   const [draft, setDraft] = useState("");
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
+    if (disabled) return;
     const trimmed = draft.trim();
     if (!trimmed) return;
     onSend(trimmed);
@@ -34,8 +36,9 @@ export function ChatPanel({ messages, onSend, error }: ChatPanelProps) {
           placeholder="输入消息…"
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
+          disabled={disabled}
         />
-        <button className="chat-send" type="submit">
+        <button className="chat-send" type="submit" disabled={disabled}>
           发送
         </button>
       </form>
