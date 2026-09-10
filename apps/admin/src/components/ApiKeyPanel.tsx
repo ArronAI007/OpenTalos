@@ -1,17 +1,31 @@
 import { useEffect, useState } from "react";
-import { createApiKey, listApiKeys, revokeApiKey } from "../api.js";
+import { AdminAuthError, createApiKey, listApiKeys, revokeApiKey } from "../api.js";
 import type { ApiKeyRecord } from "../types.js";
 
 interface ApiKeyPanelProps {
   tenantId: string;
+  onAuthError: () => void;
 }
 
-export function ApiKeyPanel({ tenantId }: ApiKeyPanelProps) {
+export function ApiKeyPanel({ tenantId, onAuthError }: ApiKeyPanelProps) {
   const [keys, setKeys] = useState<ApiKeyRecord[]>([]);
   const [newRawKey, setNewRawKey] = useState<string>();
+  const [error, setError] = useState<string>();
+
+  function handleError(err: unknown) {
+    if (err instanceof AdminAuthError) {
+      onAuthError();
+      return;
+    }
+    setError(err instanceof Error ? err.message : "操作失败，请重试");
+  }
 
   async function refresh() {
-    setKeys(await listApiKeys(tenantId));
+    try {
+      setKeys(await listApiKeys(tenantId));
+    } catch (err) {
+      handleError(err);
+    }
   }
 
   useEffect(() => {
@@ -19,18 +33,29 @@ export function ApiKeyPanel({ tenantId }: ApiKeyPanelProps) {
   }, [tenantId]);
 
   async function handleCreate() {
-    const { rawKey } = await createApiKey(tenantId);
-    setNewRawKey(rawKey);
-    await refresh();
+    setError(undefined);
+    try {
+      const { rawKey } = await createApiKey(tenantId);
+      setNewRawKey(rawKey);
+      await refresh();
+    } catch (err) {
+      handleError(err);
+    }
   }
 
   async function handleRevoke(keyId: string) {
-    await revokeApiKey(keyId);
-    await refresh();
+    setError(undefined);
+    try {
+      await revokeApiKey(keyId);
+      await refresh();
+    } catch (err) {
+      handleError(err);
+    }
   }
 
   return (
     <div className="api-key-panel">
+      {error && <p className="error-banner">{error}</p>}
       <button className="primary-button" onClick={handleCreate}>
         + 新建 API Key
       </button>

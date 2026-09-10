@@ -145,3 +145,13 @@ body {
   font-size: 12px;
   cursor: pointer;
 }
+
+.error-banner {
+  background: var(--color-warn-bg);
+  border: 1px solid var(--color-danger-border);
+  color: var(--color-danger-text);
+  border-radius: var(--radius-md);
+  padding: var(--space-sm) var(--space-md);
+  margin-bottom: var(--space-md);
+  font-size: 13px;
+}

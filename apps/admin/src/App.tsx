@@ -8,6 +8,10 @@ import "./styles/app.css";
 export function App() {
   const [hasKey, setHasKey] = useState(() => getAdminKey() !== null);
 
+  function handleAuthError() {
+    setHasKey(false);
+  }
+
   if (!hasKey) {
     return (
       <main className="admin-shell">
@@ -21,7 +25,7 @@ export function App() {
       <header className="admin-header">
         <span className="admin-title">OpenTalos · 平台管理</span>
       </header>
-      <TenantList />
+      <TenantList onAuthError={handleAuthError} />
     </main>
   );
 }

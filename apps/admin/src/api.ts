@@ -1,3 +1,5 @@
+import type { ApiKeyRecord, TenantRecord } from "./types.js";
+
 const ADMIN_KEY_STORAGE_KEY = "opentalos-admin-key";
 
 export function getAdminKey(): string | null {
@@ -32,13 +34,13 @@ async function adminFetch(path: string, init: RequestInit = {}): Promise<Respons
   return res;
 }
 
-export async function listTenants(): Promise<import("./types.js").TenantRecord[]> {
+export async function listTenants(): Promise<TenantRecord[]> {
   const res = await adminFetch("/tenants");
   if (!res.ok) throw new Error(`Failed to list tenants: ${res.status}`);
   return res.json();
 }
 
-export async function createTenant(name: string, maxConcurrency?: number): Promise<import("./types.js").TenantRecord> {
+export async function createTenant(name: string, maxConcurrency?: number): Promise<TenantRecord> {
   const res = await adminFetch("/tenants", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -51,7 +53,7 @@ export async function createTenant(name: string, maxConcurrency?: number): Promi
 export async function updateTenant(
   id: string,
   patch: { status?: "active" | "disabled"; maxConcurrency?: number | null },
-): Promise<import("./types.js").TenantRecord> {
+): Promise<TenantRecord> {
   const res = await adminFetch(`/tenants/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
@@ -61,7 +63,7 @@ export async function updateTenant(
   return res.json();
 }
 
-export async function listApiKeys(tenantId: string): Promise<import("./types.js").ApiKeyRecord[]> {
+export async function listApiKeys(tenantId: string): Promise<ApiKeyRecord[]> {
   const res = await adminFetch(`/tenants/${tenantId}/api-keys`);
   if (!res.ok) throw new Error(`Failed to list API keys: ${res.status}`);
   return res.json();

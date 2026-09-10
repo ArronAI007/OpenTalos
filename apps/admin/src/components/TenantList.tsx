@@ -1,16 +1,33 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { createTenant, listTenants, updateTenant } from "../api.js";
+import { AdminAuthError, createTenant, listTenants, updateTenant } from "../api.js";
 import type { TenantRecord } from "../types.js";
 import { ApiKeyPanel } from "./ApiKeyPanel.js";
 
-export function TenantList() {
+interface TenantListProps {
+  onAuthError: () => void;
+}
+
+export function TenantList({ onAuthError }: TenantListProps) {
   const [tenants, setTenants] = useState<TenantRecord[]>([]);
   const [expandedId, setExpandedId] = useState<string>();
   const [newName, setNewName] = useState("");
   const [newQuota, setNewQuota] = useState("");
+  const [error, setError] = useState<string>();
+
+  function handleError(err: unknown) {
+    if (err instanceof AdminAuthError) {
+      onAuthError();
+      return;
+    }
+    setError(err instanceof Error ? err.message : "操作失败，请重试");
+  }
 
   async function refresh() {
-    setTenants(await listTenants());
+    try {
+      setTenants(await listTenants());
+    } catch (err) {
+      handleError(err);
+    }
   }
 
   useEffect(() => {
@@ -21,19 +38,30 @@ export function TenantList() {
     event.preventDefault();
     if (!newName.trim()) return;
     const maxConcurrency = newQuota.trim() ? Number(newQuota) : undefined;
-    await createTenant(newName.trim(), maxConcurrency);
-    setNewName("");
-    setNewQuota("");
-    await refresh();
+    setError(undefined);
+    try {
+      await createTenant(newName.trim(), maxConcurrency);
+      setNewName("");
+      setNewQuota("");
+      await refresh();
+    } catch (err) {
+      handleError(err);
+    }
   }
 
   async function handleToggleStatus(tenant: TenantRecord) {
-    await updateTenant(tenant.id, { status: tenant.status === "active" ? "disabled" : "active" });
-    await refresh();
+    setError(undefined);
+    try {
+      await updateTenant(tenant.id, { status: tenant.status === "active" ? "disabled" : "active" });
+      await refresh();
+    } catch (err) {
+      handleError(err);
+    }
   }
 
   return (
     <div>
+      {error && <p className="error-banner">{error}</p>}
       <form className="create-tenant-form" onSubmit={handleCreate}>
         <input placeholder="租户名称" value={newName} onChange={(event) => setNewName(event.target.value)} />
         <input
@@ -68,7 +96,7 @@ export function TenantList() {
                 >
                   {tenant.status === "active" ? "禁用此租户" : "启用此租户"}
                 </button>
-                <ApiKeyPanel tenantId={tenant.id} />
+                <ApiKeyPanel tenantId={tenant.id} onAuthError={onAuthError} />
               </div>
             )}
           </li>
