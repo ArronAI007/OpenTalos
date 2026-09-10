@@ -125,6 +125,15 @@ describe("POST /runs", () => {
     expect(res.statusCode).toBe(401);
   });
 
+  it("authenticates via ?apiKey= query param when no Authorization header is present", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: `/runs?sessionId=queryparam-auth&apiKey=${apiKey}`,
+      payload: { message: "hi" },
+    });
+    expect(res.statusCode).not.toBe(401);
+  });
+
   it("returns 401 for an invalid API key", async () => {
     const res = await app.inject({
       method: "POST",

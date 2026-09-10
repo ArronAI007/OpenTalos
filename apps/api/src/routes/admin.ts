@@ -24,7 +24,10 @@ export function registerAdminRoutes(app: FastifyInstance, deps: AdminRouteDeps):
       return reply.code(400).send({ error: "name body field is required and must be a non-empty string" });
     }
     const maxConcurrency = request.body?.maxConcurrency;
-    if (maxConcurrency !== undefined && (typeof maxConcurrency !== "number" || maxConcurrency <= 0)) {
+    if (
+      maxConcurrency !== undefined &&
+      (typeof maxConcurrency !== "number" || !Number.isFinite(maxConcurrency) || maxConcurrency <= 0)
+    ) {
       return reply.code(400).send({ error: "maxConcurrency must be a positive number if provided" });
     }
     const tenant = await tenantStore.createTenant(name, maxConcurrency);
@@ -50,7 +53,10 @@ export function registerAdminRoutes(app: FastifyInstance, deps: AdminRouteDeps):
 
     if (request.body?.maxConcurrency !== undefined) {
       const maxConcurrency = request.body.maxConcurrency;
-      if (maxConcurrency !== null && (typeof maxConcurrency !== "number" || maxConcurrency <= 0)) {
+      if (
+        maxConcurrency !== null &&
+        (typeof maxConcurrency !== "number" || !Number.isFinite(maxConcurrency) || maxConcurrency <= 0)
+      ) {
         return reply.code(400).send({ error: "maxConcurrency must be a positive number or null" });
       }
       await tenantStore.setTenantQuota(request.params.id, maxConcurrency);

@@ -1,4 +1,5 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
+import { timingSafeEqual } from "node:crypto";
 import type { TenantStore } from "@opentalos/postgres-tenancy";
 
 export interface AuthenticatedTenant {
@@ -62,6 +63,13 @@ export function requireTenantId(request: FastifyRequest): string {
   return request.tenant.tenantId;
 }
 
+function safeEqual(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
+}
+
 /** Protects /admin/* routes with a single bootstrap secret (the ADMIN_API_KEY environment
  * variable) — a separate, independent check from tenant API keys; a tenant's own key can never
  * satisfy this hook. */
@@ -69,7 +77,7 @@ export function createAdminAuthHook(adminApiKey: string) {
   return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     const authHeader = request.headers.authorization;
     const provided = authHeader?.startsWith("Bearer ") ? authHeader.slice("Bearer ".length) : undefined;
-    if (!provided || provided !== adminApiKey) {
+    if (!provided || !safeEqual(provided, adminApiKey)) {
       return reply.code(401).send({ error: "Missing or invalid admin API key" });
     }
   };

@@ -121,6 +121,21 @@ describe("POST /admin/tenants", () => {
     const res = await app.inject({ method: "POST", url: "/admin/tenants", headers: adminHeaders(), payload: {} });
     expect(res.statusCode).toBe(400);
   });
+
+  it("returns 400 for a non-finite maxConcurrency instead of leaking a DB error", async () => {
+    // Sent as raw JSON text (not a JS object payload) because `Infinity` does not survive
+    // JSON.stringify (it becomes `null`) — the real-world exploit is a raw JSON numeral like
+    // `1e400`, which JSON.parse turns directly into Infinity server-side without ever round
+    // tripping through JSON.stringify. Using a JS object here would falsely "pass" via the
+    // pre-existing null check instead of actually exercising the Number.isFinite guard.
+    const res = await app.inject({
+      method: "POST",
+      url: "/admin/tenants",
+      headers: { ...adminHeaders(), "content-type": "application/json" },
+      payload: '{"name":"infinity-test","maxConcurrency":1e400}',
+    });
+    expect(res.statusCode).toBe(400);
+  });
 });
 
 describe("GET /admin/tenants", () => {
@@ -156,6 +171,21 @@ describe("PATCH /admin/tenants/:id", () => {
       payload: { status: "disabled" },
     });
     expect(res.statusCode).toBe(404);
+  });
+
+  it("returns 400 for a non-finite maxConcurrency on update", async () => {
+    // Raw JSON text for the same reason as the POST /admin/tenants version of this test above:
+    // `Infinity` does not survive JSON.stringify (it becomes `null`, which is a legitimate
+    // "clear the quota" value for PATCH), so a JS object payload would falsely pass this test
+    // without ever exercising the Number.isFinite guard.
+    const tenant = await tenantStore.createTenant("patch-infinity-test");
+    const res = await app.inject({
+      method: "PATCH",
+      url: `/admin/tenants/${tenant.id}`,
+      headers: { ...adminHeaders(), "content-type": "application/json" },
+      payload: '{"maxConcurrency":1e400}',
+    });
+    expect(res.statusCode).toBe(400);
   });
 });
 
