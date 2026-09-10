@@ -11,6 +11,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@opentalos/core-types": "workspace:*"
+    "@anthropic-ai/sdk": "^0.124.0",
+    "@opentalos/core-types": "workspace:*",
+    "openai": "^7.12.1"
   }
 }

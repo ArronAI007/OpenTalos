@@ -5,3 +5,5 @@ export {
   type OpenAICompatibleProviderOptions,
 } from "./openai-compatible.js";
 export { createOllamaProvider, type OllamaFetchLike, type OllamaProviderOptions } from "./ollama.js";
+export { createModelProviderFromEnv } from "./factory.js";
+export { createMockProvider } from "./mock.js";
