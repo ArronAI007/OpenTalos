@@ -97,3 +97,43 @@ test("closed trace drawer's buttons are not keyboard-reachable, but open ones ar
   await drawerClose.focus();
   await expect(drawerClose).toBeFocused();
 });
+
+test("double-clicking 批准 does not enqueue a duplicate resume request (Fix 4)", async ({ page }) => {
+  // Regression test: timeline.status stays "paused" for up to ~500ms after the first click
+  // (until the next SSE poll cycle reports the status change), so two clicks fired in the same
+  // JS tick -- before React has re-rendered the button as disabled -- could both call onApprove
+  // and enqueue two "resume" tasks for the same run. The fix guards the click handler itself
+  // (`if (hasResponded) return`) rather than relying solely on the disabled attribute, since the
+  // DOM hasn't necessarily been updated yet at the moment of a same-tick double click.
+  await page.goto("/");
+
+  const chatInput = page.getByPlaceholder("输入消息…");
+  const sendButton = page.getByRole("button", { name: "发送" });
+  await chatInput.fill("今天美元兑人民币汇率是多少？");
+  await sendButton.click();
+
+  await page.getByRole("button", { name: /轨迹/ }).click();
+  const approveButton = page.getByRole("button", { name: "✓ 批准" });
+  await expect(approveButton).toBeVisible({ timeout: 10_000 });
+
+  let resumeRequestCount = 0;
+  page.on("request", (request) => {
+    if (request.method() === "POST" && request.url().includes("/resume")) {
+      resumeRequestCount += 1;
+    }
+  });
+
+  // Two synchronous .click() calls within a single page.evaluate() dispatch both click events in
+  // the same JS turn, before any React re-render can flip the `disabled` attribute -- this is
+  // what actually races the click handler's own guard, unlike two separate Playwright round trips
+  // (which give React ample time to disable the button between them).
+  await approveButton.evaluate((el: HTMLButtonElement) => {
+    el.click();
+    el.click();
+  });
+
+  await expect(approveButton).toBeDisabled();
+  await expect(page.getByText(/根据查询结果/)).toBeVisible({ timeout: 10_000 });
+
+  expect(resumeRequestCount).toBe(1);
+});

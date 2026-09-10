@@ -379,7 +379,7 @@ body {
     filter var(--duration-fast) ease;
 }
 
-.approve-button:hover {
+.approve-button:hover:not(:disabled) {
   filter: brightness(1.08);
   box-shadow: var(--shadow-hover);
 }
@@ -389,9 +389,15 @@ body {
   outline-offset: 2px;
 }
 
-.approve-button:active {
+.approve-button:active:not(:disabled) {
   transform: scale(0.97);
   filter: brightness(0.96);
+}
+
+.approve-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  filter: none;
 }
 
 .deny-button {
@@ -410,7 +416,7 @@ body {
     background var(--duration-fast) ease;
 }
 
-.deny-button:hover {
+.deny-button:hover:not(:disabled) {
   background: var(--color-warn-bg);
   box-shadow: var(--shadow-hover);
 }
@@ -420,8 +426,13 @@ body {
   outline-offset: 2px;
 }
 
-.deny-button:active {
+.deny-button:active:not(:disabled) {
   transform: scale(0.97);
+}
+
+.deny-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 @media (max-width: 480px) {
