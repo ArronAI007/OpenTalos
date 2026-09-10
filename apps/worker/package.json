@@ -12,7 +12,6 @@
   },
   "dependencies": {
     "@opentalos/core-types": "workspace:*",
-    "@opentalos/core-graph": "workspace:*",
     "@opentalos/postgres-checkpoint": "workspace:*",
     "@opentalos/postgres-tracing": "workspace:*",
     "@opentalos/scheduler": "workspace:*",

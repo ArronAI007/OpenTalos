@@ -121,9 +121,6 @@ importers:
 
   apps/worker:
     dependencies:
-      '@opentalos/core-graph':
-        specifier: workspace:*
-        version: link:../../packages/core-graph
       '@opentalos/core-types':
         specifier: workspace:*
         version: link:../../packages/core-types
