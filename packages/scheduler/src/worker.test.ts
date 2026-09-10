@@ -243,7 +243,11 @@ describe("Worker", () => {
     // Resume: replays "ask" (auto-answering with the approval), advances to "flaky", which
     // throws on this first invocation. The checkpoint has already advanced past the pause
     // (status "running", nodeCursor "flaky") by the time the error propagates.
-    await scheduler.enqueueResume("fix1-run", { type: "approval", approved: true });
+    await scheduler.enqueueResume(
+      "fix1-run",
+      { type: "approval", approved: true },
+      { tenantId: "tenant-fix1", sessionId: "s1" },
+    );
     await worker.pollOnce();
 
     // enqueueResume inserts a NEW task row (kind "resume") rather than updating the original

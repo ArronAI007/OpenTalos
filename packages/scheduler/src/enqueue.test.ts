@@ -87,7 +87,7 @@ describe("Scheduler.enqueueResume", () => {
       createdAt: new Date().toISOString(),
     });
 
-    await scheduler.enqueueResume("resume-seed-run", { type: "approval", approved: true });
+    await scheduler.enqueueResume("resume-seed-run", { type: "approval", approved: true }, { tenantId: "tenant-b", sessionId: "s1" });
 
     const rows = await db.select().from(tasks).where(eq(tasks.runId, "resume-seed-run"));
     expect(rows).toHaveLength(1);
@@ -97,15 +97,45 @@ describe("Scheduler.enqueueResume", () => {
   });
 
   it("throws when no checkpoint exists for the runId", async () => {
-    await expect(scheduler.enqueueResume("no-such-run", { type: "approval", approved: true })).rejects.toThrow(
-      /no checkpoint found/,
-    );
+    await expect(
+      scheduler.enqueueResume("no-such-run", { type: "approval", approved: true }, { tenantId: "tenant-a", sessionId: "s1" }),
+    ).rejects.toThrow(/no checkpoint found/);
   });
 
   it("throws when the checkpoint is not paused", async () => {
     await scheduler.enqueueStart("counter", { count: 0 }, { tenantId: "tenant-a", sessionId: "s1" }, "not-paused-run");
-    await expect(scheduler.enqueueResume("not-paused-run", { type: "approval", approved: true })).rejects.toThrow(
-      /is not paused/,
-    );
+    await expect(
+      scheduler.enqueueResume(
+        "not-paused-run",
+        { type: "approval", approved: true },
+        { tenantId: "tenant-a", sessionId: "s1" },
+      ),
+    ).rejects.toThrow(/is not paused/);
+  });
+
+  it("throws a clear error when the calling tenant does not match the checkpoint's tenant (Fix 2)", async () => {
+    await checkpointStore.save({
+      graphId: "counter",
+      runId: "tenant-mismatch-run",
+      tenantId: "tenant-real",
+      sessionId: "s1",
+      nodeCursor: "increment",
+      state: { count: 0 },
+      pendingYields: [{ type: "awaiting_approval", reason: "confirm" }],
+      status: "paused",
+      createdAt: new Date().toISOString(),
+    });
+
+    await expect(
+      scheduler.enqueueResume(
+        "tenant-mismatch-run",
+        { type: "approval", approved: true },
+        { tenantId: "tenant-imposter", sessionId: "s1" },
+      ),
+    ).rejects.toThrow(/belongs to a different tenant/);
+
+    // No task should have been queued for the rejected attempt.
+    const rows = await db.select().from(tasks).where(eq(tasks.runId, "tenant-mismatch-run"));
+    expect(rows).toHaveLength(0);
   });
 });

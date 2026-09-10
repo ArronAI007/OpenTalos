@@ -54,13 +54,25 @@ export class Scheduler {
     });
   }
 
-  async enqueueResume(runId: string, resumeValue: NodeResumeValue, options: EnqueueOptions = {}): Promise<void> {
+  async enqueueResume(
+    runId: string,
+    resumeValue: NodeResumeValue,
+    tenant: TenantContext,
+    options: EnqueueOptions = {},
+  ): Promise<void> {
     const checkpoint = await this.checkpointStore.load(runId);
     if (!checkpoint) {
       throw new Error(`Cannot enqueue resume: no checkpoint found for run "${runId}"`);
     }
     if (checkpoint.status !== "paused") {
       throw new Error(`Cannot enqueue resume: run "${runId}" is not paused (status: "${checkpoint.status}")`);
+    }
+    // Tenant authorization: resumeFromCheckpoint() itself performs no tenant check (see its
+    // JSDoc), delegating that responsibility to whoever loads the checkpoint and calls it — i.e.
+    // here. Match resume()'s own tenant-mismatch granularity in core-graph's engine.ts, which
+    // checks both tenantId and sessionId, not just tenantId.
+    if (checkpoint.tenantId !== tenant.tenantId || checkpoint.sessionId !== tenant.sessionId) {
+      throw new Error(`Cannot enqueue resume: run "${runId}" belongs to a different tenant`);
     }
     await this.db.insert(tasks).values({
       runId,

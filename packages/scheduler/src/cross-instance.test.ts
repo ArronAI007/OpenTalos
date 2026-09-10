@@ -92,7 +92,11 @@ describe("cross-instance durable resume", () => {
       tenantConcurrency: 10,
     });
 
-    await schedulerProcess2.enqueueResume("cross-instance-run-1", { type: "approval", approved: true });
+    await schedulerProcess2.enqueueResume(
+      "cross-instance-run-1",
+      { type: "approval", approved: true },
+      { tenantId: "tenant-cross", sessionId: "s1" },
+    );
     await workerProcess2.pollOnce();
 
     const finalCheckpoint = await checkpointStore.load("cross-instance-run-1");
