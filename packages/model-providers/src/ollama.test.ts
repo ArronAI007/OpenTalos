@@ -125,4 +125,37 @@ describe("createOllamaProvider", () => {
       { type: "message_stop" },
     ]);
   });
+
+  it("sends tool_calls on an assistant message and tool_name on a tool message", async () => {
+    const requestWithHistory: ModelRequest = {
+      messages: [
+        { role: "user", content: "what's the rate?" },
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [{ id: "call-1", name: "lookup_rate", input: { pair: "USD/CNY" } }],
+        },
+        { role: "tool", content: "7.13", toolCallId: "call-1" },
+      ],
+    };
+    let capturedInit: { method: string; body: string; headers: Record<string, string> } | undefined;
+    const fetchFn: OllamaFetchLike = async (_url, init) => {
+      capturedInit = init;
+      return { ok: true, status: 200, body: streamFromLines([JSON.stringify({ done: true })]) };
+    };
+    const provider = createOllamaProvider(fetchFn, { baseUrl: "http://localhost:11434", model: "llama-test" });
+    for await (const _chunk of provider.complete(requestWithHistory)) {
+      // draining the iterator to trigger the fetch call
+    }
+
+    const sentBody = JSON.parse(capturedInit?.body ?? "{}") as {
+      messages: { role: string; content: string; tool_calls?: unknown; tool_name?: string }[];
+    };
+    expect(sentBody.messages[1]).toEqual({
+      role: "assistant",
+      content: "",
+      tool_calls: [{ type: "function", function: { name: "lookup_rate", arguments: { pair: "USD/CNY" } } }],
+    });
+    expect(sentBody.messages[2]).toEqual({ role: "tool", content: "7.13", tool_name: "lookup_rate" });
+  });
 });
