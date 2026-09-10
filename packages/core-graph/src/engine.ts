@@ -104,6 +104,67 @@ export class GraphEngine<TState> {
     return advanced.status === "running" ? this.run(advanced) : advanced;
   }
 
+  /**
+   * Resumes a paused checkpoint WITHOUT requiring the original in-memory generator — instead
+   * it reconstructs a fresh generator from the checkpoint's saved (pre-node) state and replays
+   * the node function from the top, in order feeding back every previously-resolved approval
+   * (recorded in `checkpoint.pendingYields`, everything but the last element) before applying
+   * the newly-supplied `resumeValue` at the current pending yield. This is what makes durable,
+   * cross-process resume possible (see resume() for the same-process, in-memory-generator
+   * alternative, which is faster but only works within one process's lifetime).
+   * Relies on node functions being replay-safe: no non-idempotent side effects before their first yield.
+   */
+  async resumeFromCheckpoint(checkpoint: Checkpoint<TState>, resumeValue: NodeResumeValue): Promise<Checkpoint<TState>> {
+    if (checkpoint.status !== "paused" || typeof checkpoint.nodeCursor !== "string") {
+      throw new Error(`Run ${checkpoint.runId} is not in a resumable paused state`);
+    }
+    const nodeId = checkpoint.nodeCursor;
+    const nodeFn = this.graph.nodes[nodeId];
+    if (!nodeFn) {
+      throw new Error(`Unknown node: ${nodeId}`);
+    }
+    const tenant: TenantContext = { tenantId: checkpoint.tenantId, sessionId: checkpoint.sessionId };
+    const guardedNodeFn = this.wrapWithGuardrails(nodeId, nodeFn);
+    const generator = guardedNodeFn(checkpoint.state, { tenant, eventBus: this.deps.eventBus });
+
+    // pendingYields is either length 1 (a "fresh" pause produced by step(), no replay history
+    // yet — the common case) or length > 1 (a pause produced by an earlier resumeFromCheckpoint
+    // call, where every element but the last is a resume value already fed to an earlier yield
+    // during a previous replay of this same node execution). Either way, everything but the
+    // last element is the prior-answers history to replay before applying the new resumeValue.
+    const priorAnswers = checkpoint.pendingYields.slice(0, -1) as NodeResumeValue[];
+    const replayQueue = [...priorAnswers, resumeValue];
+
+    const outcome = await this.runNodeToCompletion(
+      nodeId,
+      generator,
+      tenant,
+      checkpoint.runId,
+      undefined,
+      () => {
+        // No live generator to persist here — resumeFromCheckpoint always reconstructs a fresh
+        // generator by replay next time too, so there is nothing useful to keep in `this.paused`.
+      },
+      replayQueue,
+    );
+
+    if (outcome.status === "paused") {
+      this.emitTrace("hitl_interrupt", checkpoint.runId, tenant, { nodeId, reason: outcome.reason });
+      const pausedCheckpoint: Checkpoint<TState> = {
+        ...checkpoint,
+        nodeCursor: nodeId,
+        status: "paused",
+        pendingYields: [...replayQueue, { type: "awaiting_approval", reason: outcome.reason }],
+      };
+      await this.deps.checkpointStore.save(pausedCheckpoint);
+      return pausedCheckpoint;
+    }
+
+    this.emitTrace("node_exit", checkpoint.runId, tenant, { nodeId });
+    const advanced = await this.completeNode(nodeId, outcome.partial, checkpoint);
+    return advanced.status === "running" ? this.run(advanced) : advanced;
+  }
+
   private async step(checkpoint: Checkpoint<TState>): Promise<Checkpoint<TState>> {
     const cursor = checkpoint.nodeCursor as NodeCursor;
     if (typeof cursor !== "string") {
@@ -207,7 +268,12 @@ export class GraphEngine<TState> {
     runId: string,
     initialResume: NodeResumeValue,
     onApprovalPause: (generator: NodeGenerator<TState>) => void,
+    replayQueue?: NodeResumeValue[],
   ): Promise<NodeOutcome<TState>> {
+    // Copy so draining it here never mutates the caller's array — resumeFromCheckpoint still
+    // needs its own original replayQueue afterwards, to build the next checkpoint's pendingYields.
+    const queue = replayQueue ? [...replayQueue] : undefined;
+
     const advance = async (value: NodeResumeValue) => {
       try {
         return await generator.next(value);
@@ -226,6 +292,16 @@ export class GraphEngine<TState> {
         const toolResult = await this.deps.toolRegistry.execute(yielded.toolCall, tenant);
         this.emitTrace("tool_call_end", runId, tenant, { toolResult });
         result = await advance({ type: "tool_result", result: toolResult });
+        continue;
+      }
+      // On replay, each awaiting_approval yield consumes the next queued value in order — this
+      // is what makes cross-process resume possible: the node is being re-driven from scratch
+      // (see resumeFromCheckpoint), and everything already resolved in an earlier replay pass
+      // must be faithfully re-answered before the genuinely new value is applied. Once the queue
+      // is empty, the next awaiting_approval yield pauses for real, exactly like a first-time pause.
+      if (queue && queue.length > 0) {
+        const seeded = queue.shift() as NodeResumeValue;
+        result = await advance(seeded);
         continue;
       }
       onApprovalPause(generator);
