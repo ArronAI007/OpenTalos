@@ -184,6 +184,9 @@ importers:
         specifier: ^19.0.0
         version: 19.2.8(react@19.2.8)
     devDependencies:
+      '@opentalos/postgres-tenancy':
+        specifier: workspace:*
+        version: link:../../packages/postgres-tenancy
       '@playwright/test':
         specifier: ^1.48.0
         version: 1.63.0

@@ -1,4 +1,12 @@
 import { test, expect } from "@playwright/test";
+import { readFixtureApiKey } from "./fixtures.js";
+
+test.beforeEach(async ({ page }) => {
+  const apiKey = readFixtureApiKey();
+  await page.addInitScript((key) => {
+    window.localStorage.setItem("opentalos-api-key", key);
+  }, apiKey);
+});
 
 test("send a message, see trace events stream in, approve the HITL pause, see completion", async ({ page }) => {
   await page.goto("/");

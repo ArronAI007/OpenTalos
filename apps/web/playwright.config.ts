@@ -1,6 +1,7 @@
 import { defineConfig } from "@playwright/test";
 
 const DATABASE_URL = "postgres://postgres:postgres@localhost:5433/postgres";
+const ADMIN_API_KEY = "e2e-admin-key";
 
 export default defineConfig({
   testDir: "./e2e",
@@ -32,7 +33,7 @@ export default defineConfig({
       // independent of whether any request has touched Postgres yet, so this is a truer match for
       // "is the process up" than the DB-dependent route this plan originally pointed at.
       command: "pnpm --filter @opentalos/api start",
-      env: { DATABASE_URL, PORT: "3001" },
+      env: { DATABASE_URL, PORT: "3001", ADMIN_API_KEY },
       port: 3001,
       reuseExistingServer: !process.env.CI,
       timeout: 20_000,
@@ -40,6 +41,12 @@ export default defineConfig({
     {
       command: "pnpm --filter @opentalos/web dev",
       url: "http://localhost:5173",
+      reuseExistingServer: !process.env.CI,
+      timeout: 20_000,
+    },
+    {
+      command: "pnpm --filter @opentalos/admin dev",
+      url: "http://localhost:5174",
       reuseExistingServer: !process.env.CI,
       timeout: 20_000,
     },

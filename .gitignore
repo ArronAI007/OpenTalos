@@ -10,3 +10,5 @@ dist
 apps/web/e2e/screenshots
 apps/web/playwright-report
 apps/web/test-results
+apps/web/e2e/.fixture-api-key.json
+.gstack/
