@@ -14,6 +14,16 @@ function scriptedProvider(responses: ModelResponseChunk[][]): ModelProvider {
   };
 }
 
+function alwaysToolCallProvider(): ModelProvider {
+  let callIndex = 0;
+  return {
+    async *complete() {
+      callIndex += 1;
+      yield { type: "tool_call", toolCall: { id: `call-${callIndex}`, name: "search", input: {} } };
+    },
+  };
+}
+
 async function drive(
   gen: AsyncGenerator<NodeYield, AgentTurnResult, NodeResumeValue>,
   toolOutputs: Record<string, unknown>,
@@ -80,5 +90,29 @@ describe("runModelWithTools", () => {
     expect(result.finalText).toBe("combined answer");
     const toolMessages = result.messages.filter((m) => m.role === "tool");
     expect(toolMessages.map((m) => m.toolCallId)).toEqual(["call-1", "call-2"]);
+  });
+
+  it("throws once maxRounds is exceeded when the model never stops requesting tools", async () => {
+    const provider = alwaysToolCallProvider();
+    const gen = runModelWithTools(provider, tools, [{ role: "user", content: "hi" }], 3);
+    await expect(drive(gen, { search: "ok" })).rejects.toThrow(
+      "runModelWithTools: exceeded maxRounds (3) without the model producing a turn with no tool calls — the model may be stuck in a repetitive tool-calling loop",
+    );
+  });
+
+  it("defaults maxRounds to 10, succeeding when the model stops exactly on the 10th round", async () => {
+    const responses: ModelResponseChunk[][] = [];
+    for (let round = 1; round <= 9; round += 1) {
+      responses.push([{ type: "tool_call", toolCall: { id: `call-${round}`, name: "search", input: { round } } }]);
+    }
+    responses.push([{ type: "text_delta", textDelta: "done on round 10" }, { type: "message_stop" }]);
+    const provider = scriptedProvider(responses);
+
+    // maxRounds intentionally omitted — this test pins the default at (at least) 10 rounds.
+    const gen = runModelWithTools(provider, tools, [{ role: "user", content: "hi" }]);
+    const result = await drive(gen, { search: "ok" });
+
+    expect(result.finalText).toBe("done on round 10");
+    expect(result.messages.filter((m) => m.role === "tool")).toHaveLength(9);
   });
 });
