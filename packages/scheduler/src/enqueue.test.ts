@@ -70,6 +70,20 @@ describe("Scheduler.enqueueStart", () => {
       scheduler.enqueueStart("does-not-exist", { count: 0 }, { tenantId: "tenant-a", sessionId: "s1" }, "enqueue-run-bad"),
     ).rejects.toThrow(/Unknown graphId/);
   });
+
+  it("throws a clear error instead of silently overwriting an in-flight run when the runId is reused (Fix 3)", async () => {
+    await scheduler.enqueueStart("counter", { count: 0 }, { tenantId: "tenant-a", sessionId: "s1" }, "reused-run-id");
+
+    await expect(
+      scheduler.enqueueStart("counter", { count: 0 }, { tenantId: "tenant-a", sessionId: "s1" }, "reused-run-id"),
+    ).rejects.toThrow(/already exists/);
+
+    // The original checkpoint and task must be left untouched by the rejected second call.
+    const checkpoint = await checkpointStore.load("reused-run-id");
+    expect(checkpoint?.status).toBe("running");
+    const rows = await db.select().from(tasks).where(eq(tasks.runId, "reused-run-id"));
+    expect(rows).toHaveLength(1);
+  });
 });
 
 describe("Scheduler.enqueueResume", () => {

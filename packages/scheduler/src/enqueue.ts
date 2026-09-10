@@ -30,6 +30,16 @@ export class Scheduler {
     runId: string,
     options: EnqueueOptions = {},
   ): Promise<void> {
+    // Guard against a reused runId silently destroying an in-flight or paused run:
+    // PostgresCheckpointStore.save() upserts on the run_id primary key, so without this check a
+    // second enqueueStart() call with the same runId would silently overwrite a live checkpoint
+    // with a fresh initial state (losing an awaiting-approval run with no error) and queue a
+    // duplicate task row.
+    const existing = await this.checkpointStore.load(runId);
+    if (existing) {
+      throw new Error(`Cannot enqueue start: run "${runId}" already exists (status: "${existing.status}")`);
+    }
+
     const registration = this.registry.getOrThrow(graphId);
     const graph = registration.buildGraph();
     const deps = registration.buildDeps();
