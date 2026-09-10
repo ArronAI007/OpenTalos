@@ -267,11 +267,12 @@ describe("Worker", () => {
 
     // The retry must dispatch on the checkpoint's actual ("running") status rather than blindly
     // re-calling resumeFromCheckpoint (which would throw "not in a resumable paused state" and
-    // destroy the real "boom-once" error) — proving the fix. The task completes successfully.
-    // (The stale `error` field left over from the earlier failed attempt is addressed separately
-    // by Fix 4, which extends this same assertion block with an `error: null` check.)
+    // destroy the real "boom-once" error) — proving the fix. The task completes successfully,
+    // and the stale "boom-once" error from the earlier failed attempt is cleared (Fix 4) — a
+    // task that ends "done" must not still show a previous attempt's error message.
     rows = await db.select().from(tasks).where(and(eq(tasks.runId, "fix1-run"), eq(tasks.kind, "resume")));
     expect(rows[0].status).toBe("done");
+    expect(rows[0].error).toBeNull();
     checkpoint = await checkpointStore.load("fix1-run");
     expect(checkpoint?.status).toBe("done");
     expect(checkpoint?.state).toEqual({ count: 1, approved: true });

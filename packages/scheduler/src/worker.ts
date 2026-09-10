@@ -96,7 +96,12 @@ export class Worker {
   private async execute(task: TaskRow): Promise<void> {
     try {
       await this.runWithTimeout(task);
-      await this.db.update(tasks).set({ status: "done", updatedAt: new Date() }).where(eq(tasks.id, task.id));
+      // Clear a previously-set `error` from an earlier failed attempt — a task that fails once
+      // and then succeeds on retry must not still show the stale error message once "done".
+      await this.db
+        .update(tasks)
+        .set({ status: "done", error: null, updatedAt: new Date() })
+        .where(eq(tasks.id, task.id));
     } catch (error) {
       const attempts = task.attempts + 1;
       if (attempts >= task.maxAttempts) {
