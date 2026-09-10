@@ -119,6 +119,25 @@ importers:
         specifier: ^5.0.0
         version: 5.0.0(@types/node@22.20.1)(vite@8.2.2(@types/node@22.20.1)(yaml@2.9.0))
 
+  examples/chat-demo-agent:
+    dependencies:
+      '@opentalos/core-graph':
+        specifier: workspace:*
+        version: link:../../packages/core-graph
+      '@opentalos/core-types':
+        specifier: workspace:*
+        version: link:../../packages/core-types
+      '@opentalos/tool-registry':
+        specifier: workspace:*
+        version: link:../../packages/tool-registry
+    devDependencies:
+      '@opentalos/checkpoint':
+        specifier: workspace:*
+        version: link:../../packages/checkpoint
+      '@opentalos/tracing':
+        specifier: workspace:*
+        version: link:../../packages/tracing
+
   examples/research-agent:
     dependencies:
       '@opentalos/checkpoint':

@@ -1,0 +1,22 @@
+{
+  "name": "@opentalos/example-chat-demo-agent",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@opentalos/core-types": "workspace:*",
+    "@opentalos/core-graph": "workspace:*",
+    "@opentalos/tool-registry": "workspace:*"
+  },
+  "devDependencies": {
+    "@opentalos/checkpoint": "workspace:*",
+    "@opentalos/tracing": "workspace:*"
+  }
+}
