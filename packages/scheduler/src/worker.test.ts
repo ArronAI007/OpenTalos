@@ -277,4 +277,47 @@ describe("Worker", () => {
     expect(checkpoint?.status).toBe("done");
     expect(checkpoint?.state).toEqual({ count: 1, approved: true });
   });
+
+  it("applies per-tenant concurrency caps resolved via resolveTenantConcurrency, differentiated per tenant", async () => {
+    const tenantA = { tenantId: "tenant-quota-a", sessionId: "s1" };
+    const tenantB = { tenantId: "tenant-quota-b", sessionId: "s1" };
+    for (let i = 0; i < 5; i++) {
+      await scheduler.enqueueStart("trivial", { count: 0 }, tenantA, `quota-a-run-${i}`);
+    }
+    for (let i = 0; i < 5; i++) {
+      await scheduler.enqueueStart("trivial", { count: 0 }, tenantB, `quota-b-run-${i}`);
+    }
+    const caps: Record<string, number> = { "tenant-quota-a": 1, "tenant-quota-b": 4 };
+    const worker = new Worker(testDb.pool, registry, checkpointStore, {
+      globalConcurrency: 10,
+      tenantConcurrency: 10, // 静态默认值，两个租户都设置了 resolver 覆盖，不应该被用到
+      resolveTenantConcurrency: async (tenantId) => caps[tenantId] ?? 10,
+    });
+
+    await worker.pollOnce();
+
+    const rowsA = await db.select().from(tasks).where(eq(tasks.tenantId, "tenant-quota-a"));
+    const rowsB = await db.select().from(tasks).where(eq(tasks.tenantId, "tenant-quota-b"));
+    expect(rowsA.filter((r) => r.status === "done").length).toBe(1);
+    expect(rowsB.filter((r) => r.status === "done").length).toBe(4);
+  });
+
+  it("falls back to the static tenantConcurrency default when resolveTenantConcurrency throws", async () => {
+    const tenant = { tenantId: "tenant-quota-error", sessionId: "s1" };
+    for (let i = 0; i < 5; i++) {
+      await scheduler.enqueueStart("trivial", { count: 0 }, tenant, `quota-error-run-${i}`);
+    }
+    const worker = new Worker(testDb.pool, registry, checkpointStore, {
+      globalConcurrency: 10,
+      tenantConcurrency: 3,
+      resolveTenantConcurrency: async () => {
+        throw new Error("quota lookup failed");
+      },
+    });
+
+    await worker.pollOnce();
+
+    const rows = await db.select().from(tasks).where(eq(tasks.tenantId, "tenant-quota-error"));
+    expect(rows.filter((r) => r.status === "done").length).toBe(3);
+  });
 });

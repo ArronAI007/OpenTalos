@@ -13,6 +13,7 @@
   "dependencies": {
     "@opentalos/core-types": "workspace:*",
     "@opentalos/postgres-checkpoint": "workspace:*",
+    "@opentalos/postgres-tenancy": "workspace:*",
     "@opentalos/postgres-tracing": "workspace:*",
     "@opentalos/scheduler": "workspace:*",
     "@opentalos/example-chat-demo-agent": "workspace:*",

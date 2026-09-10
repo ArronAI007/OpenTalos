@@ -12,6 +12,11 @@ type TaskRow = typeof tasks.$inferSelect;
 export interface WorkerOptions {
   globalConcurrency: number;
   tenantConcurrency: number;
+  /** 可选：按 tenantId 动态解析每租户并发上限。提供时优先于静态的 tenantConcurrency；不提供
+   * 时行为和不存在这个字段完全一样（用 tenantConcurrency 这个静态数字）。如果这个函数对某个
+   * tenantId 抛出异常，该租户这一批次退回使用静态默认值，不会让整个 pollOnce() 失败——一次
+   * 配额查询的瞬时故障不应该阻塞其他租户的任务被正常领取执行。 */
+  resolveTenantConcurrency?: (tenantId: string) => Promise<number>;
   pollIntervalMs?: number;
   batchSize?: number;
 }
@@ -81,12 +86,14 @@ export class Worker {
         .limit(batchSize)
         .for("update", { skipLocked: true });
 
+      const tenantCaps = await this.resolveTenantCaps(candidates);
       const toRun: TaskRow[] = [];
       const tenantCounts = new Map<string, number>();
       for (const candidate of candidates) {
         if (toRun.length >= this.options.globalConcurrency) break;
+        const cap = tenantCaps.get(candidate.tenantId) ?? this.options.tenantConcurrency;
         const tenantCount = tenantCounts.get(candidate.tenantId) ?? 0;
-        if (tenantCount >= this.options.tenantConcurrency) continue;
+        if (tenantCount >= cap) continue;
         toRun.push(candidate);
         tenantCounts.set(candidate.tenantId, tenantCount + 1);
       }
@@ -98,6 +105,31 @@ export class Worker {
     });
 
     await Promise.all(claimed.map((task) => this.execute(task)));
+  }
+
+  /** Resolves each DISTINCT tenantId appearing in this batch to its per-tenant concurrency cap,
+   * via the injected resolveTenantConcurrency hook — called at most once per distinct tenantId
+   * per poll cycle, not once per candidate task. Returns an empty map (falling through to the
+   * static tenantConcurrency default for every tenant) when no resolver is configured at all,
+   * preserving Phase 2's original behavior exactly. */
+  private async resolveTenantCaps(candidates: TaskRow[]): Promise<Map<string, number>> {
+    const caps = new Map<string, number>();
+    if (!this.options.resolveTenantConcurrency) return caps;
+
+    const resolve = this.options.resolveTenantConcurrency;
+    const distinctTenantIds = [...new Set(candidates.map((c) => c.tenantId))];
+    await Promise.all(
+      distinctTenantIds.map(async (tenantId) => {
+        try {
+          caps.set(tenantId, await resolve(tenantId));
+        } catch (error) {
+          console.error(
+            `Worker: resolveTenantConcurrency failed for tenant "${tenantId}", falling back to the static default: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }),
+    );
+    return caps;
   }
 
   private async execute(task: TaskRow): Promise<void> {

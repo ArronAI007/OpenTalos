@@ -4,8 +4,10 @@ import { Pool } from "pg";
 import type { EventBus } from "@opentalos/core-types";
 import { PostgresCheckpointStore } from "@opentalos/postgres-checkpoint";
 import { PostgresEventBus } from "@opentalos/postgres-tracing";
+import { TenantStore } from "@opentalos/postgres-tenancy";
 import { GraphRegistry, Worker } from "@opentalos/scheduler";
 import { buildChatDemoAgentGraph, createChatDemoAgentToolRegistry } from "@opentalos/example-chat-demo-agent";
+import { createTenantConcurrencyResolver } from "./tenant-quota.js";
 
 /** Builds and registers every graph this worker process knows how to run. Split out from the
  * bootstrap below so it can be exercised directly in tests without needing to start the
@@ -44,12 +46,15 @@ if (isMain()) {
   });
 
   const checkpointStore = new PostgresCheckpointStore(pool);
+  const tenantStore = new TenantStore(pool);
   const eventBus = new PostgresEventBus(pool);
   const registry = buildWorkerRegistry(eventBus);
 
+  const defaultTenantConcurrency = parsePositiveInt("WORKER_TENANT_CONCURRENCY", 5);
   const worker = new Worker(pool, registry, checkpointStore, {
     globalConcurrency: parsePositiveInt("WORKER_GLOBAL_CONCURRENCY", 10),
-    tenantConcurrency: parsePositiveInt("WORKER_TENANT_CONCURRENCY", 5),
+    tenantConcurrency: defaultTenantConcurrency,
+    resolveTenantConcurrency: createTenantConcurrencyResolver(tenantStore, defaultTenantConcurrency),
   });
   worker.start();
   console.log("apps/worker: started, polling for tasks...");
