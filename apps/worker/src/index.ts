@@ -39,6 +39,10 @@ if (isMain()) {
   const pool = new Pool({
     connectionString: process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/opentalos",
   });
+  pool.on("error", (error) => {
+    console.error(`apps/worker: unexpected Postgres pool error: ${error.message}`);
+  });
+
   const checkpointStore = new PostgresCheckpointStore(pool);
   const eventBus = new PostgresEventBus(pool);
   const registry = buildWorkerRegistry(eventBus);
@@ -51,10 +55,14 @@ if (isMain()) {
   console.log("apps/worker: started, polling for tasks...");
 
   const healthPort = parsePositiveInt("HEALTH_PORT", 3002);
-  createServer((_req, res) => {
+  const healthServer = createServer((_req, res) => {
     res.writeHead(200, { "Content-Type": "text/plain" });
     res.end("ok");
-  }).listen(healthPort, () => {
+  });
+  healthServer.on("error", (error) => {
+    console.error(`apps/worker: health check server error: ${error.message}`);
+  });
+  healthServer.listen(healthPort, () => {
     console.log(`apps/worker: health check listening on :${healthPort}`);
   });
 
