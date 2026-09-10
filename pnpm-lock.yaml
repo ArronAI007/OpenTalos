@@ -242,6 +242,34 @@ importers:
         specifier: ^12.1.0
         version: 12.1.0
 
+  packages/scheduler:
+    dependencies:
+      '@opentalos/core-graph':
+        specifier: workspace:*
+        version: link:../core-graph
+      '@opentalos/core-types':
+        specifier: workspace:*
+        version: link:../core-types
+      '@opentalos/postgres-checkpoint':
+        specifier: workspace:*
+        version: link:../postgres-checkpoint
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@types/pg@8.23.1)(pg@8.23.0)
+      pg:
+        specifier: ^8.23.0
+        version: 8.23.0
+    devDependencies:
+      '@testcontainers/postgresql':
+        specifier: ^12.1.0
+        version: 12.1.0
+      '@types/pg':
+        specifier: ^8.23.1
+        version: 8.23.1
+      testcontainers:
+        specifier: ^12.1.0
+        version: 12.1.0
+
   packages/sdk:
     dependencies:
       '@opentalos/checkpoint':
