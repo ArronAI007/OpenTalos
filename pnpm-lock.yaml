@@ -263,6 +263,9 @@ importers:
       '@opentalos/multi-agent':
         specifier: workspace:*
         version: link:../../packages/multi-agent
+      '@opentalos/sdk':
+        specifier: workspace:*
+        version: link:../../packages/sdk
       '@opentalos/tool-registry':
         specifier: workspace:*
         version: link:../../packages/tool-registry
