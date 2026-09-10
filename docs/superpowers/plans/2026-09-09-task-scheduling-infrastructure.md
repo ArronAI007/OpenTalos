@@ -124,7 +124,7 @@ describe("GraphEngine.resumeFromCheckpoint", () => {
       reducer: shallowMergeReducer,
     };
     const deps = makeDeps();
-    const alwaysRequireApproval = { async check: async () => "require_approval" as const };
+    const alwaysRequireApproval = { check: async () => "require_approval" as const };
     const engineA = new GraphEngine(graph, { ...deps, guardrails: [alwaysRequireApproval] });
     let checkpoint = engineA.start({ count: 0 }, tenant, "run-3");
     checkpoint = await engineA.run(checkpoint); // before-phase pause
@@ -293,7 +293,14 @@ Add this new public method to the `GraphEngine` class, right after the existing 
    * the newly-supplied `resumeValue` at the current pending yield. This is what makes durable,
    * cross-process resume possible (see resume() for the same-process, in-memory-generator
    * alternative, which is faster but only works within one process's lifetime).
-   * Relies on node functions being replay-safe: no non-idempotent side effects before their first yield.
+   * Relies on node functions AND guardrails being replay-safe: no non-idempotent side effects
+   * before their first yield each time they're replayed.
+   * Unlike resume(), this does NOT itself validate checkpoint.tenantId/sessionId against a
+   * caller-asserted tenant — there is no shared in-memory state keyed loosely by runId for a
+   * mismatched tenant to collide with here, since the full Checkpoint object is passed in
+   * directly. Tenant authorization for who may trigger a resume for a given runId is the
+   * responsibility of whoever loads the checkpoint and calls this method (the scheduler's
+   * enqueueResume, built in a later task).
    */
   async resumeFromCheckpoint(checkpoint: Checkpoint<TState>, resumeValue: NodeResumeValue): Promise<Checkpoint<TState>> {
     if (checkpoint.status !== "paused" || typeof checkpoint.nodeCursor !== "string") {
@@ -1096,7 +1103,7 @@ export class Scheduler {
 - [ ] **Step 12: Run tests to verify they pass**
 
 Run: `pnpm --filter @opentalos/scheduler test`
-Expected: PASS — all 11 tests green (4 graph-registry + 7 enqueue).
+Expected: PASS — all 9 tests green (4 graph-registry + 5 enqueue).
 
 - [ ] **Step 13: Create `packages/scheduler/src/index.ts`**
 
@@ -1486,6 +1493,8 @@ function errorMessage(error: unknown): string {
 Run: `pnpm --filter @opentalos/scheduler test -- worker`
 Expected: PASS — all 6 tests green. (These tests exercise real concurrent Postgres transactions and real timeouts — if any test is flaky, re-run once before investigating; if it fails consistently, the claiming transaction or timeout logic has a real bug, not a timing fluke.)
 
+Note: the enqueue.test.ts suite has 5 tests (not 7, per Task 3's corrected count), so the running total after this task is 4 (graph-registry) + 5 (enqueue) + 6 (worker) = 15, not 17 — see Step 6 below.
+
 - [ ] **Step 5: Update `packages/scheduler/src/index.ts`**
 
 ```ts
@@ -1498,7 +1507,7 @@ export { tasks } from "./schema.js";
 - [ ] **Step 6: Rebuild and run the full package test suite**
 
 Run: `pnpm --filter @opentalos/scheduler build && pnpm --filter @opentalos/scheduler test`
-Expected: PASS — all 17 tests green (4 graph-registry + 7 enqueue + 6 worker).
+Expected: PASS — all 15 tests green (4 graph-registry + 5 enqueue + 6 worker).
 
 - [ ] **Step 7: Commit**
 
@@ -1631,7 +1640,7 @@ Expected: PASS — the single test green. If it fails, the bug is almost certain
 - [ ] **Step 3: Run the full package suite one more time**
 
 Run: `pnpm --filter @opentalos/scheduler build && pnpm --filter @opentalos/scheduler test`
-Expected: PASS — all 18 tests green (4 graph-registry + 7 enqueue + 6 worker + 1 cross-instance).
+Expected: PASS — all 16 tests green (4 graph-registry + 5 enqueue + 6 worker + 1 cross-instance).
 
 - [ ] **Step 4: Commit**
 

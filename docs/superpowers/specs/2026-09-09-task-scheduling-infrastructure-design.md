@@ -53,7 +53,9 @@ packages/
 ├── postgres-checkpoint/     # 真实 CheckpointStore 实现（Drizzle + PostgreSQL）
 │   ├── src/schema.ts         # Drizzle schema：checkpoints 表
 │   ├── src/store.ts          # PostgresCheckpointStore implements CheckpointStore
-│   └── drizzle/               # drizzle-kit 生成的迁移文件
+│   └── drizzle/               # [未来阶段] drizzle-kit 生成的迁移文件 —
+│                               #   本阶段尚未创建此目录，也未引入 drizzle-kit 依赖；
+│                               #   见第 8 节"明确不在本阶段范围内"
 └── scheduler/                # 任务队列 + 单进程异步并发 worker
     ├── src/graph-registry.ts  # graphId(字符串) → 完整 GraphDefinition + EngineDeps 构建函数 的映射
     ├── src/schema.ts          # Drizzle schema：tasks 表
@@ -138,3 +140,4 @@ LIMIT :batchSize
 - 对话 Web UI 对执行轨迹/暂停状态的可视化——那是第三个子系统的工作，本子系统只保证 `EventBus`/`CheckpointStore` 里有它需要的数据。
 - 认证、租户资源配额的管理界面/API——本子系统只在 worker 内部强制执行配额数字，配额本身如何被设置、由谁设置，留给第四个子系统（平台服务层）。
 - Redis/BullMQ 或任何其他队列技术——已决定完全用 PostgreSQL 承载队列语义（`FOR UPDATE SKIP LOCKED`），本阶段不引入额外的基础设施依赖。
+- 数据库迁移（`drizzle-kit` 生成的迁移文件）——本阶段推迟到未来阶段。`checkpoints` 表和 `tasks` 表的 schema 变更目前仅通过原始 `CREATE TABLE` SQL 语句应用，且仅用于测试环境搭建（见 `packages/postgres-checkpoint/src/store.test.ts` 和 `packages/scheduler/src/test-db.ts`）；生产环境的迁移工作流、`drizzle-kit` 依赖引入、以及对应的 `drizzle/` 迁移目录都留给未来阶段。
