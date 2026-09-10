@@ -186,15 +186,28 @@ body {
   transform: translateX(100%);
   opacity: 0;
   pointer-events: none;
+  /* Closed drawer's children (close button, trace-card-header toggles) must not stay
+     keyboard-focusable once aria-hidden="true" is applied. visibility: hidden removes them from
+     the tab order; the visibility transition is delayed until AFTER the slide-out animation
+     finishes so it doesn't cut the visual transition short. */
+  visibility: hidden;
   transition:
     transform var(--duration-normal) var(--ease-out-expo),
-    opacity var(--duration-normal) ease;
+    opacity var(--duration-normal) ease,
+    visibility 0s var(--duration-normal);
 }
 
 .trace-drawer-open {
   transform: translateX(0);
   opacity: 1;
   pointer-events: auto;
+  /* Applies immediately (no delay) so the drawer's contents become tabbable as soon as it
+     starts opening, not only after the slide-in animation finishes. */
+  visibility: visible;
+  transition:
+    transform var(--duration-normal) var(--ease-out-expo),
+    opacity var(--duration-normal) ease,
+    visibility 0s;
 }
 
 .trace-drawer-header {

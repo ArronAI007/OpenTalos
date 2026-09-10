@@ -61,3 +61,39 @@ test("chat input is reachable via keyboard navigation", async ({ page }) => {
   await page.keyboard.press("Tab");
   await expect(page.getByPlaceholder("输入消息…")).toBeFocused();
 });
+
+test("closed trace drawer's buttons are not keyboard-reachable, but open ones are (Fix 3)", async ({ page }) => {
+  await page.goto("/");
+
+  // Regression test: TraceDrawer sets aria-hidden={!open} on the closed drawer, but its CSS only
+  // hid it visually (transform/opacity/pointer-events) without visibility: hidden, so its close
+  // button stayed in the tab order even while aria-hidden="true" -- a WCAG aria-hidden-focus
+  // violation. The trace-drawer (and its close button) is rendered AFTER the chat panel in the
+  // DOM (see App.tsx), so continuing to Tab past the send button is what would have reached it.
+  await page.keyboard.press("Tab"); // 轨迹 trigger
+  await page.keyboard.press("Tab"); // chat input
+  await expect(page.getByPlaceholder("输入消息…")).toBeFocused();
+  await page.keyboard.press("Tab"); // send button
+  await expect(page.getByRole("button", { name: "发送" })).toBeFocused();
+
+  const drawer = page.locator(".trace-drawer");
+  const drawerClose = page.locator(".trace-drawer-close");
+  await expect(drawer).toHaveAttribute("aria-hidden", "true");
+  await expect(drawer).toHaveCSS("visibility", "hidden");
+
+  await page.keyboard.press("Tab");
+  await expect(drawerClose).not.toBeFocused();
+
+  // Opening the drawer must still show the slide-in animation (no snapping to the open state)
+  // and make its buttons genuinely tabbable again.
+  const transitionDuration = await drawer.evaluate((el) => getComputedStyle(el).transitionDuration);
+  expect(transitionDuration).not.toBe("0s");
+
+  await page.getByRole("button", { name: /轨迹/ }).click();
+  await expect(drawer).toHaveClass(/trace-drawer-open/);
+  await expect(drawer).toHaveAttribute("aria-hidden", "false");
+  await expect(drawer).toHaveCSS("visibility", "visible");
+
+  await drawerClose.focus();
+  await expect(drawerClose).toBeFocused();
+});
