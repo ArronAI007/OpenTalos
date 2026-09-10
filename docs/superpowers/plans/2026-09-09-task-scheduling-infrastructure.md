@@ -293,7 +293,14 @@ Add this new public method to the `GraphEngine` class, right after the existing 
    * the newly-supplied `resumeValue` at the current pending yield. This is what makes durable,
    * cross-process resume possible (see resume() for the same-process, in-memory-generator
    * alternative, which is faster but only works within one process's lifetime).
-   * Relies on node functions being replay-safe: no non-idempotent side effects before their first yield.
+   * Relies on node functions AND guardrails being replay-safe: no non-idempotent side effects
+   * before their first yield each time they're replayed.
+   * Unlike resume(), this does NOT itself validate checkpoint.tenantId/sessionId against a
+   * caller-asserted tenant — there is no shared in-memory state keyed loosely by runId for a
+   * mismatched tenant to collide with here, since the full Checkpoint object is passed in
+   * directly. Tenant authorization for who may trigger a resume for a given runId is the
+   * responsibility of whoever loads the checkpoint and calls this method (the scheduler's
+   * enqueueResume, built in a later task).
    */
   async resumeFromCheckpoint(checkpoint: Checkpoint<TState>, resumeValue: NodeResumeValue): Promise<Checkpoint<TState>> {
     if (checkpoint.status !== "paused" || typeof checkpoint.nodeCursor !== "string") {
