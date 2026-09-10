@@ -124,7 +124,7 @@ describe("GraphEngine.resumeFromCheckpoint", () => {
       reducer: shallowMergeReducer,
     };
     const deps = makeDeps();
-    const alwaysRequireApproval = { async check: async () => "require_approval" as const };
+    const alwaysRequireApproval = { check: async () => "require_approval" as const };
     const engineA = new GraphEngine(graph, { ...deps, guardrails: [alwaysRequireApproval] });
     let checkpoint = engineA.start({ count: 0 }, tenant, "run-3");
     checkpoint = await engineA.run(checkpoint); // before-phase pause
