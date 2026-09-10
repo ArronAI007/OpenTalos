@@ -267,4 +267,84 @@ describe("GET /runs/:runId/events (real SSE connection lifecycle)", () => {
 
     expect(getActiveSseConnectionCountForTests()).toBe(countBefore);
   }, 10_000);
+
+  it("drains trailing events that land in the same tick the checkpoint flips to done (Fix 1)", async () => {
+    // Regression test for the "last trace event dropped" bug: PostgresEventBus.emit() is
+    // fire-and-forget, so a node's final trace events can still be in the write queue at the
+    // exact instant poll() observes checkpoint.status === "done". This test simulates that race
+    // deterministically with mocked deps instead of racing real Postgres timing: the first
+    // listEventsSince() call (before the status check) returns nothing, but a second call
+    // (Fix 1's post-"done" drain) reveals a trailing event that "landed late".
+    const runId = "trailing-events-run";
+    const sessionId = "trail-1";
+
+    const mockCheckpointStore = {
+      load: async () => ({
+        runId,
+        graphId: "chat-demo-agent",
+        tenantId: DEV_TENANT_ID,
+        sessionId,
+        nodeCursor: "respond",
+        state: {},
+        pendingYields: [],
+        status: "done" as const,
+        createdAt: new Date().toISOString(),
+      }),
+    } as unknown as PostgresCheckpointStore;
+
+    const trailingEvent = {
+      id: 1,
+      type: "node_exit",
+      runId,
+      tenantId: DEV_TENANT_ID,
+      sessionId,
+      timestamp: new Date().toISOString(),
+      payload: undefined,
+    };
+
+    let listEventsSinceCallCount = 0;
+    const mockListEventsSince = async (_runId: string, afterId: number) => {
+      listEventsSinceCallCount += 1;
+      if (listEventsSinceCallCount === 1) return [];
+      if (afterId === 0) return [trailingEvent];
+      return [];
+    };
+
+    const testApp = buildServer({
+      pool,
+      checkpointStore: mockCheckpointStore,
+      scheduler: {} as unknown as Scheduler,
+      listEventsSince: mockListEventsSince,
+    });
+    await testApp.listen({ port: 0, host: "127.0.0.1" });
+    const address = testApp.server.address();
+    if (address === null || typeof address === "string") {
+      throw new Error("expected testApp.listen() to bind a real TCP address");
+    }
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      const response = await fetch(`${baseUrl}/runs/${runId}/events?sessionId=${sessionId}`);
+      expect(response.status).toBe(200);
+
+      const reader = response.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      const deadline = Date.now() + 5000;
+      while (!buffer.includes("event: done") && Date.now() < deadline) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value);
+      }
+
+      expect(buffer).toContain("event: trace");
+      expect(buffer).toContain('"id":1');
+      expect(buffer).toContain("event: done");
+      // The trailing trace event must be forwarded BEFORE the stream signals "done" — otherwise
+      // the browser closes the EventSource having never seen it.
+      expect(buffer.indexOf("event: trace")).toBeLessThan(buffer.indexOf("event: done"));
+    } finally {
+      await testApp.close();
+    }
+  }, 10_000);
 });

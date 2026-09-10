@@ -169,6 +169,16 @@ export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void 
           lastStatus = current.status;
           reply.raw.write(`event: status_changed\ndata: ${JSON.stringify({ status: current.status })}\n\n`);
           if (current.status === "done") {
+            // Drain any trailing events that may still be landing in the write-chain at the
+            // exact moment the checkpoint flips to "done" (PostgresEventBus.emit() is
+            // fire-and-forget, so a node's final trace events can still be in flight when its
+            // completeNode() save resolves).
+            const trailingEvents = await deps.listEventsSince(runId, cursor);
+            for (const event of trailingEvents) {
+              if (stopped) return;
+              cursor = event.id;
+              reply.raw.write(`id: ${event.id}\nevent: trace\ndata: ${JSON.stringify(event)}\n\n`);
+            }
             reply.raw.write(`event: done\ndata: {}\n\n`);
             stopped = true;
             clearInterval(timer);
