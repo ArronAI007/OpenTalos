@@ -4,3 +4,4 @@ dist
 *.tsbuildinfo
 .claude/worktrees
 /docs
+.superpowers
