@@ -13,7 +13,7 @@ export default defineConfig({
   webServer: [
     {
       command: "pnpm --filter @opentalos/worker start",
-      env: { DATABASE_URL, HEALTH_PORT: "3002" },
+      env: { DATABASE_URL, HEALTH_PORT: "3002", MODEL_PROVIDER: "mock" },
       url: "http://localhost:3002",
       reuseExistingServer: !process.env.CI,
       timeout: 20_000,
@@ -33,7 +33,7 @@ export default defineConfig({
       // independent of whether any request has touched Postgres yet, so this is a truer match for
       // "is the process up" than the DB-dependent route this plan originally pointed at.
       command: "pnpm --filter @opentalos/api start",
-      env: { DATABASE_URL, PORT: "3001", ADMIN_API_KEY },
+      env: { DATABASE_URL, PORT: "3001", ADMIN_API_KEY, MODEL_PROVIDER: "mock" },
       port: 3001,
       reuseExistingServer: !process.env.CI,
       timeout: 20_000,
