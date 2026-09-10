@@ -52,12 +52,15 @@ export function TraceDrawer({ open, timeline, onClose, onApprove }: TraceDrawerP
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [open, onClose]);
 
-  if (!open) return null;
   return (
-    <aside className="trace-drawer" aria-label="执行轨迹">
+    <aside
+      className={`trace-drawer${open ? " trace-drawer-open" : ""}`}
+      aria-label="执行轨迹"
+      aria-hidden={!open}
+    >
       <div className="trace-drawer-header">
         <h2>执行轨迹</h2>
-        <button onClick={onClose} aria-label="关闭">
+        <button className="trace-drawer-close" onClick={onClose} aria-label="关闭">
           ✕
         </button>
       </div>

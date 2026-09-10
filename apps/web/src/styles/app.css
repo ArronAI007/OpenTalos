@@ -23,11 +23,15 @@ body {
 }
 
 .app-title {
-  font-weight: 600;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
 }
 
 .drawer-trigger {
   background: var(--color-surface);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   box-shadow: var(--shadow-soft);
   border: none;
   color: var(--color-accent-end);
@@ -36,6 +40,25 @@ body {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
+  transition:
+    transform var(--duration-fast) ease,
+    box-shadow var(--duration-fast) ease,
+    filter var(--duration-fast) ease;
+}
+
+.drawer-trigger:hover {
+  filter: brightness(1.05);
+  box-shadow: var(--shadow-hover);
+}
+
+.drawer-trigger:focus-visible {
+  outline: 2px solid var(--color-accent-start);
+  outline-offset: 2px;
+}
+
+.drawer-trigger:active {
+  transform: scale(0.97);
+  filter: brightness(0.97);
 }
 
 .chat-panel {
@@ -66,13 +89,15 @@ body {
 .message-user {
   align-self: flex-end;
   background: linear-gradient(135deg, var(--color-accent-start), var(--color-accent-end));
-  color: #fff;
+  color: var(--color-on-accent);
   border-radius: var(--radius-md) var(--radius-md) 4px var(--radius-md);
 }
 
 .message-assistant {
   align-self: flex-start;
   background: var(--color-surface);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border-radius: var(--radius-md) var(--radius-md) var(--radius-md) 4px;
 }
 
@@ -89,22 +114,60 @@ body {
 .chat-input {
   flex: 1;
   background: var(--color-surface);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border: none;
   border-radius: var(--radius-pill);
   padding: 9px 16px;
   font-size: 13px;
   box-shadow: var(--shadow-soft);
+  transition: box-shadow var(--duration-fast) ease;
+}
+
+.chat-input:focus-visible {
+  outline: 2px solid var(--color-accent-start);
+  outline-offset: 2px;
+}
+
+.chat-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .chat-send {
   background: linear-gradient(135deg, var(--color-accent-start), var(--color-accent-end));
-  color: #fff;
+  color: var(--color-on-accent);
   border: none;
   border-radius: var(--radius-pill);
   padding: 9px 18px;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
+  transition:
+    transform var(--duration-fast) ease,
+    box-shadow var(--duration-fast) ease,
+    filter var(--duration-fast) ease;
+}
+
+.chat-send:hover:not(:disabled) {
+  filter: brightness(1.08);
+  box-shadow: var(--shadow-hover);
+}
+
+.chat-send:focus-visible {
+  outline: 2px solid var(--color-accent-start);
+  outline-offset: 2px;
+}
+
+.chat-send:active:not(:disabled) {
+  transform: scale(0.97);
+  filter: brightness(0.96);
+}
+
+.chat-send:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  filter: none;
 }
 
 .trace-drawer {
@@ -113,11 +176,25 @@ body {
   right: 0;
   bottom: 0;
   width: min(360px, 90vw);
-  background: linear-gradient(160deg, var(--color-bg-start), var(--color-bg-end));
-  box-shadow: -4px 0 24px rgba(90, 80, 180, 0.15);
+  background: linear-gradient(160deg, var(--color-drawer-glass-start), var(--color-drawer-glass-end));
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--shadow-drawer);
   padding: var(--space-lg);
   overflow-y: auto;
   box-sizing: border-box;
+  transform: translateX(100%);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform var(--duration-normal) var(--ease-out-expo),
+    opacity var(--duration-normal) ease;
+}
+
+.trace-drawer-open {
+  transform: translateX(0);
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .trace-drawer-header {
@@ -125,6 +202,41 @@ body {
   justify-content: space-between;
   align-items: center;
   margin-bottom: var(--space-md);
+}
+
+.trace-drawer-header h2 {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.trace-drawer-close {
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  border-radius: var(--radius-pill);
+  padding: 4px 8px;
+  font-size: 14px;
+  line-height: 1;
+  transition:
+    transform var(--duration-fast) ease,
+    background var(--duration-fast) ease,
+    color var(--duration-fast) ease;
+}
+
+.trace-drawer-close:hover {
+  background: var(--color-hover-tint);
+  color: var(--color-text);
+}
+
+.trace-drawer-close:focus-visible {
+  outline: 2px solid var(--color-accent-start);
+  outline-offset: 2px;
+}
+
+.trace-drawer-close:active {
+  transform: scale(0.92);
 }
 
 .trace-timeline {
@@ -141,7 +253,7 @@ body {
   top: 6px;
   bottom: 6px;
   width: 2px;
-  background: linear-gradient(180deg, #a99ef0, #e0dcf5);
+  background: linear-gradient(180deg, var(--color-timeline-line-start), var(--color-timeline-line-end));
 }
 
 .trace-row {
@@ -161,6 +273,8 @@ body {
 
 .trace-card {
   background: var(--color-surface);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border-radius: 10px;
   padding: 8px 12px;
   box-shadow: var(--shadow-soft);
@@ -179,6 +293,23 @@ body {
   color: inherit;
   text-align: left;
   cursor: pointer;
+  border-radius: 6px;
+  transition:
+    background var(--duration-fast) ease,
+    transform var(--duration-fast) ease;
+}
+
+.trace-card-header:hover {
+  background: var(--color-hover-tint-soft);
+}
+
+.trace-card-header:focus-visible {
+  outline: 2px solid var(--color-accent-start);
+  outline-offset: 2px;
+}
+
+.trace-card-header:active {
+  transform: scale(0.99);
 }
 
 .trace-card-pause {
@@ -188,11 +319,21 @@ body {
 
 .trace-payload {
   margin-top: 6px;
-  background: #f3fbfa;
+  background: var(--color-payload-bg);
   border-radius: 6px;
   padding: 6px 8px;
   font-size: 11px;
   overflow-x: auto;
+  animation: trace-payload-fade-in var(--duration-fast) ease;
+}
+
+@keyframes trace-payload-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .trace-approval {
@@ -212,13 +353,32 @@ body {
 .approve-button {
   flex: 1;
   background: linear-gradient(135deg, var(--color-accent-start), var(--color-accent-end));
-  color: #fff;
+  color: var(--color-on-accent);
   border: none;
   border-radius: 8px;
   padding: 7px;
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
+  transition:
+    transform var(--duration-fast) ease,
+    box-shadow var(--duration-fast) ease,
+    filter var(--duration-fast) ease;
+}
+
+.approve-button:hover {
+  filter: brightness(1.08);
+  box-shadow: var(--shadow-hover);
+}
+
+.approve-button:focus-visible {
+  outline: 2px solid var(--color-accent-start);
+  outline-offset: 2px;
+}
+
+.approve-button:active {
+  transform: scale(0.97);
+  filter: brightness(0.96);
 }
 
 .deny-button {
@@ -231,10 +391,43 @@ body {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
+  transition:
+    transform var(--duration-fast) ease,
+    box-shadow var(--duration-fast) ease,
+    background var(--duration-fast) ease;
+}
+
+.deny-button:hover {
+  background: var(--color-warn-bg);
+  box-shadow: var(--shadow-hover);
+}
+
+.deny-button:focus-visible {
+  outline: 2px solid var(--color-danger-text);
+  outline-offset: 2px;
+}
+
+.deny-button:active {
+  transform: scale(0.97);
 }
 
 @media (max-width: 480px) {
   .trace-drawer {
     width: 100vw;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .trace-drawer,
+  .trace-payload,
+  .chat-send,
+  .chat-input,
+  .approve-button,
+  .deny-button,
+  .drawer-trigger,
+  .trace-card-header,
+  .trace-drawer-close {
+    transition: none;
+    animation: none;
   }
 }

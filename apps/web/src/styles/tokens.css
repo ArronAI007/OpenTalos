@@ -1,7 +1,9 @@
 :root {
   --color-bg-start: #eef1fb;
   --color-bg-end: #f7f4fb;
-  --color-surface: #ffffff;
+  --color-surface: rgba(255, 255, 255, 0.72);
+  --color-surface-solid: #ffffff;
+  --color-on-accent: #ffffff;
   --color-text: #282a3a;
   --color-text-muted: #9a97b0;
   --color-accent-start: #7c6ff0;
@@ -13,10 +15,22 @@
   --color-danger-text: #b5442e;
   --color-danger-border: #f0d0c8;
   --shadow-soft: 0 2px 10px rgba(90, 80, 180, 0.1);
+  --shadow-drawer: -4px 0 24px rgba(90, 80, 180, 0.15);
+  --shadow-hover: 0 4px 16px rgba(90, 80, 180, 0.25);
+  --color-timeline-line-start: #a99ef0;
+  --color-timeline-line-end: #e0dcf5;
+  --color-payload-bg: #f3fbfa;
+  --color-hover-tint: rgba(90, 80, 180, 0.1);
+  --color-hover-tint-soft: rgba(90, 80, 180, 0.08);
+  --color-drawer-glass-start: rgba(238, 241, 251, 0.78);
+  --color-drawer-glass-end: rgba(247, 244, 251, 0.85);
   --radius-md: 14px;
   --radius-pill: 20px;
   --space-sm: 8px;
   --space-md: 14px;
   --space-lg: 20px;
   --font-sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", sans-serif;
+  --duration-fast: 150ms;
+  --duration-normal: 300ms;
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
 }
