@@ -1,6 +1,7 @@
 packages:
   - "packages/*"
   - "examples/*"
+  - "apps/*"
 allowBuilds:
   cpu-features: true
   protobufjs: true

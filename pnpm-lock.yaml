@@ -119,6 +119,40 @@ importers:
         specifier: ^5.0.0
         version: 5.0.0(@types/node@22.20.1)(vite@8.2.2(@types/node@22.20.1)(yaml@2.9.0))
 
+  apps/worker:
+    dependencies:
+      '@opentalos/core-graph':
+        specifier: workspace:*
+        version: link:../../packages/core-graph
+      '@opentalos/core-types':
+        specifier: workspace:*
+        version: link:../../packages/core-types
+      '@opentalos/example-chat-demo-agent':
+        specifier: workspace:*
+        version: link:../../examples/chat-demo-agent
+      '@opentalos/postgres-checkpoint':
+        specifier: workspace:*
+        version: link:../../packages/postgres-checkpoint
+      '@opentalos/postgres-tracing':
+        specifier: workspace:*
+        version: link:../../packages/postgres-tracing
+      '@opentalos/scheduler':
+        specifier: workspace:*
+        version: link:../../packages/scheduler
+      pg:
+        specifier: ^8.23.0
+        version: 8.23.0
+    devDependencies:
+      '@testcontainers/postgresql':
+        specifier: ^12.1.0
+        version: 12.1.0
+      '@types/pg':
+        specifier: ^8.23.1
+        version: 8.23.1
+      testcontainers:
+        specifier: ^12.1.0
+        version: 12.1.0
+
   examples/chat-demo-agent:
     dependencies:
       '@opentalos/core-graph':
