@@ -48,15 +48,47 @@ describe("createAnthropicProvider", () => {
     ]);
   });
 
-  it("yields a tool_call chunk from a content_block_start tool_use event", async () => {
+  it("accumulates input_json_delta fragments across a tool_use block and yields one tool_call on content_block_stop", async () => {
+    // Regression test: the real Anthropic streaming API sends a tool_use block's `input` as `{}`
+    // on content_block_start, then streams the actual JSON as `input_json_delta` `partial_json`
+    // fragments (often split mid-token) across one or more content_block_delta events, closing
+    // with content_block_stop. A prior version of this fixture (and the code it was matching)
+    // incorrectly assumed the full `input` object arrived synchronously on content_block_start,
+    // which would silently produce `input: {}` for every real Anthropic tool call.
     const client = fakeClient([
-      { type: "content_block_start", content_block: { type: "tool_use", id: "call-1", name: "search", input: { q: "x" } } },
+      { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "call-1", name: "search", input: {} } },
+      { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: '{"q":' } },
+      { type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: '"x"}' } },
+      { type: "content_block_stop", index: 0 },
       { type: "message_stop" },
     ]);
     const provider = createAnthropicProvider(client, { model: "claude-test" });
     const chunks = [];
     for await (const chunk of provider.complete(request)) chunks.push(chunk);
-    expect(chunks[0]).toEqual({ type: "tool_call", toolCall: { id: "call-1", name: "search", input: { q: "x" } } });
+    expect(chunks).toEqual([
+      { type: "tool_call", toolCall: { id: "call-1", name: "search", input: { q: "x" } } },
+      { type: "message_stop" },
+    ]);
+  });
+
+  it("interleaves a text block and a tool_use block by index without cross-contaminating them", async () => {
+    const client = fakeClient([
+      { type: "content_block_start", index: 0, content_block: { type: "text" } },
+      { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Let me check. " } },
+      { type: "content_block_stop", index: 0 },
+      { type: "content_block_start", index: 1, content_block: { type: "tool_use", id: "call-1", name: "search", input: {} } },
+      { type: "content_block_delta", index: 1, delta: { type: "input_json_delta", partial_json: '{"q":"x"}' } },
+      { type: "content_block_stop", index: 1 },
+      { type: "message_stop" },
+    ]);
+    const provider = createAnthropicProvider(client, { model: "claude-test" });
+    const chunks = [];
+    for await (const chunk of provider.complete(request)) chunks.push(chunk);
+    expect(chunks).toEqual([
+      { type: "text_delta", textDelta: "Let me check. " },
+      { type: "tool_call", toolCall: { id: "call-1", name: "search", input: { q: "x" } } },
+      { type: "message_stop" },
+    ]);
   });
 
   it("extracts the system message and maps tool definitions to input_schema", async () => {

@@ -95,7 +95,13 @@ describe("createOllamaProvider", () => {
     });
   });
 
-  it("sends tools in the request body and parses tool_calls out of a response line", async () => {
+  it("sends tools in the request body and parses tool_calls out of a response line matching Ollama's real shape (no id, object arguments)", async () => {
+    // Regression test: Ollama's actual `/api/chat` response (confirmed against
+    // github.com/ollama/ollama/docs/api.md) sends tool_calls with NO `id` field and
+    // `function.arguments` as a plain JSON *object*, not a JSON-encoded string. A prior version
+    // of this fixture (and the code it was matching) incorrectly assumed an OpenAI-shaped
+    // `{ id, function: { arguments: "<json string>" } }`, which crashes `JSON.parse` on a real
+    // Ollama server the first time a tool-calling model actually responds.
     let capturedInit: { method: string; body: string; headers: Record<string, string> } | undefined;
     const fetchFn: OllamaFetchLike = async (_url, init) => {
       capturedInit = init;
@@ -103,7 +109,7 @@ describe("createOllamaProvider", () => {
         ok: true,
         status: 200,
         body: streamFromLines([
-          JSON.stringify({ message: { tool_calls: [{ id: "call-1", function: { name: "search", arguments: '{"q":"x"}' } }] } }),
+          JSON.stringify({ message: { tool_calls: [{ function: { name: "search", arguments: { q: "x" } } }] } }),
           JSON.stringify({ done: true }),
         ]),
       };
@@ -120,6 +126,27 @@ describe("createOllamaProvider", () => {
     expect(sentBody.tools).toEqual([
       { type: "function", function: { name: "search", description: "search the web", parameters: { type: "object" } } },
     ]);
+    expect(chunks).toHaveLength(2);
+    expect(chunks[0]).toMatchObject({ type: "tool_call", toolCall: { name: "search", input: { q: "x" } } });
+    // No id was in the response — the adapter must synthesize a non-empty one rather than pass
+    // through `undefined` (which would break downstream tool-result correlation).
+    expect((chunks[0] as { toolCall: { id: string } }).toolCall.id).toEqual(expect.any(String));
+    expect((chunks[0] as { toolCall: { id: string } }).toolCall.id.length).toBeGreaterThan(0);
+    expect(chunks[1]).toEqual({ type: "message_stop" });
+  });
+
+  it("also accepts a JSON-string-encoded arguments field and a present id, defensively", async () => {
+    const fetchFn: OllamaFetchLike = async () => ({
+      ok: true,
+      status: 200,
+      body: streamFromLines([
+        JSON.stringify({ message: { tool_calls: [{ id: "call-1", function: { name: "search", arguments: '{"q":"x"}' } }] } }),
+        JSON.stringify({ done: true }),
+      ]),
+    });
+    const provider = createOllamaProvider(fetchFn, { baseUrl: "http://localhost:11434", model: "llama-test" });
+    const chunks = [];
+    for await (const chunk of provider.complete({ messages: [{ role: "user", content: "hi" }] })) chunks.push(chunk);
     expect(chunks).toEqual([
       { type: "tool_call", toolCall: { id: "call-1", name: "search", input: { q: "x" } } },
       { type: "message_stop" },

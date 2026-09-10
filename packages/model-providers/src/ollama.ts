@@ -17,7 +17,17 @@ export interface OllamaProviderOptions {
 }
 
 interface OllamaChatLine {
-  message?: { content?: string; tool_calls?: { id: string; function: { name: string; arguments: string } }[] };
+  message?: {
+    content?: string;
+    // Verified against current Ollama docs (docs.ollama.com/capabilities/tool-calling,
+    // github.com/ollama/ollama/docs/api.md) as of this writing: a real `/api/chat` response's
+    // `tool_calls` entries have NO `id` field (see the OllamaOutMessage-building comment above —
+    // same open upstream gap, ollama/ollama#11417) and `function.arguments` is a plain JSON
+    // *object*, not a JSON-encoded string (unlike OpenAI's wire format, which this shape
+    // otherwise mirrors). Both fields are typed optional/union here — rather than assumed present
+    // in OpenAI's shape — so parseLine below can handle the real response without throwing.
+    tool_calls?: { id?: string; function: { name: string; arguments: string | Record<string, unknown> } }[];
+  };
   done?: boolean;
 }
 
@@ -79,9 +89,23 @@ function parseLine(line: string): ModelResponseChunk[] {
     chunks.push({ type: "text_delta", textDelta: parsed.message.content });
   }
   for (const call of parsed.message?.tool_calls ?? []) {
+    // `id`: real Ollama responses don't send one (see OllamaChatLine above) — synthesize a
+    // unique one so this ToolCall can still be correlated through the rest of the pipeline
+    // (runModelWithTools / the tool registry / the eventual `tool` result message), the same way
+    // every other real id would be. `crypto.randomUUID()` is a Node >=20 global (this repo's
+    // minimum engine), no import needed.
+    // `arguments`: accept either a plain object (the real shape) or a JSON string (defensive,
+    // in case a future Ollama version — or an OpenAI-compatible proxy in front of it — encodes it
+    // as a string instead); only JSON.parse when it actually is a string, to avoid crashing on
+    // `JSON.parse` being handed a non-string value.
+    const args = call.function.arguments;
     chunks.push({
       type: "tool_call",
-      toolCall: { id: call.id, name: call.function.name, input: JSON.parse(call.function.arguments || "{}") },
+      toolCall: {
+        id: call.id ?? crypto.randomUUID(),
+        name: call.function.name,
+        input: typeof args === "string" ? JSON.parse(args || "{}") : (args ?? {}),
+      },
     });
   }
   if (parsed.done) {

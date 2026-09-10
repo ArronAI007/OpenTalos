@@ -51,14 +51,71 @@ describe("createOpenAICompatibleProvider", () => {
     ]);
   });
 
-  it("yields tool_call chunks from delta.tool_calls", async () => {
+  it("yields a tool_call chunk once a single-fragment delta.tool_calls completes at finish_reason", async () => {
     const client = fakeClient([
-      { choices: [{ delta: { tool_calls: [{ id: "call-1", function: { name: "search", arguments: '{"q":"x"}' } }] } }] },
+      {
+        choices: [
+          { delta: { tool_calls: [{ index: 0, id: "call-1", function: { name: "search", arguments: '{"q":"x"}' } }] } },
+        ],
+      },
+      { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
     ]);
     const provider = createOpenAICompatibleProvider(client, { model: "gpt-test" });
     const chunks = [];
     for await (const chunk of provider.complete(request)) chunks.push(chunk);
-    expect(chunks).toEqual([{ type: "tool_call", toolCall: { id: "call-1", name: "search", input: { q: "x" } } }]);
+    expect(chunks).toEqual([
+      { type: "tool_call", toolCall: { id: "call-1", name: "search", input: { q: "x" } } },
+      { type: "message_stop" },
+    ]);
+  });
+
+  it("accumulates a tool call whose id/name/arguments arrive fragmented across multiple chunks, keyed by index", async () => {
+    // Regression test: real OpenAI-protocol streaming sends `id`/`function.name` only on a tool
+    // call's first fragment and splits `function.arguments` across many fragments (e.g. mid-token,
+    // like `{"q` then `":"x` then `"}`). A prior version of this fixture (and the code it was
+    // matching) treated each `delta.tool_calls` entry as one complete, standalone call and called
+    // `JSON.parse` on each fragment independently — which throws a `SyntaxError` on any fragment
+    // after the first, since a partial JSON string like `{"q` is not valid JSON on its own.
+    const client = fakeClient([
+      { choices: [{ delta: { tool_calls: [{ index: 0, id: "call-1", function: { name: "search", arguments: '{"q' } }] } }] },
+      { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '":"x' } }] } }] },
+      { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '"}' } }] } }] },
+      { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+    ]);
+    const provider = createOpenAICompatibleProvider(client, { model: "gpt-test" });
+    const chunks = [];
+    for await (const chunk of provider.complete(request)) chunks.push(chunk);
+    expect(chunks).toEqual([
+      { type: "tool_call", toolCall: { id: "call-1", name: "search", input: { q: "x" } } },
+      { type: "message_stop" },
+    ]);
+  });
+
+  it("keeps two concurrent tool calls' argument fragments separate by index", async () => {
+    const client = fakeClient([
+      {
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                { index: 0, id: "call-1", function: { name: "search", arguments: '{"q":"x"}' } },
+                { index: 1, id: "call-2", function: { name: "lookup_rate", arguments: '{"pai' } },
+              ],
+            },
+          },
+        ],
+      },
+      { choices: [{ delta: { tool_calls: [{ index: 1, function: { arguments: 'r":"USD/CNY"}' } }] } }] },
+      { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+    ]);
+    const provider = createOpenAICompatibleProvider(client, { model: "gpt-test" });
+    const chunks = [];
+    for await (const chunk of provider.complete(request)) chunks.push(chunk);
+    expect(chunks).toEqual([
+      { type: "tool_call", toolCall: { id: "call-1", name: "search", input: { q: "x" } } },
+      { type: "tool_call", toolCall: { id: "call-2", name: "lookup_rate", input: { pair: "USD/CNY" } } },
+      { type: "message_stop" },
+    ]);
   });
 
   it("maps tool definitions to function.parameters matching inputSchema", async () => {
