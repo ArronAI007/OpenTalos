@@ -4,6 +4,7 @@ import { PostgresEventBus, listEventsSince } from "@opentalos/postgres-tracing";
 import { GraphRegistry, Scheduler } from "@opentalos/scheduler";
 import { buildChatDemoAgentGraph, createChatDemoAgentToolRegistry } from "@opentalos/example-chat-demo-agent";
 import { buildServer } from "./server.js";
+import { closeAllSseConnections } from "./routes/runs.js";
 
 /** Parses a positive-integer environment variable, throwing a clear error rather than
  * silently falling back to NaN (which would disable concurrency caps or break `.listen()`).
@@ -51,8 +52,16 @@ app.listen({ port, host: "0.0.0.0" }).then(() => {
 // meaningful health check — any of its real REST routes responding is proof of life (e.g.
 // GET /runs/some-id?sessionId=x, where even a 404 response means the process is up). This will
 // be used directly as Playwright's `webServer` readiness check in a later task.
+// Defense in depth: app.close() waits for all connections to finish naturally, but a hijacked
+// SSE response (see routes/runs.ts) stays open until its run completes or the client
+// disconnects. closeAllSseConnections() below proactively ends every tracked SSE stream before
+// close() is even called, but this timeout guarantees shutdown proceeds regardless, in case any
+// connection was somehow missed.
+const APP_CLOSE_TIMEOUT_MS = 5000;
+
 async function shutdown(): Promise<void> {
-  await app.close();
+  closeAllSseConnections();
+  await Promise.race([app.close(), new Promise((resolve) => setTimeout(resolve, APP_CLOSE_TIMEOUT_MS))]);
   await eventBus.flush();
   await pool.end();
   process.exit(0);

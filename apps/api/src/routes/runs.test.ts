@@ -8,6 +8,7 @@ import { PostgresEventBus, listEventsSince } from "@opentalos/postgres-tracing";
 import { GraphRegistry, Scheduler } from "@opentalos/scheduler";
 import { buildChatDemoAgentGraph, createChatDemoAgentToolRegistry } from "@opentalos/example-chat-demo-agent";
 import { buildServer } from "../server.js";
+import { closeAllSseConnections, getActiveSseConnectionCountForTests } from "./runs.js";
 import { DEV_TENANT_ID } from "../dev-tenant.js";
 
 let container: StartedPostgreSqlContainer;
@@ -184,4 +185,86 @@ describe("GET /runs/:runId/events", () => {
     const res = await app.inject({ method: "GET", url: `/runs/${runId}/events?sessionId=wrong` });
     expect(res.statusCode).toBe(403);
   });
+});
+
+describe("GET /runs/:runId/events (real SSE connection lifecycle)", () => {
+  // `.inject()` never opens a real socket, so `reply.hijack()` can't be exercised faithfully
+  // through it — a hijacked SSE response only behaves like a real long-lived connection over an
+  // actual TCP listener. This suite starts one just for these tests and reuses the same `app`
+  // instance (the outer `afterAll` above already closes it, which also tears down this listener).
+  let baseUrl: string;
+
+  beforeAll(async () => {
+    await app.listen({ port: 0, host: "127.0.0.1" });
+    const address = app.server.address();
+    if (address === null || typeof address === "string") {
+      throw new Error("expected app.listen() to bind a real TCP address");
+    }
+    baseUrl = `http://127.0.0.1:${address.port}`;
+  });
+
+  it("registers the connection in the tracking set and closeAllSseConnections() ends it", async () => {
+    // Nothing drains the task queue in this test suite (no Worker is wired in — see the
+    // tenant-mismatch test above), so this run's status stays "running" forever: the SSE stream
+    // will not reach its own "done" branch on its own, which is exactly what's needed to prove
+    // closeAllSseConnections() is what ended it, not the run finishing naturally.
+    const start = await app.inject({ method: "POST", url: "/runs?sessionId=sse1", payload: { message: "hi" } });
+    const { runId } = start.json();
+
+    const countBefore = getActiveSseConnectionCountForTests();
+
+    const response = await fetch(`${baseUrl}/runs/${runId}/events?sessionId=sse1`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/event-stream");
+    expect(response.body).not.toBeNull();
+
+    // Proves the handler registered `reply.raw` in the tracking set right after hijacking.
+    expect(getActiveSseConnectionCountForTests()).toBe(countBefore + 1);
+
+    const reader = response.body!.getReader();
+    closeAllSseConnections();
+
+    // Proves closeAllSseConnections() actually cleared the set (not just called .end() on stale
+    // entries left over from another test).
+    expect(getActiveSseConnectionCountForTests()).toBe(0);
+
+    const streamClosed = await Promise.race([
+      (async () => {
+        // Drain whatever was already buffered (e.g. an initial status_changed frame written by
+        // the first poll() tick, which can race ahead of closeAllSseConnections()) until the
+        // response body itself ends.
+        for (;;) {
+          const result = await reader.read();
+          if (result.done) return true;
+        }
+      })(),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 3000)),
+    ]);
+
+    // Proves closeAllSseConnections() genuinely terminated the underlying connection, not just
+    // the bookkeeping Set.
+    expect(streamClosed).toBe(true);
+  }, 10_000);
+
+  it("unregisters the connection when the client disconnects", async () => {
+    const start = await app.inject({ method: "POST", url: "/runs?sessionId=sse2", payload: { message: "hi" } });
+    const { runId } = start.json();
+
+    const countBefore = getActiveSseConnectionCountForTests();
+
+    const controller = new AbortController();
+    const response = await fetch(`${baseUrl}/runs/${runId}/events?sessionId=sse2`, { signal: controller.signal });
+    expect(response.status).toBe(200);
+    expect(getActiveSseConnectionCountForTests()).toBe(countBefore + 1);
+
+    // Exercises the `request.raw.on("close", ...)` handler from the client side.
+    controller.abort();
+
+    const deadline = Date.now() + 3000;
+    while (getActiveSseConnectionCountForTests() > countBefore && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+
+    expect(getActiveSseConnectionCountForTests()).toBe(countBefore);
+  }, 10_000);
 });
