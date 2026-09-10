@@ -77,10 +77,23 @@ describe("apps/worker registry wiring", () => {
     );
     await worker.pollOnce();
 
+    // PostgresEventBus.emit() is fire-and-forget (chained onto an internal write-chain promise,
+    // not awaited by callers), so some events can still be in-flight in the write queue right
+    // after pollOnce() resolves. Without this flush(), the assertions below could run against a
+    // partially-written event set -- confirmed by reproduction: two events were observed still
+    // unwritten immediately after pollOnce() returned, even after further awaited round trips.
+    await eventBus.flush();
+
     const checkpoint = await checkpointStore.load("worker-app-run-1");
     expect(checkpoint?.status).toBe("paused");
 
     const events = await listEventsSince(pool, "worker-app-run-1", 0);
-    expect(events.length).toBeGreaterThan(0);
+    // Mirrors the expected event-type sequence already established in
+    // examples/chat-demo-agent/src/index.test.ts for this same graph reaching its HITL pause.
+    const eventTypes = events.map((event) => event.type);
+    expect(eventTypes).toContain("node_enter");
+    expect(eventTypes).toContain("tool_call_start");
+    expect(eventTypes).toContain("tool_call_end");
+    expect(eventTypes).toContain("hitl_interrupt");
   });
 });
