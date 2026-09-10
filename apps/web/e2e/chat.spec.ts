@@ -51,7 +51,13 @@ test("responsive layout renders without horizontal overflow at key breakpoints",
 
 test("chat input is reachable via keyboard navigation", async ({ page }) => {
   await page.goto("/");
+
+  // The header's "轨迹" (trace drawer) toggle button precedes the chat input in DOM/tab order
+  // (see App.tsx: <header> renders before <ChatPanel>), so it is the genuinely first focusable
+  // element on the page. Confirm that, then confirm the second Tab press reaches the chat input.
   await page.keyboard.press("Tab");
-  const focused = await page.evaluate(() => document.activeElement?.tagName);
-  expect(focused).toBeTruthy();
+  await expect(page.getByRole("button", { name: /轨迹/ })).toBeFocused();
+
+  await page.keyboard.press("Tab");
+  await expect(page.getByPlaceholder("输入消息…")).toBeFocused();
 });
