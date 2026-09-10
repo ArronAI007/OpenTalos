@@ -1,0 +1,23 @@
+{
+  "name": "@opentalos/postgres-tracing",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@opentalos/core-types": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "pg": "^8.23.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.23.1",
+    "testcontainers": "^12.1.0",
+    "@testcontainers/postgresql": "^12.1.0"
+  }
+}
