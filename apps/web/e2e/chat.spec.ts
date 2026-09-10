@@ -137,3 +137,26 @@ test("double-clicking 批准 does not enqueue a duplicate resume request (Fix 4)
 
   expect(resumeRequestCount).toBe(1);
 });
+
+test("a terminal SSE connection failure re-enables sending a new message (Fix 5)", async ({ page }) => {
+  // Regression test: isRunInFlight was computed purely from timeline.status, which never
+  // advances to "done" if the SSE connection dies terminally (no more events or status changes
+  // can ever arrive) -- permanently locking the send button/input with no recovery path. Forcing
+  // the very first GET to /runs/:runId/events to fail with a non-200 status makes EventSource
+  // "fail the connection" per spec (no auto-retry, readyState CLOSED), which is exactly the
+  // terminal-failure case useRunEvents' connectionError flag exists to detect.
+  await page.route("**/events*", (route) => route.fulfill({ status: 500, body: "" }));
+
+  await page.goto("/");
+  const chatInput = page.getByPlaceholder("输入消息…");
+  const sendButton = page.getByRole("button", { name: "发送" });
+  await chatInput.fill("今天美元兑人民币汇率是多少？");
+  await sendButton.click();
+
+  // The mocked 500 response can fail the EventSource almost immediately, so whether the input
+  // was ever observably disabled is racy and not the point of this test -- what matters is that,
+  // once the connection is confirmed dead, sending recovers instead of staying locked forever.
+  await expect(page.getByText(/连接已断开/)).toBeVisible({ timeout: 10_000 });
+  await expect(chatInput).toBeEnabled();
+  await expect(sendButton).toBeEnabled();
+});

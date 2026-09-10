@@ -13,7 +13,16 @@ export function App() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [error, setError] = useState<string>();
   const timeline = useRunEvents(runId);
-  const isRunInFlight = runId !== undefined && (timeline.status === "running" || timeline.status === "paused");
+  // Once the SSE connection is confirmed terminally dead, no more trace events or status changes
+  // will ever arrive for this run, so timeline.status can never reach "done" on its own. Without
+  // excluding connectionError here, the run would stay "in flight" forever and the user could
+  // never send another message. Treating a confirmed-dead connection as "not in flight" lets the
+  // user start a fresh conversation (implicitly abandoning the stuck run) instead of being
+  // permanently locked out.
+  const isRunInFlight =
+    runId !== undefined &&
+    !timeline.connectionError &&
+    (timeline.status === "running" || timeline.status === "paused");
 
   useEffect(() => {
     const reply = timeline.finalState?.reply;
