@@ -28,7 +28,7 @@ and resume later from exactly where it left off, via a serializable `NodeCursor`
 | `packages/checkpoint` | `InMemoryCheckpointStore` — reference implementation of run-state persistence. |
 | `packages/tracing` | `InMemoryEventBus` — reference implementation of trace-event pub/sub. |
 | `packages/memory` | `InMemoryMemoryStore` — tenant/session-scoped agent memory. |
-| `packages/model-providers` | LLM provider adapters: Anthropic, OpenAI-compatible, Ollama. |
+| `packages/model-providers` | LLM provider adapters: Anthropic, OpenAI-compatible, Ollama, plus Dashscope/Doubao/Kimi/MiniMax presets over the OpenAI-compatible adapter, and a `mock` provider for tests. `createModelProviderFromEnv()` selects among them — see "Key Environment Variables" below. |
 | `packages/tool-registry` | Tool registration, including an MCP (Model Context Protocol) adapter. |
 | `packages/multi-agent` | Composable multi-agent patterns: supervisor/router and swarm graphs. |
 | `packages/config-loader` | Declarative graph definitions (YAML/JSON) compiled into `GraphDefinition`s. |
@@ -112,12 +112,21 @@ pnpm --filter @opentalos/worker build
 pnpm --filter @opentalos/api build
 
 # 3. Start each process (separate terminals)
+# Both processes call createModelProviderFromEnv() at startup and fail fast if MODEL_PROVIDER
+# is unset — see "Key Environment Variables" below for the full set of MODEL_* vars and the
+# built-in provider presets. MODEL_PROVIDER=mock (shown here) needs no API key and makes no
+# network calls; swap in a real provider (e.g. MODEL_PROVIDER=anthropic, MODEL_API_KEY=...,
+# MODEL_NAME=...) to actually call an LLM. apps/worker and apps/api each read these vars
+# independently — set the SAME values for both, or they can silently end up on different
+# providers/models.
 DATABASE_URL=postgres://postgres:postgres@localhost:5433/postgres \
+  MODEL_PROVIDER=mock \
   pnpm --filter @opentalos/worker start
 
 DATABASE_URL=postgres://postgres:postgres@localhost:5433/postgres \
   ADMIN_API_KEY=<pick-a-secret> \
   PORT=3001 \
+  MODEL_PROVIDER=mock \
   pnpm --filter @opentalos/api start
 
 pnpm --filter @opentalos/web dev      # http://localhost:5173
@@ -146,6 +155,18 @@ default tenant + API key via `globalSetup` — no manual process startup needed 
 | `HEALTH_PORT` | `apps/worker` | `3002` | Plain-text health check endpoint. |
 | `WORKER_GLOBAL_CONCURRENCY` | `apps/worker` | `10` | Cap across all tenants combined. |
 | `WORKER_TENANT_CONCURRENCY` | `apps/worker` | `5` | Static fallback cap per tenant, when a tenant has no configured quota. |
+| `MODEL_PROVIDER` | `apps/worker`, `apps/api` | *(required, no default)* | Selects the LLM backend: `anthropic \| openai-compatible \| ollama \| dashscope \| doubao \| kimi \| minimax \| mock`. Fails fast at startup if unset or unrecognized. `mock` needs no API key/network access and is what the E2E suite and `playwright.config.ts`'s `webServer` entries use — not a production fallback. |
+| `MODEL_API_KEY` | `apps/worker`, `apps/api` | *(required except for `ollama`/`mock`)* | |
+| `MODEL_NAME` | `apps/worker`, `apps/api` | *(required except for `mock`)* | No universal default across 7 providers. |
+| `MODEL_BASE_URL` | `apps/worker`, `apps/api` | Provider-specific preset (see below); required for `ollama` | Overrides the built-in preset. `dashscope`/`doubao`/`kimi`/`minimax` default to their public OpenAI-compatible endpoints (`https://dashscope.aliyuncs.com/compatible-mode/v1`, `https://ark.cn-beijing.volces.com/api/v3`, `https://api.moonshot.cn/v1`, `https://api.minimax.chat/v1` respectively); `anthropic`/`openai-compatible` use their SDK's own default unless set; `ollama` has no safe default (always a local address) and requires this var. |
+
+**Note:** `apps/worker` and `apps/api` each independently call `createModelProviderFromEnv()` from
+their own process environment — there is no shared/central config. In a real deployment, set the
+same `MODEL_*` values for both processes; if they diverge, `apps/api` merely fails fast at its own
+startup on an invalid value (it never actually calls the model itself — it only builds a
+provider to validate config and to hand to `buildChatAgentGraph`), while `apps/worker` is the
+process that actually executes the `respond`/`researcher`/`writer` nodes and makes the real LLM
+call, under whatever `MODEL_*` values *it* was started with.
 
 ## Design Principles
 
