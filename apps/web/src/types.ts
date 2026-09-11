@@ -15,3 +15,9 @@ export interface ChatMessage {
   role: "user" | "assistant" | "system";
   text: string;
 }
+
+export interface ChatSession {
+  id: string;
+  messages: ChatMessage[];
+  runId?: string;
+}

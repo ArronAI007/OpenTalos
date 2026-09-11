@@ -1,4 +1,3 @@
-const SESSION_ID = crypto.randomUUID();
 const API_KEY_STORAGE_KEY = "opentalos-api-key";
 
 export class ApiAuthError extends Error {
@@ -20,14 +19,14 @@ export function clearApiKey(): void {
   localStorage.removeItem(API_KEY_STORAGE_KEY);
 }
 
-function withSession(path: string): string {
+function withSession(path: string, sessionId: string): string {
   const separator = path.includes("?") ? "&" : "?";
-  return `${path}${separator}sessionId=${SESSION_ID}`;
+  return `${path}${separator}sessionId=${sessionId}`;
 }
 
-async function authedFetch(path: string, init: RequestInit = {}): Promise<Response> {
+async function authedFetch(path: string, sessionId: string, init: RequestInit = {}): Promise<Response> {
   const apiKey = getApiKey();
-  const res = await fetch(withSession(path), {
+  const res = await fetch(withSession(path, sessionId), {
     ...init,
     headers: { ...init.headers, Authorization: `Bearer ${apiKey}` },
   });
@@ -38,8 +37,8 @@ async function authedFetch(path: string, init: RequestInit = {}): Promise<Respon
   return res;
 }
 
-export async function startRun(message: string): Promise<{ runId: string }> {
-  const res = await authedFetch("/runs", {
+export async function startRun(sessionId: string, message: string): Promise<{ runId: string }> {
+  const res = await authedFetch("/runs", sessionId, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ message }),
@@ -48,8 +47,8 @@ export async function startRun(message: string): Promise<{ runId: string }> {
   return res.json();
 }
 
-export async function resumeRun(runId: string, approved: boolean): Promise<void> {
-  const res = await authedFetch(`/runs/${runId}/resume`, {
+export async function resumeRun(sessionId: string, runId: string, approved: boolean): Promise<void> {
+  const res = await authedFetch(`/runs/${runId}/resume`, sessionId, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ approved }),
@@ -57,8 +56,11 @@ export async function resumeRun(runId: string, approved: boolean): Promise<void>
   if (!res.ok) throw new Error(`Failed to resume run: ${res.status}`);
 }
 
-export async function getRun(runId: string): Promise<{ runId: string; status: string; state: Record<string, unknown> }> {
-  const res = await authedFetch(`/runs/${runId}`);
+export async function getRun(
+  sessionId: string,
+  runId: string,
+): Promise<{ runId: string; status: string; state: Record<string, unknown> }> {
+  const res = await authedFetch(`/runs/${runId}`, sessionId);
   if (!res.ok) throw new Error(`Failed to load run: ${res.status}`);
   return res.json();
 }
@@ -66,7 +68,7 @@ export async function getRun(runId: string): Promise<{ runId: string; status: st
 /** EventSource (used by useRunEvents) cannot set custom request headers, so the API key is
  * appended as a query parameter here specifically — apps/api's auth middleware accepts either
  * the Authorization header or this query parameter uniformly (see apps/api/src/auth.ts). */
-export function eventsUrl(runId: string): string {
+export function eventsUrl(sessionId: string, runId: string): string {
   const apiKey = getApiKey();
-  return `${withSession(`/runs/${runId}/events`)}&apiKey=${encodeURIComponent(apiKey ?? "")}`;
+  return `${withSession(`/runs/${runId}/events`, sessionId)}&apiKey=${encodeURIComponent(apiKey ?? "")}`;
 }

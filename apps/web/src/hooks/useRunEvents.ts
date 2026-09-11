@@ -2,15 +2,15 @@ import { useEffect, useReducer, useState } from "react";
 import { eventsUrl, getRun } from "../api.js";
 import { initialTraceTimelineState, traceTimelineReducer } from "./trace-reducer.js";
 
-export function useRunEvents(runId: string | undefined) {
+export function useRunEvents(sessionId: string | undefined, runId: string | undefined) {
   const [state, dispatch] = useReducer(traceTimelineReducer, initialTraceTimelineState);
   const [connectionError, setConnectionError] = useState(false);
 
   useEffect(() => {
-    if (!runId) return;
+    if (!sessionId || !runId) return;
     dispatch({ kind: "reset" });
     setConnectionError(false);
-    const source = new EventSource(eventsUrl(runId));
+    const source = new EventSource(eventsUrl(sessionId, runId));
 
     source.addEventListener("trace", (event) => {
       dispatch({ kind: "trace", event: JSON.parse((event as MessageEvent).data) });
@@ -20,7 +20,7 @@ export function useRunEvents(runId: string | undefined) {
       dispatch({ kind: "status", status });
     });
     source.addEventListener("done", () => {
-      getRun(runId)
+      getRun(sessionId, runId)
         .then((run) => dispatch({ kind: "final", state: run.state }))
         .catch(() => {
           // Best-effort: if the final-state fetch fails, the timeline still shows every trace
@@ -43,7 +43,7 @@ export function useRunEvents(runId: string | undefined) {
     };
 
     return () => source.close();
-  }, [runId]);
+  }, [sessionId, runId]);
 
   return { ...state, connectionError };
 }

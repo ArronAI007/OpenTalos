@@ -5,7 +5,7 @@ body {
   color: var(--color-text);
 }
 
-.app-shell {
+.app-gate-shell {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
@@ -15,11 +15,58 @@ body {
   box-sizing: border-box;
 }
 
+.app-shell {
+  display: flex;
+  min-height: 100vh;
+}
+
+.app-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: var(--space-lg);
+  box-sizing: border-box;
+}
+
 .app-header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: var(--space-sm);
   margin-bottom: var(--space-md);
+}
+
+.app-header .app-title {
+  flex: 1;
+}
+
+.sidebar-trigger {
+  display: none;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-soft);
+  border: none;
+  color: var(--color-text);
+  border-radius: var(--radius-pill);
+  width: 32px;
+  height: 32px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: filter var(--duration-fast) ease;
+}
+
+.sidebar-trigger:hover {
+  filter: brightness(1.05);
+}
+
+.sidebar-trigger:focus-visible {
+  outline: 2px solid var(--color-accent-start);
+  outline-offset: 2px;
+}
+
+.sidebar-scrim {
+  display: none;
 }
 
 .app-title {
@@ -61,6 +108,147 @@ body {
   filter: brightness(0.97);
 }
 
+.session-sidebar {
+  width: 240px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-lg) var(--space-md);
+  box-sizing: border-box;
+  background: var(--color-surface);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-right: 1px solid var(--color-hover-tint);
+  overflow-y: auto;
+}
+
+.session-new-button {
+  background: linear-gradient(135deg, var(--color-accent-start), var(--color-accent-end));
+  color: var(--color-on-accent);
+  border: none;
+  border-radius: var(--radius-pill);
+  padding: 9px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter var(--duration-fast) ease;
+}
+
+.session-new-button:hover {
+  filter: brightness(1.08);
+}
+
+.session-new-button:focus-visible {
+  outline: 2px solid var(--color-accent-start);
+  outline-offset: 2px;
+}
+
+.session-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+}
+
+.session-item {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.session-button {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--color-text);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background var(--duration-fast) ease;
+}
+
+.session-button:hover {
+  background: var(--color-hover-tint-soft);
+}
+
+.session-button:focus-visible {
+  outline: 2px solid var(--color-accent-start);
+  outline-offset: 2px;
+}
+
+.session-button-active {
+  background: var(--color-hover-tint);
+  font-weight: 600;
+}
+
+.session-delete-button {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 4px 6px;
+  font-size: 11px;
+  transition:
+    background var(--duration-fast) ease,
+    color var(--duration-fast) ease;
+}
+
+.session-delete-button:hover {
+  background: var(--color-hover-tint);
+  color: var(--color-danger-text);
+}
+
+.session-delete-button:focus-visible {
+  outline: 2px solid var(--color-accent-start);
+  outline-offset: 2px;
+}
+
+@media (max-width: 768px) {
+  .sidebar-trigger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .session-sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: 20;
+    width: min(280px, 85vw);
+    transform: translateX(-100%);
+    box-shadow: var(--shadow-drawer);
+    transition: transform var(--duration-normal) var(--ease-out-expo);
+  }
+
+  .session-sidebar.session-sidebar-open {
+    transform: translateX(0);
+  }
+
+  .sidebar-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 15;
+    background: rgba(20, 15, 40, 0.35);
+    border: none;
+    padding: 0;
+  }
+}
+
 .chat-panel {
   flex: 1;
   display: flex;
@@ -95,9 +283,11 @@ body {
 
 .message-assistant {
   align-self: flex-start;
+  /* No backdrop-filter here: every message bubble sits in a growing, scrolling list, and a
+     per-item blur filter forces the browser to recompute it on every scroll frame for every
+     bubble on screen — with enough messages that's what makes the page feel laggy. A translucent
+     solid background gives the same glass look at effectively zero scroll cost. */
   background: var(--color-surface);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
   border-radius: var(--radius-md) var(--radius-md) var(--radius-md) 4px;
 }
 
@@ -285,9 +475,9 @@ body {
 }
 
 .trace-card {
+  /* Same reasoning as .message-assistant: this list only grows as trace events stream in, and
+     scrolling the drawer with a per-card blur filter is what makes it feel choppy. */
   background: var(--color-surface);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
   border-radius: 10px;
   padding: 8px 12px;
   box-shadow: var(--shadow-soft);
@@ -450,7 +640,10 @@ body {
   .deny-button,
   .drawer-trigger,
   .trace-card-header,
-  .trace-drawer-close {
+  .trace-drawer-close,
+  .session-sidebar,
+  .session-new-button,
+  .sidebar-trigger {
     transition: none;
     animation: none;
   }

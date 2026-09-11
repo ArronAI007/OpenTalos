@@ -60,9 +60,16 @@ test("responsive layout renders without horizontal overflow at key breakpoints",
 test("chat input is reachable via keyboard navigation", async ({ page }) => {
   await page.goto("/");
 
-  // The header's "轨迹" (trace drawer) toggle button precedes the chat input in DOM/tab order
-  // (see App.tsx: <header> renders before <ChatPanel>), so it is the genuinely first focusable
-  // element on the page. Confirm that, then confirm the second Tab press reaches the chat input.
+  // At desktop viewport width (Playwright's default), the session sidebar is permanently docked
+  // and its "☰" mobile toggle is display:none (so not focusable) — meaning the sidebar's own
+  // buttons ("+ 新对话", then the one default session) are the genuinely first focusable elements
+  // on the page, ahead of the header's "轨迹" (trace drawer) toggle and the chat input.
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("button", { name: "+ 新对话" })).toBeFocused();
+
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("button", { name: "新对话", exact: true })).toBeFocused();
+
   await page.keyboard.press("Tab");
   await expect(page.getByRole("button", { name: /轨迹/ })).toBeFocused();
 
@@ -78,6 +85,8 @@ test("closed trace drawer's buttons are not keyboard-reachable, but open ones ar
   // button stayed in the tab order even while aria-hidden="true" -- a WCAG aria-hidden-focus
   // violation. The trace-drawer (and its close button) is rendered AFTER the chat panel in the
   // DOM (see App.tsx), so continuing to Tab past the send button is what would have reached it.
+  await page.keyboard.press("Tab"); // + 新对话
+  await page.keyboard.press("Tab"); // default session button
   await page.keyboard.press("Tab"); // 轨迹 trigger
   await page.keyboard.press("Tab"); // chat input
   await expect(page.getByPlaceholder("输入消息…")).toBeFocused();
