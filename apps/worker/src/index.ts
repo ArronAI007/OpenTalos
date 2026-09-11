@@ -1,5 +1,7 @@
 import { createServer } from "node:http";
-import { pathToFileURL } from "node:url";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { config as loadDotenv } from "dotenv";
 import { Pool } from "pg";
 import type { EventBus } from "@opentalos/core-types";
 import { PostgresCheckpointStore } from "@opentalos/postgres-checkpoint";
@@ -40,6 +42,11 @@ function parsePositiveInt(envVar: string, defaultValue: number): number {
 }
 
 if (isMain()) {
+  // Repo-root .env, shared by apps/worker and apps/api, so MODEL_* vars don't silently diverge
+  // between the two processes (see README). Only fills in vars not already set in the
+  // environment, so an explicit `FOO=bar pnpm start` still wins over the .env file.
+  loadDotenv({ path: resolve(dirname(fileURLToPath(import.meta.url)), "../../../.env") });
+
   const pool = new Pool({
     connectionString: process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/opentalos",
   });

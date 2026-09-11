@@ -17,6 +17,7 @@
     "@opentalos/chat-agent": "workspace:*",
     "@opentalos/model-providers": "workspace:*",
     "@opentalos/postgres-tenancy": "workspace:*",
+    "dotenv": "^17.4.2",
     "fastify": "^5.0.0",
     "pg": "^8.23.0"
   },

@@ -18,6 +18,7 @@
     "@opentalos/scheduler": "workspace:*",
     "@opentalos/chat-agent": "workspace:*",
     "@opentalos/model-providers": "workspace:*",
+    "dotenv": "^17.4.2",
     "pg": "^8.23.0"
   },
   "devDependencies": {

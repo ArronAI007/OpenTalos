@@ -1,3 +1,6 @@
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { config as loadDotenv } from "dotenv";
 import { Pool } from "pg";
 import { PostgresCheckpointStore } from "@opentalos/postgres-checkpoint";
 import { PostgresEventBus, listEventsSince } from "@opentalos/postgres-tracing";
@@ -7,6 +10,11 @@ import { buildChatAgentGraph, createChatAgentToolRegistry } from "@opentalos/cha
 import { createModelProviderFromEnv } from "@opentalos/model-providers";
 import { buildServer } from "./server.js";
 import { closeAllSseConnections } from "./routes/runs.js";
+
+// Repo-root .env, shared by apps/worker and apps/api, so MODEL_* vars don't silently diverge
+// between the two processes (see README). Only fills in vars not already set in the
+// environment, so an explicit `FOO=bar pnpm start` still wins over the .env file.
+loadDotenv({ path: resolve(dirname(fileURLToPath(import.meta.url)), "../../../.env") });
 
 /** Parses a positive-integer environment variable, throwing a clear error rather than
  * silently falling back to NaN (which would disable concurrency caps or break `.listen()`). */
