@@ -1,7 +1,7 @@
 body {
   margin: 0;
   font-family: var(--font-sans);
-  background: linear-gradient(160deg, var(--color-bg-start), var(--color-bg-end));
+  background: var(--color-bg);
   color: var(--color-text);
 }
 
@@ -45,23 +45,22 @@ body {
 .sidebar-trigger {
   display: none;
   background: var(--color-surface);
-  box-shadow: var(--shadow-soft);
-  border: none;
+  border: 0.5px solid var(--color-border);
   color: var(--color-text);
   border-radius: var(--radius-pill);
   width: 32px;
   height: 32px;
   font-size: 14px;
   cursor: pointer;
-  transition: filter var(--duration-fast) ease;
+  transition: background var(--duration-fast) ease;
 }
 
 .sidebar-trigger:hover {
-  filter: brightness(1.05);
+  background: var(--color-hover-tint-soft);
 }
 
 .sidebar-trigger:focus-visible {
-  outline: 2px solid var(--color-accent-start);
+  outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
 
@@ -77,35 +76,27 @@ body {
 
 .drawer-trigger {
   background: var(--color-surface);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  box-shadow: var(--shadow-soft);
-  border: none;
-  color: var(--color-accent-end);
+  border: 0.5px solid var(--color-border);
+  color: var(--color-accent);
   border-radius: var(--radius-pill);
   padding: 7px 14px;
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition:
-    transform var(--duration-fast) ease,
-    box-shadow var(--duration-fast) ease,
-    filter var(--duration-fast) ease;
+  transition: background var(--duration-fast) ease;
 }
 
 .drawer-trigger:hover {
-  filter: brightness(1.05);
-  box-shadow: var(--shadow-hover);
+  background: var(--color-hover-tint-soft);
 }
 
 .drawer-trigger:focus-visible {
-  outline: 2px solid var(--color-accent-start);
+  outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
 
 .drawer-trigger:active {
   transform: scale(0.97);
-  filter: brightness(0.97);
 }
 
 .session-sidebar {
@@ -116,15 +107,13 @@ body {
   gap: var(--space-sm);
   padding: var(--space-lg) var(--space-md);
   box-sizing: border-box;
-  background: var(--color-surface);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border-right: 1px solid var(--color-hover-tint);
+  background: var(--color-surface-sidebar);
+  border-right: 0.5px solid var(--color-border);
   overflow-y: auto;
 }
 
 .session-new-button {
-  background: linear-gradient(135deg, var(--color-accent-start), var(--color-accent-end));
+  background: var(--color-accent);
   color: var(--color-on-accent);
   border: none;
   border-radius: var(--radius-pill);
@@ -132,15 +121,15 @@ body {
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  transition: filter var(--duration-fast) ease;
+  transition: background var(--duration-fast) ease;
 }
 
 .session-new-button:hover {
-  filter: brightness(1.08);
+  background: var(--color-accent-hover);
 }
 
 .session-new-button:focus-visible {
-  outline: 2px solid var(--color-accent-start);
+  outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
 
@@ -178,16 +167,16 @@ body {
 }
 
 .session-button:hover {
-  background: var(--color-hover-tint-soft);
+  background: var(--color-sidebar-hover);
 }
 
 .session-button:focus-visible {
-  outline: 2px solid var(--color-accent-start);
+  outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
 
 .session-button-active {
-  background: var(--color-hover-tint);
+  background: var(--color-sidebar-active);
   font-weight: 600;
 }
 
@@ -211,7 +200,7 @@ body {
 }
 
 .session-delete-button:focus-visible {
-  outline: 2px solid var(--color-accent-start);
+  outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
 
@@ -243,7 +232,7 @@ body {
     position: fixed;
     inset: 0;
     z-index: 15;
-    background: rgba(20, 15, 40, 0.35);
+    background: rgba(15, 17, 21, 0.4);
     border: none;
     padding: 0;
   }
@@ -271,23 +260,21 @@ body {
   padding: 10px 14px;
   border-radius: var(--radius-md);
   font-size: 14px;
-  box-shadow: var(--shadow-soft);
 }
 
 .message-user {
   align-self: flex-end;
-  background: linear-gradient(135deg, var(--color-accent-start), var(--color-accent-end));
+  background: var(--color-accent);
   color: var(--color-on-accent);
   border-radius: var(--radius-md) var(--radius-md) 4px var(--radius-md);
 }
 
 .message-assistant {
   align-self: flex-start;
-  /* No backdrop-filter here: every message bubble sits in a growing, scrolling list, and a
-     per-item blur filter forces the browser to recompute it on every scroll frame for every
-     bubble on screen — with enough messages that's what makes the page feel laggy. A translucent
-     solid background gives the same glass look at effectively zero scroll cost. */
-  background: var(--color-surface);
+  /* A flat tinted fill (no backdrop-filter): every message bubble sits in a growing, scrolling
+     list, and a per-item blur filter forces the browser to recompute it on every scroll frame for
+     every bubble on screen — with enough messages that's what makes the page feel laggy. */
+  background: var(--color-bubble-assistant);
   border-radius: var(--radius-md) var(--radius-md) var(--radius-md) 4px;
 }
 
@@ -304,18 +291,16 @@ body {
 .chat-input {
   flex: 1;
   background: var(--color-surface);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: none;
+  border: 0.5px solid var(--color-border);
   border-radius: var(--radius-pill);
   padding: 9px 16px;
   font-size: 13px;
-  box-shadow: var(--shadow-soft);
-  transition: box-shadow var(--duration-fast) ease;
+  color: var(--color-text);
+  transition: border-color var(--duration-fast) ease;
 }
 
 .chat-input:focus-visible {
-  outline: 2px solid var(--color-accent-start);
+  outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
 
@@ -325,7 +310,7 @@ body {
 }
 
 .chat-send {
-  background: linear-gradient(135deg, var(--color-accent-start), var(--color-accent-end));
+  background: var(--color-accent);
   color: var(--color-on-accent);
   border: none;
   border-radius: var(--radius-pill);
@@ -335,29 +320,25 @@ body {
   cursor: pointer;
   transition:
     transform var(--duration-fast) ease,
-    box-shadow var(--duration-fast) ease,
-    filter var(--duration-fast) ease;
+    background var(--duration-fast) ease;
 }
 
 .chat-send:hover:not(:disabled) {
-  filter: brightness(1.08);
-  box-shadow: var(--shadow-hover);
+  background: var(--color-accent-hover);
 }
 
 .chat-send:focus-visible {
-  outline: 2px solid var(--color-accent-start);
+  outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
 
 .chat-send:active:not(:disabled) {
   transform: scale(0.97);
-  filter: brightness(0.96);
 }
 
 .chat-send:disabled {
   opacity: 0.6;
   cursor: not-allowed;
-  filter: none;
 }
 
 .trace-drawer {
@@ -366,9 +347,8 @@ body {
   right: 0;
   bottom: 0;
   width: min(360px, 90vw);
-  background: linear-gradient(160deg, var(--color-drawer-glass-start), var(--color-drawer-glass-end));
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: var(--color-surface);
+  border-left: 0.5px solid var(--color-border);
   box-shadow: var(--shadow-drawer);
   padding: var(--space-lg);
   overflow-y: auto;
@@ -434,7 +414,7 @@ body {
 }
 
 .trace-drawer-close:focus-visible {
-  outline: 2px solid var(--color-accent-start);
+  outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
 
@@ -476,11 +456,12 @@ body {
 
 .trace-card {
   /* Same reasoning as .message-assistant: this list only grows as trace events stream in, and
-     scrolling the drawer with a per-card blur filter is what makes it feel choppy. */
-  background: var(--color-surface);
+     scrolling the drawer with a per-card blur filter is what makes it feel choppy. A hairline
+     border does the job of separating cards instead. */
+  background: var(--color-bg);
+  border: 0.5px solid var(--color-border);
   border-radius: 10px;
   padding: 8px 12px;
-  box-shadow: var(--shadow-soft);
   font-size: 12px;
 }
 
@@ -507,7 +488,7 @@ body {
 }
 
 .trace-card-header:focus-visible {
-  outline: 2px solid var(--color-accent-start);
+  outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
 
@@ -516,7 +497,7 @@ body {
 }
 
 .trace-card-pause {
-  background: linear-gradient(135deg, var(--color-warn-bg), var(--color-surface));
+  background: var(--color-warn-bg);
   border: 1px solid var(--color-warn-border);
 }
 
@@ -541,7 +522,7 @@ body {
 
 .trace-approval {
   margin-top: var(--space-md);
-  background: linear-gradient(135deg, var(--color-warn-bg), var(--color-surface));
+  background: var(--color-warn-bg);
   border: 1px solid var(--color-warn-border);
   border-radius: 10px;
   padding: 10px 12px;
@@ -555,7 +536,7 @@ body {
 
 .approve-button {
   flex: 1;
-  background: linear-gradient(135deg, var(--color-accent-start), var(--color-accent-end));
+  background: var(--color-accent);
   color: var(--color-on-accent);
   border: none;
   border-radius: 8px;
@@ -565,29 +546,25 @@ body {
   cursor: pointer;
   transition:
     transform var(--duration-fast) ease,
-    box-shadow var(--duration-fast) ease,
-    filter var(--duration-fast) ease;
+    background var(--duration-fast) ease;
 }
 
 .approve-button:hover:not(:disabled) {
-  filter: brightness(1.08);
-  box-shadow: var(--shadow-hover);
+  background: var(--color-accent-hover);
 }
 
 .approve-button:focus-visible {
-  outline: 2px solid var(--color-accent-start);
+  outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
 
 .approve-button:active:not(:disabled) {
   transform: scale(0.97);
-  filter: brightness(0.96);
 }
 
 .approve-button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
-  filter: none;
 }
 
 .deny-button {
@@ -602,13 +579,11 @@ body {
   cursor: pointer;
   transition:
     transform var(--duration-fast) ease,
-    box-shadow var(--duration-fast) ease,
     background var(--duration-fast) ease;
 }
 
 .deny-button:hover:not(:disabled) {
   background: var(--color-warn-bg);
-  box-shadow: var(--shadow-hover);
 }
 
 .deny-button:focus-visible {
@@ -653,8 +628,8 @@ body {
   max-width: 360px;
   margin: 120px auto;
   background: var(--color-surface-solid);
+  border: 0.5px solid var(--color-border);
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow-soft);
   padding: var(--space-lg);
   text-align: center;
 }
@@ -662,16 +637,17 @@ body {
 .gate-input {
   width: 100%;
   box-sizing: border-box;
-  border: none;
+  background: var(--color-surface);
+  border: 0.5px solid var(--color-border);
   border-radius: var(--radius-pill);
   padding: 9px 16px;
   font-size: 13px;
-  box-shadow: var(--shadow-soft);
+  color: var(--color-text);
   margin: var(--space-md) 0;
 }
 
 .gate-button {
-  background: linear-gradient(135deg, var(--color-accent-start), var(--color-accent-end));
+  background: var(--color-accent);
   color: var(--color-on-accent);
   border: none;
   border-radius: var(--radius-pill);
@@ -679,14 +655,14 @@ body {
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  transition: filter var(--duration-fast) ease;
+  transition: background var(--duration-fast) ease;
 }
 
 .gate-button:hover {
-  filter: brightness(1.08);
+  background: var(--color-accent-hover);
 }
 
 .gate-button:focus-visible {
-  outline: 2px solid var(--color-accent-start);
+  outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }

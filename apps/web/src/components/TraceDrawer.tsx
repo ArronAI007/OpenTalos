@@ -10,12 +10,12 @@ interface TraceDrawerProps {
 }
 
 const DOT_COLOR: Record<string, string> = {
-  node_enter: "var(--color-accent-start)",
-  node_exit: "var(--color-accent-start)",
-  tool_call_start: "var(--color-accent-teal)",
-  tool_call_end: "var(--color-accent-teal)",
-  llm_call_start: "var(--color-accent-teal)",
-  llm_call_end: "var(--color-accent-teal)",
+  node_enter: "var(--color-accent)",
+  node_exit: "var(--color-accent)",
+  tool_call_start: "var(--color-accent-secondary)",
+  tool_call_end: "var(--color-accent-secondary)",
+  llm_call_start: "var(--color-accent-secondary)",
+  llm_call_end: "var(--color-accent-secondary)",
   hitl_interrupt: "var(--color-warn-text)",
   error: "var(--color-danger-text)",
 };
