@@ -8,11 +8,15 @@ const SYSTEM_PROMPT =
 
 function buildRespondNode(modelProvider: ModelProvider, toolRegistry: ToolRegistry): NodeFn<ChatState> {
   return async function* respond(state) {
-    const { finalText } = yield* runModelWithTools(modelProvider, toolRegistry.list(), [
+    const { finalText, messages } = yield* runModelWithTools(modelProvider, toolRegistry.list(), [
       { role: "system", content: SYSTEM_PROMPT },
       { role: "user", content: state.message },
     ]);
-    return { searchResult: finalText };
+    // Only turns that actually called a tool (e.g. looked up an exchange rate) go through human
+    // approval before their result is sent — plain conversational replies skip the HITL pause
+    // entirely, so an ordinary "你好" doesn't stop and wait for a click every time.
+    const usedTool = messages.some((message) => message.role === "tool");
+    return { searchResult: finalText, usedTool };
   };
 }
 
@@ -23,7 +27,11 @@ const confirm: NodeFn<ChatState> = async function* confirm() {
 };
 
 const respondFinal: NodeFn<ChatState> = async function* respondFinal(state) {
-  const reply = state.approved ? state.searchResult ?? "" : "好的，我不会发送这条回复。";
+  const reply = state.usedTool
+    ? state.approved
+      ? state.searchResult ?? ""
+      : "好的，我不会发送这条回复。"
+    : state.searchResult ?? "";
   return { reply };
 };
 
@@ -33,7 +41,8 @@ export function buildChatAgentGraph(modelProvider: ModelProvider, toolRegistry: 
     entryNode: "respond",
     nodes: { respond: buildRespondNode(modelProvider, toolRegistry), confirm, respondFinal },
     edges: [
-      { from: "respond", to: "confirm" },
+      { from: "respond", to: "confirm", condition: (state) => !!state.usedTool },
+      { from: "respond", to: "respondFinal", condition: (state) => !state.usedTool },
       { from: "confirm", to: "respondFinal" },
     ],
     reducer: shallowMergeReducer,
