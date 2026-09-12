@@ -1,11 +1,19 @@
-import type { EventBus, TenantContext, ToolCall, ToolResult } from "@opentalos/core-types";
+import type { EventBus, TenantContext, ToolCall, ToolResult, TraceEventType } from "@opentalos/core-types";
 
 export interface NodeContext {
   tenant: TenantContext;
   eventBus: EventBus;
 }
 
-export type NodeYield = { type: "awaiting_tool"; toolCall: ToolCall } | { type: "awaiting_approval"; reason: string };
+export type NodeYield =
+  | { type: "awaiting_tool"; toolCall: ToolCall }
+  | { type: "awaiting_approval"; reason: string }
+  // Fire-and-forget observability: the engine emits this as a trace event and immediately
+  // auto-continues the generator (never pauses, never touches the paused/replay machinery) —
+  // unlike the two yields above, this carries no meaning for resumability. Generic on purpose
+  // (an eventType, not one variant per event) so a future node can emit a new kind of
+  // observability event without the engine needing changes.
+  | { type: "emit"; eventType: TraceEventType; payload?: Record<string, unknown> };
 
 export type NodeResumeValue =
   | { type: "tool_result"; result: ToolResult }

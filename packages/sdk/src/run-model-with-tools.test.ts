@@ -30,6 +30,12 @@ async function drive(
 ): Promise<AgentTurnResult> {
   let next = await gen.next();
   while (!next.done) {
+    // Mirrors GraphEngine.runNodeToCompletion: an "emit" yield never pauses, so a test driver
+    // (like the real engine) just auto-continues past it.
+    if (next.value.type === "emit") {
+      next = await gen.next(undefined);
+      continue;
+    }
     if (next.value.type !== "awaiting_tool") {
       throw new Error(`Unexpected yield type in test helper: ${next.value.type}`);
     }
@@ -90,6 +96,29 @@ describe("runModelWithTools", () => {
     expect(result.finalText).toBe("combined answer");
     const toolMessages = result.messages.filter((m) => m.role === "tool");
     expect(toolMessages.map((m) => m.toolCallId)).toEqual(["call-1", "call-2"]);
+  });
+
+  it("yields llm_call_start, one llm_text_delta per chunk, and llm_call_end around a round with no tool calls", async () => {
+    const provider = scriptedProvider([
+      [{ type: "text_delta", textDelta: "hel" }, { type: "text_delta", textDelta: "lo" }, { type: "message_stop" }],
+    ]);
+    const gen = runModelWithTools(provider, tools, [{ role: "user", content: "hi" }]);
+    const emitted: NodeYield[] = [];
+    let next = await gen.next();
+    while (!next.done) {
+      if (next.value.type !== "emit") {
+        throw new Error(`Unexpected yield type in this test: ${next.value.type}`);
+      }
+      emitted.push(next.value);
+      next = await gen.next(undefined);
+    }
+    expect(emitted).toEqual([
+      { type: "emit", eventType: "llm_call_start" },
+      { type: "emit", eventType: "llm_text_delta", payload: { delta: "hel" } },
+      { type: "emit", eventType: "llm_text_delta", payload: { delta: "lo" } },
+      { type: "emit", eventType: "llm_call_end" },
+    ]);
+    expect(next.value.finalText).toBe("hello");
   });
 
   it("throws once maxRounds is exceeded when the model never stops requesting tools", async () => {

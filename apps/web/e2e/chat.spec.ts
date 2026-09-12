@@ -11,7 +11,7 @@ test.beforeEach(async ({ page }) => {
 test("send a message, see trace events stream in, approve the HITL pause, see completion", async ({ page }) => {
   await page.goto("/");
 
-  const chatInput = page.getByPlaceholder("输入消息…");
+  const chatInput = page.getByPlaceholder("给智能体发消息");
   const sendButton = page.getByRole("button", { name: "发送" });
 
   await chatInput.fill("今天美元兑人民币汇率是多少？");
@@ -62,57 +62,41 @@ test("chat input is reachable via keyboard navigation", async ({ page }) => {
 
   // At desktop viewport width (Playwright's default), the session sidebar is permanently docked
   // and its "☰" mobile toggle is display:none (so not focusable) — meaning the sidebar's own
-  // buttons ("+ 新对话", then the one default session) are the genuinely first focusable elements
-  // on the page, ahead of the header's "轨迹" (trace drawer) toggle and the chat input.
+  // controls (collapse button, "+ 新会话", the workspace toolbar's search/sort/new icons, then the
+  // one default session, then "设置") are the genuinely first focusable elements on the page,
+  // ahead of the header's Session log button, 对话/轨迹 tabs, and the chat input.
   await page.keyboard.press("Tab");
-  await expect(page.getByRole("button", { name: "+ 新对话" })).toBeFocused();
+  await expect(page.getByRole("button", { name: "收起侧栏" })).toBeFocused();
 
   await page.keyboard.press("Tab");
-  await expect(page.getByRole("button", { name: "新对话", exact: true })).toBeFocused();
+  await expect(page.getByRole("button", { name: "+ 新会话" })).toBeFocused();
+
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("button", { name: "搜索会话" })).toBeFocused();
+
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("button", { name: "按最早优先排序" })).toBeFocused();
+
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("button", { name: "新建会话" })).toBeFocused();
+
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("button", { name: "新会话", exact: true })).toBeFocused();
+
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("button", { name: "设置", exact: true })).toBeFocused();
+
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("button", { name: /Session log/ })).toBeFocused();
+
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("button", { name: "对话", exact: true })).toBeFocused();
 
   await page.keyboard.press("Tab");
   await expect(page.getByRole("button", { name: /轨迹/ })).toBeFocused();
 
   await page.keyboard.press("Tab");
-  await expect(page.getByPlaceholder("输入消息…")).toBeFocused();
-});
-
-test("closed trace drawer's buttons are not keyboard-reachable, but open ones are (Fix 3)", async ({ page }) => {
-  await page.goto("/");
-
-  // Regression test: TraceDrawer sets aria-hidden={!open} on the closed drawer, but its CSS only
-  // hid it visually (transform/opacity/pointer-events) without visibility: hidden, so its close
-  // button stayed in the tab order even while aria-hidden="true" -- a WCAG aria-hidden-focus
-  // violation. The trace-drawer (and its close button) is rendered AFTER the chat panel in the
-  // DOM (see App.tsx), so continuing to Tab past the send button is what would have reached it.
-  await page.keyboard.press("Tab"); // + 新对话
-  await page.keyboard.press("Tab"); // default session button
-  await page.keyboard.press("Tab"); // 轨迹 trigger
-  await page.keyboard.press("Tab"); // chat input
-  await expect(page.getByPlaceholder("输入消息…")).toBeFocused();
-  await page.keyboard.press("Tab"); // send button
-  await expect(page.getByRole("button", { name: "发送" })).toBeFocused();
-
-  const drawer = page.locator(".trace-drawer");
-  const drawerClose = page.locator(".trace-drawer-close");
-  await expect(drawer).toHaveAttribute("aria-hidden", "true");
-  await expect(drawer).toHaveCSS("visibility", "hidden");
-
-  await page.keyboard.press("Tab");
-  await expect(drawerClose).not.toBeFocused();
-
-  // Opening the drawer must still show the slide-in animation (no snapping to the open state)
-  // and make its buttons genuinely tabbable again.
-  const transitionDuration = await drawer.evaluate((el) => getComputedStyle(el).transitionDuration);
-  expect(transitionDuration).not.toBe("0s");
-
-  await page.getByRole("button", { name: /轨迹/ }).click();
-  await expect(drawer).toHaveClass(/trace-drawer-open/);
-  await expect(drawer).toHaveAttribute("aria-hidden", "false");
-  await expect(drawer).toHaveCSS("visibility", "visible");
-
-  await drawerClose.focus();
-  await expect(drawerClose).toBeFocused();
+  await expect(page.getByPlaceholder("给智能体发消息")).toBeFocused();
 });
 
 test("double-clicking 批准 does not enqueue a duplicate resume request (Fix 4)", async ({ page }) => {
@@ -124,7 +108,7 @@ test("double-clicking 批准 does not enqueue a duplicate resume request (Fix 4)
   // DOM hasn't necessarily been updated yet at the moment of a same-tick double click.
   await page.goto("/");
 
-  const chatInput = page.getByPlaceholder("输入消息…");
+  const chatInput = page.getByPlaceholder("给智能体发消息");
   const sendButton = page.getByRole("button", { name: "发送" });
   await chatInput.fill("今天美元兑人民币汇率是多少？");
   await sendButton.click();
@@ -165,7 +149,7 @@ test("a terminal SSE connection failure re-enables sending a new message (Fix 5)
   await page.route("**/events*", (route) => route.fulfill({ status: 500, body: "" }));
 
   await page.goto("/");
-  const chatInput = page.getByPlaceholder("输入消息…");
+  const chatInput = page.getByPlaceholder("给智能体发消息");
   const sendButton = page.getByRole("button", { name: "发送" });
   await chatInput.fill("今天美元兑人民币汇率是多少？");
   await sendButton.click();

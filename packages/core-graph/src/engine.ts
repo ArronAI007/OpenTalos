@@ -315,6 +315,15 @@ export class GraphEngine<TState> {
         result = await advance({ type: "tool_result", result: toolResult });
         continue;
       }
+      // Must be checked before the replay-queue/pause logic below: an "emit" yield never pauses
+      // and isn't part of a node's resumable history, so it must never be treated as an
+      // awaiting_approval placeholder (which would either consume a replay-queue entry meant for
+      // a real approval, or pause the run waiting for one that will never come).
+      if (yielded.type === "emit") {
+        this.emitTrace(yielded.eventType, runId, tenant, yielded.payload);
+        result = await advance(undefined);
+        continue;
+      }
       // On replay, each awaiting_approval yield consumes the next queued value in order — this
       // is what makes cross-process resume possible: the node is being re-driven from scratch
       // (see resumeFromCheckpoint), and everything already resolved in an earlier replay pass

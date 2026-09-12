@@ -105,6 +105,7 @@ export type TraceEventType =
   | "node_exit"
   | "llm_call_start"
   | "llm_call_end"
+  | "llm_text_delta"
   | "tool_call_start"
   | "tool_call_end"
   | "hitl_interrupt"

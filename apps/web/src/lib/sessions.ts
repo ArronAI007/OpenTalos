@@ -4,7 +4,7 @@ const SESSIONS_KEY = "opentalos-sessions";
 const ACTIVE_SESSION_KEY = "opentalos-active-session";
 
 export function createEmptySession(): ChatSession {
-  return { id: crypto.randomUUID(), messages: [] };
+  return { id: crypto.randomUUID(), createdAt: Date.now(), messages: [] };
 }
 
 /** apps/api has no endpoint to list past runs for a session — conversation history only ever
@@ -17,10 +17,15 @@ export function loadSessions(): { sessions: ChatSession[]; activeSessionId: stri
     if (raw) {
       const sessions = JSON.parse(raw) as ChatSession[];
       if (Array.isArray(sessions) && sessions.length > 0) {
+        // Backfill createdAt for sessions saved before this field existed, so old localStorage
+        // data doesn't break relativeTime() below.
+        const normalized = sessions.map((session) => ({ ...session, createdAt: session.createdAt ?? Date.now() }));
         const storedActiveId = localStorage.getItem(ACTIVE_SESSION_KEY);
         const activeSessionId =
-          storedActiveId && sessions.some((session) => session.id === storedActiveId) ? storedActiveId : sessions[0].id;
-        return { sessions, activeSessionId };
+          storedActiveId && normalized.some((session) => session.id === storedActiveId)
+            ? storedActiveId
+            : normalized[0].id;
+        return { sessions: normalized, activeSessionId };
       }
     }
   } catch {
@@ -42,6 +47,19 @@ export function saveSessions(sessions: ChatSession[], activeSessionId: string): 
 
 export function sessionTitle(session: ChatSession): string {
   const firstUserMessage = session.messages.find((message) => message.role === "user");
-  if (!firstUserMessage) return "新对话";
+  if (!firstUserMessage) return "新会话";
   return firstUserMessage.text.length > 20 ? `${firstUserMessage.text.slice(0, 20)}…` : firstUserMessage.text;
+}
+
+/** Terse relative age for the sidebar list ("刚刚" / "5分钟" / "3小时" / "2天"), matching how long
+ * ago a session was created — not a general-purpose date formatter. */
+export function relativeSessionAge(createdAt: number): string {
+  const diffMs = Date.now() - createdAt;
+  const minute = 60_000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+  if (diffMs < minute) return "刚刚";
+  if (diffMs < hour) return `${Math.floor(diffMs / minute)}分钟`;
+  if (diffMs < day) return `${Math.floor(diffMs / hour)}小时`;
+  return `${Math.floor(diffMs / day)}天`;
 }

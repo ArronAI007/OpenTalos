@@ -18,6 +18,7 @@ export interface ChatMessage {
 
 export interface ChatSession {
   id: string;
+  createdAt: number;
   messages: ChatMessage[];
   runId?: string;
 }

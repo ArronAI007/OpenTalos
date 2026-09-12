@@ -42,7 +42,7 @@ test("admin creates a tenant and key via the browser, and the chat UI authentica
   await page.getByPlaceholder("API Key").fill(rawKey!);
   await page.getByRole("button", { name: "进入" }).click();
 
-  await page.getByPlaceholder("输入消息…").fill("今天美元兑人民币汇率是多少？");
+  await page.getByPlaceholder("给智能体发消息").fill("今天美元兑人民币汇率是多少？");
   await page.getByRole("button", { name: "发送" }).click();
   await expect(page.getByText("今天美元兑人民币汇率是多少？")).toBeVisible();
 
@@ -152,7 +152,7 @@ test("a revoked API key is rejected by the chat UI, which asks the user to re-en
   await page.goto("/");
   await page.getByPlaceholder("API Key").fill(rawKey);
   await page.getByRole("button", { name: "进入" }).click();
-  await page.getByPlaceholder("输入消息…").fill("hello");
+  await page.getByPlaceholder("给智能体发消息").fill("hello");
   await page.getByRole("button", { name: "发送" }).click();
 
   await expect(page.getByText("密钥无效或已被吊销，请重新输入")).toBeVisible({ timeout: 5000 });

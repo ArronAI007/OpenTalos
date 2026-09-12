@@ -119,6 +119,34 @@ describe("GraphEngine — sequential execution", () => {
     expect(deps.eventBus.getEvents().map((e) => e.type)).toContain("tool_call_end");
   });
 
+  it("auto-resolves an emit yield by persisting a trace event and continuing without pausing", async () => {
+    const streamText: NodeFn<CounterState> = async function* (state) {
+      yield { type: "emit", eventType: "llm_call_start" };
+      yield { type: "emit", eventType: "llm_text_delta", payload: { delta: "hi" } };
+      yield { type: "emit", eventType: "llm_call_end" };
+      return { count: state.count + 1 };
+    };
+    const graph: GraphDefinition<CounterState> = {
+      id: "g4b",
+      entryNode: "streamText",
+      nodes: { streamText },
+      edges: [],
+      reducer: shallowMergeReducer,
+    };
+    const deps = makeDeps();
+    const engine = new GraphEngine(graph, deps);
+    let checkpoint = engine.start({ count: 0 }, tenant, "run-4b");
+    checkpoint = await engine.run(checkpoint);
+
+    expect(checkpoint.status).toBe("done");
+    expect(checkpoint.state.count).toBe(1);
+    const deltaEvents = deps.eventBus.getEvents().filter((e) => e.type === "llm_text_delta");
+    expect(deltaEvents).toHaveLength(1);
+    expect(deltaEvents[0].payload).toEqual({ delta: "hi" });
+    expect(deps.eventBus.getEvents().map((e) => e.type)).toContain("llm_call_start");
+    expect(deps.eventBus.getEvents().map((e) => e.type)).toContain("llm_call_end");
+  });
+
   it("pauses on an awaiting_approval yield and persists a paused checkpoint", async () => {
     const askApproval: NodeFn<CounterState> = async function* (state) {
       const resume = yield { type: "awaiting_approval", reason: "please confirm" };

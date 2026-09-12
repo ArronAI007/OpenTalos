@@ -29,13 +29,16 @@ export async function* runModelWithTools(
   for (let round = 0; round < maxRounds; round++) {
     let assistantText = "";
     const pendingToolCalls: ToolCall[] = [];
+    yield { type: "emit", eventType: "llm_call_start" };
     for await (const chunk of provider.complete({ messages: conversation, tools })) {
       if (chunk.type === "text_delta") {
         assistantText += chunk.textDelta;
+        yield { type: "emit", eventType: "llm_text_delta", payload: { delta: chunk.textDelta } };
       } else if (chunk.type === "tool_call") {
         pendingToolCalls.push(chunk.toolCall);
       }
     }
+    yield { type: "emit", eventType: "llm_call_end" };
 
     if (pendingToolCalls.length === 0) {
       return { messages: conversation, finalText: assistantText };

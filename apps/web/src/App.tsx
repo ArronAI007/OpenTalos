@@ -1,21 +1,25 @@
 import { useEffect, useState } from "react";
-import { startRun, resumeRun, getApiKey, ApiAuthError } from "./api.js";
+import { startRun, resumeRun, getApiKey, clearApiKey, ApiAuthError } from "./api.js";
 import { useRunEvents } from "./hooks/useRunEvents.js";
 import { ChatPanel } from "./components/ChatPanel.js";
-import { TraceDrawer } from "./components/TraceDrawer.js";
+import { TracePanel } from "./components/TracePanel.js";
 import { ApiKeyGate } from "./components/ApiKeyGate.js";
 import { SessionSidebar } from "./components/SessionSidebar.js";
-import { createEmptySession, loadSessions, saveSessions } from "./lib/sessions.js";
+import { SessionLogMenu } from "./components/SessionLogMenu.js";
+import { createEmptySession, loadSessions, saveSessions, sessionTitle } from "./lib/sessions.js";
 import type { ChatSession } from "./types.js";
 import "./styles/tokens.css";
 import "./styles/app.css";
+
+type Tab = "chat" | "trace";
 
 export function App() {
   const [hasApiKey, setHasApiKey] = useState(() => getApiKey() !== null);
   const [authError, setAuthError] = useState<string>();
   const [{ sessions, activeSessionId }, setSessionState] = useState(loadSessions);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [activeTab, setActiveTab] = useState<Tab>("chat");
   const [error, setError] = useState<string>();
 
   const activeSession = sessions.find((session) => session.id === activeSessionId) ?? sessions[0];
@@ -85,6 +89,7 @@ export function App() {
     if (!runId) return;
     try {
       await resumeRun(activeSessionId, runId, approved);
+      setActiveTab("chat");
     } catch (err) {
       if (err instanceof ApiAuthError) {
         setHasApiKey(false);
@@ -99,13 +104,20 @@ export function App() {
     const session = createEmptySession();
     setSessionState((prev) => ({ sessions: [session, ...prev.sessions], activeSessionId: session.id }));
     setSidebarOpen(false);
+    setActiveTab("chat");
     setError(undefined);
   }
 
   function handleSelectSession(sessionId: string) {
     setSessionState((prev) => ({ ...prev, activeSessionId: sessionId }));
     setSidebarOpen(false);
+    setActiveTab("chat");
     setError(undefined);
+  }
+
+  function handleOpenSettings() {
+    clearApiKey();
+    setHasApiKey(false);
   }
 
   function handleDeleteSession(sessionId: string) {
@@ -140,28 +152,54 @@ export function App() {
         sessions={sessions}
         activeSessionId={activeSessionId}
         open={sidebarOpen}
+        collapsed={sidebarCollapsed}
         onSelect={handleSelectSession}
         onCreate={handleCreateSession}
         onDelete={handleDeleteSession}
         onClose={() => setSidebarOpen(false)}
+        onToggleCollapse={() => setSidebarCollapsed((value) => !value)}
+        onOpenSettings={handleOpenSettings}
       />
       <main className="app-main">
         <header className="app-header">
           <button className="sidebar-trigger" onClick={() => setSidebarOpen((value) => !value)} aria-label="会话列表">
             ☰
           </button>
-          <span className="app-title">OpenTalos · chat-agent</span>
-          <button className="drawer-trigger" onClick={() => setDrawerOpen((value) => !value)}>
-            📊 轨迹 ({timeline.events.length})
-          </button>
+          <div className="app-header-main">
+            <div className="app-header-top">
+              <h1 className="app-session-title">{sessionTitle(activeSession)}</h1>
+              <SessionLogMenu session={activeSession} />
+            </div>
+            <nav className="app-tabs" aria-label="视图切换">
+              <button
+                type="button"
+                className={`app-tab${activeTab === "chat" ? " app-tab-active" : ""}`}
+                onClick={() => setActiveTab("chat")}
+              >
+                对话
+              </button>
+              <button
+                type="button"
+                className={`app-tab${activeTab === "trace" ? " app-tab-active" : ""}`}
+                onClick={() => setActiveTab("trace")}
+              >
+                轨迹
+                {timeline.status === "paused" && <span className="app-tab-badge" aria-label="有待确认的操作" />}
+              </button>
+            </nav>
+          </div>
         </header>
-        <ChatPanel messages={activeSession.messages} onSend={handleSend} error={error} disabled={isRunInFlight} />
-        <TraceDrawer
-          open={drawerOpen}
-          timeline={timeline}
-          onClose={() => setDrawerOpen(false)}
-          onApprove={handleApprove}
-        />
+        {activeTab === "chat" ? (
+          <ChatPanel
+            messages={activeSession.messages}
+            onSend={handleSend}
+            error={error}
+            disabled={isRunInFlight}
+            streamingText={timeline.finalState ? undefined : timeline.streamingText}
+          />
+        ) : (
+          <TracePanel timeline={timeline} onApprove={handleApprove} />
+        )}
       </main>
     </div>
   );

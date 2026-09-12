@@ -35,6 +35,34 @@ describe("traceTimelineReducer", () => {
     expect(state.events.map((e) => e.type)).toEqual(["node_enter", "tool_call_start"]);
   });
 
+  it("accumulates llm_text_delta payloads into streamingText without adding them to events", () => {
+    let state = initialTraceTimelineState;
+    state = traceTimelineReducer(state, {
+      kind: "trace",
+      event: { ...sampleEvent, type: "llm_text_delta", payload: { delta: "hel" } },
+    });
+    state = traceTimelineReducer(state, {
+      kind: "trace",
+      event: { ...sampleEvent, id: 2, type: "llm_text_delta", payload: { delta: "lo" } },
+    });
+    expect(state.streamingText).toBe("hello");
+    expect(state.events).toEqual([]);
+  });
+
+  it("clears streamingText once a tool call starts, but still records that event", () => {
+    let state = initialTraceTimelineState;
+    state = traceTimelineReducer(state, {
+      kind: "trace",
+      event: { ...sampleEvent, type: "llm_text_delta", payload: { delta: "thinking…" } },
+    });
+    state = traceTimelineReducer(state, {
+      kind: "trace",
+      event: { ...sampleEvent, id: 2, type: "tool_call_start" },
+    });
+    expect(state.streamingText).toBe("");
+    expect(state.events.map((e) => e.type)).toEqual(["tool_call_start"]);
+  });
+
   it("records the final state payload when the run completes", () => {
     const next = traceTimelineReducer(initialTraceTimelineState, { kind: "final", state: { reply: "done" } });
     expect(next.finalState).toEqual({ reply: "done" });

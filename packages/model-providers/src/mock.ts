@@ -17,7 +17,13 @@ export function createMockProvider(): ModelProvider {
       }
       const lastToolMessage = [...request.messages].reverse().find((m) => m.role === "tool");
       const reply = lastToolMessage ? `根据查询结果：${lastToolMessage.content}` : "你好，我是 OpenTalos 的模拟回复（MODEL_PROVIDER=mock）。";
-      yield { type: "text_delta", textDelta: reply };
+      // Chunked (not yielded whole) so MODEL_PROVIDER=mock — used by the whole E2E suite and for
+      // manual smoke testing without a real API key — also visibly demonstrates streaming rather
+      // than looking identical to the old one-shot behavior. Final concatenated text is unchanged.
+      for (const chunk of reply.match(/.{1,4}/gu) ?? [reply]) {
+        yield { type: "text_delta", textDelta: chunk };
+        await new Promise((resolve) => setTimeout(resolve, 15));
+      }
       yield { type: "message_stop" };
     },
   };

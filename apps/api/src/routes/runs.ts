@@ -201,7 +201,9 @@ export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void 
       }
     };
 
-    const timer = setInterval(poll, 500);
+    // 150ms (was 500ms): with llm_text_delta trace events now streaming the model's reply in as
+    // it generates, a slower poll cadence made the "streaming" effect visibly chunky/laggy.
+    const timer = setInterval(poll, 150);
     void poll();
 
     request.raw.on("close", () => {

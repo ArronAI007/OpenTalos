@@ -2,10 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import type { TraceEventDto } from "../types.js";
 import type { TraceTimelineState } from "../hooks/trace-reducer.js";
 
-interface TraceDrawerProps {
-  open: boolean;
+interface TracePanelProps {
   timeline: TraceTimelineState;
-  onClose: () => void;
   onApprove: (approved: boolean) => void;
 }
 
@@ -42,7 +40,7 @@ function TraceEventRow({ event }: { event: TraceEventDto }) {
   );
 }
 
-export function TraceDrawer({ open, timeline, onClose, onApprove }: TraceDrawerProps) {
+export function TracePanel({ timeline, onApprove }: TracePanelProps) {
   // Guards against a fast double-click (or an impatient double-tap) enqueuing two "resume" tasks
   // for the same run: timeline.status stays "paused" for up to ~500ms after the first click,
   // until the next SSE poll cycle reports the status change, so a second click in that window
@@ -72,32 +70,17 @@ export function TraceDrawer({ open, timeline, onClose, onApprove }: TraceDrawerP
     onApprove(approved);
   }
 
-  useEffect(() => {
-    if (!open) return;
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [open, onClose]);
-
   return (
-    <aside
-      className={`trace-drawer${open ? " trace-drawer-open" : ""}`}
-      aria-label="执行轨迹"
-      aria-hidden={!open}
-    >
-      <div className="trace-drawer-header">
-        <h2>执行轨迹</h2>
-        <button className="trace-drawer-close" onClick={onClose} aria-label="关闭">
-          ✕
-        </button>
-      </div>
-      <ul className="trace-timeline">
-        {timeline.events.map((event) => (
-          <TraceEventRow key={event.id} event={event} />
-        ))}
-      </ul>
+    <div className="trace-panel">
+      {timeline.events.length === 0 ? (
+        <p className="trace-empty">还没有轨迹事件</p>
+      ) : (
+        <ul className="trace-timeline">
+          {timeline.events.map((event) => (
+            <TraceEventRow key={event.id} event={event} />
+          ))}
+        </ul>
+      )}
       {timeline.status === "paused" && (
         <div className="trace-approval">
           <p>⏸ 等待你确认</p>
@@ -111,6 +94,6 @@ export function TraceDrawer({ open, timeline, onClose, onApprove }: TraceDrawerP
           </div>
         </div>
       )}
-    </aside>
+    </div>
   );
 }
