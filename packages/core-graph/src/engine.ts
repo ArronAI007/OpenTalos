@@ -104,6 +104,7 @@ export class GraphEngine<TState> {
         status: "paused",
         pendingYields: [{ type: "awaiting_approval", reason: outcome.reason }],
       };
+      await this.deps.eventBus.flush?.();
       await this.deps.checkpointStore.save(pausedCheckpoint);
       return pausedCheckpoint;
     }
@@ -177,6 +178,7 @@ export class GraphEngine<TState> {
         status: "paused",
         pendingYields: [...replayQueue, { type: "awaiting_approval", reason: outcome.reason }],
       };
+      await this.deps.eventBus.flush?.();
       await this.deps.checkpointStore.save(pausedCheckpoint);
       return pausedCheckpoint;
     }
@@ -214,6 +216,7 @@ export class GraphEngine<TState> {
         status: "paused",
         pendingYields: [{ type: "awaiting_approval", reason: outcome.reason }],
       };
+      await this.deps.eventBus.flush?.();
       await this.deps.checkpointStore.save(pausedCheckpoint);
       return pausedCheckpoint;
     }
@@ -239,6 +242,7 @@ export class GraphEngine<TState> {
     } else {
       nextCheckpoint = { ...checkpoint, state: nextState, nodeCursor: edge.to, status: "running", pendingYields: [] };
     }
+    await this.deps.eventBus.flush?.();
     await this.deps.checkpointStore.save(nextCheckpoint);
     return nextCheckpoint;
   }
@@ -278,6 +282,7 @@ export class GraphEngine<TState> {
       ? { ...checkpoint, state: mergedState, nodeCursor: cursor.joinTo, status: "running", pendingYields: [] }
       : { ...checkpoint, state: mergedState, nodeCursor: cursor.branches[0], status: "done", pendingYields: [] };
 
+    await this.deps.eventBus.flush?.();
     await this.deps.checkpointStore.save(nextCheckpoint);
     return nextCheckpoint;
   }

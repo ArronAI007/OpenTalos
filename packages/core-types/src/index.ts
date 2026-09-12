@@ -125,6 +125,12 @@ export type EventHandler = (event: TraceEvent) => void;
 export interface EventBus {
   emit(event: TraceEvent): void;
   subscribe(handler: EventHandler): () => void;
+  /** Waits for every emit() issued so far to be durably persisted. Optional because an in-memory
+   * bus has nothing to wait for; a durable bus (e.g. Postgres-backed) should implement it so
+   * callers that need every trace event visible before observing a state transition — the graph
+   * engine, before persisting a checkpoint — can await it instead of racing a fire-and-forget
+   * write. */
+  flush?(): Promise<void>;
 }
 
 export type GuardrailDecision = "allow" | "block" | "require_approval";

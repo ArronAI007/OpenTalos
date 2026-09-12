@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Guardrail, TenantContext } from "@opentalos/core-types";
+import type { EventBus, Guardrail, TenantContext } from "@opentalos/core-types";
 import { InMemoryCheckpointStore } from "@opentalos/checkpoint";
 import { InMemoryEventBus } from "@opentalos/tracing";
 import { InMemoryToolRegistry } from "@opentalos/tool-registry";
@@ -370,5 +370,52 @@ describe("GraphEngine — sequential execution", () => {
     expect(persistedA?.state).toEqual({ count: 5 });
     expect(persistedB?.tenantId).toBe("tenant-b");
     expect(persistedB?.state).toEqual({ count: 105 });
+  });
+});
+
+describe("GraphEngine — trace durability", () => {
+  it("awaits eventBus.flush() before persisting a checkpoint, so a poller that stops as soon as it observes a terminal status can never miss an event still in flight", async () => {
+    // Mirrors PostgresEventBus for real: emit() is synchronous and fire-and-forget, but its write
+    // isn't actually durable until a later microtask resolves — exactly the gap that let
+    // node_exit/llm_call_end get lost when apps/api's SSE poller saw "done" and stopped polling
+    // before that write had landed.
+    let pendingWrites = 0;
+    const eventBus: EventBus = {
+      emit() {
+        pendingWrites += 1;
+        queueMicrotask(() => {
+          pendingWrites -= 1;
+        });
+      },
+      subscribe: () => () => {},
+      async flush() {
+        while (pendingWrites > 0) {
+          await new Promise((resolve) => queueMicrotask(resolve));
+        }
+      },
+    };
+    const checkpointStore = new InMemoryCheckpointStore();
+    let sawSaveWithUnflushedWrites = false;
+    const originalSave = checkpointStore.save.bind(checkpointStore);
+    checkpointStore.save = async (checkpoint) => {
+      if (pendingWrites > 0) sawSaveWithUnflushedWrites = true;
+      return originalSave(checkpoint);
+    };
+
+    const increment: NodeFn<CounterState> = async function* (state) {
+      return { count: state.count + 1 };
+    };
+    const graph: GraphDefinition<CounterState> = {
+      id: "g-flush",
+      entryNode: "a",
+      nodes: { a: increment },
+      edges: [],
+      reducer: shallowMergeReducer,
+    };
+    const engine = new GraphEngine(graph, { toolRegistry: new InMemoryToolRegistry(), eventBus, checkpointStore });
+    const checkpoint = await engine.run(engine.start({ count: 0 }, tenant, "run-flush"));
+
+    expect(checkpoint.status).toBe("done");
+    expect(sawSaveWithUnflushedWrites).toBe(false);
   });
 });
