@@ -6,7 +6,9 @@ import { TracePanel } from "./components/TracePanel.js";
 import { ApiKeyGate } from "./components/ApiKeyGate.js";
 import { SessionSidebar } from "./components/SessionSidebar.js";
 import { SessionLogMenu } from "./components/SessionLogMenu.js";
+import { SettingsPanel } from "./components/SettingsPanel.js";
 import { createEmptySession, loadSessions, saveSessions, sessionTitle } from "./lib/sessions.js";
+import { applyTheme, loadTheme, saveTheme, type ThemePreference } from "./lib/theme.js";
 import type { ChatSession } from "./types.js";
 import "./styles/tokens.css";
 import "./styles/app.css";
@@ -21,6 +23,13 @@ export function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("chat");
   const [error, setError] = useState<string>();
+  const [theme, setTheme] = useState<ThemePreference>(loadTheme);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  useEffect(() => {
+    applyTheme(theme);
+    saveTheme(theme);
+  }, [theme]);
 
   const activeSession = sessions.find((session) => session.id === activeSessionId) ?? sessions[0];
   const timeline = useRunEvents(activeSessionId, activeSession.runId);
@@ -115,9 +124,10 @@ export function App() {
     setError(undefined);
   }
 
-  function handleOpenSettings() {
+  function handleChangeApiKey() {
     clearApiKey();
     setHasApiKey(false);
+    setSettingsOpen(false);
   }
 
   function handleDeleteSession(sessionId: string) {
@@ -158,7 +168,7 @@ export function App() {
         onDelete={handleDeleteSession}
         onClose={() => setSidebarOpen(false)}
         onToggleCollapse={() => setSidebarCollapsed((value) => !value)}
-        onOpenSettings={handleOpenSettings}
+        onOpenSettings={() => setSettingsOpen(true)}
       />
       <main className="app-main">
         <header className="app-header">
@@ -201,6 +211,14 @@ export function App() {
           <TracePanel timeline={timeline} onApprove={handleApprove} />
         )}
       </main>
+      {settingsOpen && (
+        <SettingsPanel
+          theme={theme}
+          onThemeChange={setTheme}
+          onChangeApiKey={handleChangeApiKey}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
     </div>
   );
 }

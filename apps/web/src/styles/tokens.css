@@ -72,3 +72,67 @@
     --color-hover-tint-soft: rgba(255, 255, 255, 0.08);
   }
 }
+
+/* Explicit overrides for the settings panel's theme picker. An attribute selector on :root always
+   out-specifies the bare ":root" rules above (regardless of source order or whether they're
+   behind the prefers-color-scheme media query above), so picking "浅色"/"深色" here reliably wins
+   over the OS preference; leaving data-theme unset (the "跟随系统" choice) falls back to the rules
+   above untouched. */
+:root[data-theme="light"] {
+  --color-bg: #f9fafb;
+  --color-surface: #ffffff;
+  --color-surface-sidebar: #f9fafb;
+  --color-surface-solid: #ffffff;
+  --color-on-accent: #ffffff;
+  --color-text: #0f1115;
+  --color-text-muted: #61666b;
+  --color-border: rgba(0, 0, 0, 0.1);
+  --color-accent: #4176e6;
+  --color-accent-hover: #679efe;
+  --color-accent-secondary: #22c55e;
+  --color-bubble-assistant: #edf3fe;
+  --color-sidebar-active: #eceef0;
+  --color-sidebar-hover: #f1f3f5;
+  --color-warn-bg: #fff8ec;
+  --color-warn-border: #f3dfab;
+  --color-warn-text: #8a6a1f;
+  --color-danger-text: #b5442e;
+  --color-danger-border: #f0d0c8;
+  --shadow-soft: 0 1px 3px rgba(15, 17, 21, 0.06);
+  --shadow-drawer: -4px 0 20px rgba(15, 17, 21, 0.08);
+  --shadow-hover: 0 2px 8px rgba(15, 17, 21, 0.1);
+  --color-timeline-line-start: #679efe;
+  --color-timeline-line-end: #d3e2ff;
+  --color-payload-bg: #f5f6f7;
+  --color-hover-tint: rgba(38, 49, 72, 0.1);
+  --color-hover-tint-soft: rgba(38, 49, 72, 0.06);
+}
+
+:root[data-theme="dark"] {
+  --color-bg: #151517;
+  --color-surface: #232324;
+  --color-surface-sidebar: #0f1115;
+  --color-surface-solid: #232324;
+  --color-text: #f9fafb;
+  --color-text-muted: #cfd3d6;
+  --color-border: rgba(255, 255, 255, 0.12);
+  --color-accent: #5686fe;
+  --color-accent-hover: #4176e6;
+  --color-accent-secondary: #4ed17e;
+  --color-bubble-assistant: #2c2c2e;
+  --color-sidebar-active: #353638;
+  --color-sidebar-hover: #2c2c2e;
+  --color-warn-bg: #2b2418;
+  --color-warn-border: #4a3c1f;
+  --color-warn-text: #f7ad31;
+  --color-danger-text: #f25a5a;
+  --color-danger-border: #4a2422;
+  --shadow-soft: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-drawer: -4px 0 20px rgba(0, 0, 0, 0.4);
+  --shadow-hover: 0 2px 8px rgba(0, 0, 0, 0.35);
+  --color-timeline-line-start: #5686fe;
+  --color-timeline-line-end: #35404f;
+  --color-payload-bg: #1b1b1c;
+  --color-hover-tint: rgba(255, 255, 255, 0.14);
+  --color-hover-tint-soft: rgba(255, 255, 255, 0.08);
+}
