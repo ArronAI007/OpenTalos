@@ -2,7 +2,18 @@ import { useEffect, useRef, useState } from "react";
 import type { TraceEventDto } from "../types.js";
 import type { TraceTimelineState } from "../hooks/trace-reducer.js";
 
+interface HistoricalRun {
+  runId: string;
+  label: string;
+  events: TraceEventDto[];
+}
+
 interface TracePanelProps {
+  /** Every earlier run in this session, oldest first, each already resolved to its full persisted
+   * event list (see useRunHistory). */
+  historicalRuns: HistoricalRun[];
+  /** The user message text that started the run `timeline` below is currently tracking, if any. */
+  currentLabel?: string;
   timeline: TraceTimelineState;
   onApprove: (approved: boolean) => void;
 }
@@ -40,7 +51,7 @@ function TraceEventRow({ event }: { event: TraceEventDto }) {
   );
 }
 
-export function TracePanel({ timeline, onApprove }: TracePanelProps) {
+export function TracePanel({ historicalRuns, currentLabel, timeline, onApprove }: TracePanelProps) {
   // Guards against a fast double-click (or an impatient double-tap) enqueuing two "resume" tasks
   // for the same run: timeline.status stays "paused" for up to ~500ms after the first click,
   // until the next SSE poll cycle reports the status change, so a second click in that window
@@ -70,16 +81,38 @@ export function TracePanel({ timeline, onApprove }: TracePanelProps) {
     onApprove(approved);
   }
 
+  // Group labels only earn their keep once there's more than one turn to tell apart — for the
+  // common case of a single in-flight run, this renders identically to before (just the list).
+  const showGroupLabels = historicalRuns.length > 0;
+  const isEmpty = historicalRuns.length === 0 && timeline.events.length === 0;
+
   return (
     <div className="trace-panel">
-      {timeline.events.length === 0 ? (
+      {isEmpty ? (
         <p className="trace-empty">还没有轨迹事件</p>
       ) : (
-        <ul className="trace-timeline">
-          {timeline.events.map((event) => (
-            <TraceEventRow key={event.id} event={event} />
+        <>
+          {historicalRuns.map((run) => (
+            <section className="trace-group" key={run.runId} aria-label={run.label}>
+              {showGroupLabels && <p className="trace-group-label">{run.label}</p>}
+              <ul className="trace-timeline">
+                {run.events.map((event) => (
+                  <TraceEventRow key={event.id} event={event} />
+                ))}
+              </ul>
+            </section>
           ))}
-        </ul>
+          {timeline.events.length > 0 && (
+            <section className="trace-group" aria-label={currentLabel}>
+              {showGroupLabels && currentLabel && <p className="trace-group-label">{currentLabel}</p>}
+              <ul className="trace-timeline">
+                {timeline.events.map((event) => (
+                  <TraceEventRow key={event.id} event={event} />
+                ))}
+              </ul>
+            </section>
+          )}
+        </>
       )}
       {timeline.status === "paused" && (
         <div className="trace-approval">

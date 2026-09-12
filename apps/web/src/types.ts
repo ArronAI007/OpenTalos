@@ -14,6 +14,10 @@ export interface ChatMessage {
   id: string;
   role: "user" | "assistant" | "system";
   text: string;
+  /** Set on a user message once its run has started — links the message to the trace events it
+   * produced, so the 轨迹 tab can show every past run's trace grouped under the turn that
+   * triggered it, not just the most recent one. */
+  runId?: string;
 }
 
 export interface ChatSession {

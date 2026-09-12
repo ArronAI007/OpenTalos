@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { startRun, resumeRun, getApiKey, clearApiKey, ApiAuthError } from "./api.js";
 import { useRunEvents } from "./hooks/useRunEvents.js";
+import { useRunHistory } from "./hooks/useRunHistory.js";
 import { ChatPanel } from "./components/ChatPanel.js";
 import { TracePanel } from "./components/TracePanel.js";
 import { ApiKeyGate } from "./components/ApiKeyGate.js";
@@ -44,6 +45,26 @@ export function App() {
     !timeline.connectionError &&
     (timeline.status === "running" || timeline.status === "paused");
 
+  // Every past run's trace is durably persisted server-side, but ChatSession only ever tracks its
+  // most recent runId (needed for resume/approve) — so without this, switching turns or reloading
+  // the page would only ever show the latest run's trace, silently dropping every earlier turn's.
+  // Attaching runId to the user message that started each run (see handleSend) lets the 轨迹 tab
+  // reconstruct the full history and group it turn-by-turn, matching the 对话 tab's message list.
+  const runTurns = activeSession.messages.filter(
+    (message): message is typeof message & { runId: string } => message.runId !== undefined,
+  );
+  const currentTurn = runTurns.find((turn) => turn.runId === activeSession.runId);
+  const historicalTurns = runTurns.filter((turn) => turn.runId !== activeSession.runId);
+  const runHistory = useRunHistory(
+    activeSessionId,
+    historicalTurns.map((turn) => turn.runId),
+  );
+  const historicalRuns = historicalTurns.map((turn) => ({
+    runId: turn.runId,
+    label: turn.text,
+    events: runHistory[turn.runId] ?? [],
+  }));
+
   useEffect(() => {
     saveSessions(sessions, activeSessionId);
   }, [sessions, activeSessionId]);
@@ -75,13 +96,20 @@ export function App() {
 
   async function handleSend(text: string) {
     const sessionId = activeSessionId;
+    const messageId = crypto.randomUUID();
     updateSession(sessionId, (session) => ({
       ...session,
-      messages: [...session.messages, { id: crypto.randomUUID(), role: "user", text }],
+      messages: [...session.messages, { id: messageId, role: "user", text }],
     }));
     try {
       const { runId: newRunId } = await startRun(sessionId, text);
-      updateSession(sessionId, (session) => ({ ...session, runId: newRunId }));
+      updateSession(sessionId, (session) => ({
+        ...session,
+        runId: newRunId,
+        messages: session.messages.map((message) =>
+          message.id === messageId ? { ...message, runId: newRunId } : message,
+        ),
+      }));
       setError(undefined);
     } catch (err) {
       if (err instanceof ApiAuthError) {
@@ -208,7 +236,12 @@ export function App() {
             streamingText={timeline.finalState ? undefined : timeline.streamingText}
           />
         ) : (
-          <TracePanel timeline={timeline} onApprove={handleApprove} />
+          <TracePanel
+            historicalRuns={historicalRuns}
+            currentLabel={currentTurn?.text}
+            timeline={timeline}
+            onApprove={handleApprove}
+          />
         )}
       </main>
       {settingsOpen && (

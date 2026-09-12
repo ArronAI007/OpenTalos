@@ -709,6 +709,22 @@ body {
   margin-top: var(--space-lg);
 }
 
+.trace-group + .trace-group {
+  margin-top: var(--space-lg);
+}
+
+.trace-group-label {
+  margin: 0 0 var(--space-sm) 0;
+  padding-bottom: 6px;
+  border-bottom: 0.5px solid var(--color-border);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .trace-timeline {
   list-style: none;
   margin: 0;
