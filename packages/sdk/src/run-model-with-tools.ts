@@ -38,7 +38,14 @@ export async function* runModelWithTools(
         pendingToolCalls.push(chunk.toolCall);
       }
     }
-    yield { type: "emit", eventType: "llm_call_end" };
+    yield {
+      type: "emit",
+      eventType: "llm_call_end",
+      // Without this, 轨迹/trace inspection of an llm_call_end row showed nothing at all to
+      // expand — the text this call actually produced (or, if it requested tools instead of
+      // replying, how many) is exactly what someone reviewing the trace wants to see here.
+      payload: { text: assistantText, toolCallCount: pendingToolCalls.length },
+    };
 
     if (pendingToolCalls.length === 0) {
       return { messages: conversation, finalText: assistantText };

@@ -798,6 +798,16 @@ body {
   transform: scale(0.99);
 }
 
+.trace-card-header-static {
+  cursor: default;
+}
+
+.trace-card-header-static:hover,
+.trace-card-header-static:active {
+  background: none;
+  transform: none;
+}
+
 .trace-card-pause {
   background: var(--color-warn-bg);
   border: 1px solid var(--color-warn-border);

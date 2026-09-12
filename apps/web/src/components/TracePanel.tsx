@@ -32,20 +32,32 @@ const DOT_COLOR: Record<string, string> = {
 function TraceEventRow({ event }: { event: TraceEventDto }) {
   const [expanded, setExpanded] = useState(false);
   const isPause = event.type === "hitl_interrupt";
+  // Some event types (llm_call_start, plain node lifecycle markers with no extra data) never
+  // carry a payload. Rendering those as a plain, non-interactive row — rather than a button that
+  // silently does nothing when clicked — is what actually fixes "clicking shows no content": there
+  // was never anything to show, but a clickable-looking header implied there should be.
+  const hasPayload = event.payload !== undefined;
   return (
     <li className="trace-row">
       <span className="trace-dot" style={{ background: DOT_COLOR[event.type] ?? "var(--color-text-muted)" }} />
       <div className={`trace-card${isPause ? " trace-card-pause" : ""}`}>
-        <button
-          type="button"
-          className="trace-card-header"
-          onClick={() => setExpanded((value) => !value)}
-          aria-expanded={expanded}
-        >
-          <span className="trace-type">{event.type}</span>
-          <time className="trace-time">{new Date(event.timestamp).toLocaleTimeString()}</time>
-        </button>
-        {expanded && event.payload && <pre className="trace-payload">{JSON.stringify(event.payload, null, 2)}</pre>}
+        {hasPayload ? (
+          <button
+            type="button"
+            className="trace-card-header"
+            onClick={() => setExpanded((value) => !value)}
+            aria-expanded={expanded}
+          >
+            <span className="trace-type">{event.type}</span>
+            <time className="trace-time">{new Date(event.timestamp).toLocaleTimeString()}</time>
+          </button>
+        ) : (
+          <div className="trace-card-header trace-card-header-static">
+            <span className="trace-type">{event.type}</span>
+            <time className="trace-time">{new Date(event.timestamp).toLocaleTimeString()}</time>
+          </div>
+        )}
+        {expanded && hasPayload && <pre className="trace-payload">{JSON.stringify(event.payload, null, 2)}</pre>}
       </div>
     </li>
   );

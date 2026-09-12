@@ -116,7 +116,7 @@ describe("runModelWithTools", () => {
       { type: "emit", eventType: "llm_call_start" },
       { type: "emit", eventType: "llm_text_delta", payload: { delta: "hel" } },
       { type: "emit", eventType: "llm_text_delta", payload: { delta: "lo" } },
-      { type: "emit", eventType: "llm_call_end" },
+      { type: "emit", eventType: "llm_call_end", payload: { text: "hello", toolCallCount: 0 } },
     ]);
     expect(next.value.finalText).toBe("hello");
   });
