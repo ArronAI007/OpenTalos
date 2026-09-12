@@ -50,8 +50,10 @@ export function App() {
   // the page would only ever show the latest run's trace, silently dropping every earlier turn's.
   // Attaching runId to the user message that started each run (see handleSend) lets the 轨迹 tab
   // reconstruct the full history and group it turn-by-turn, matching the 对话 tab's message list.
+  // Restricted to the user role: the assistant reply for that same run also carries this runId
+  // (see the finalState effect below, for dedup) — counting both would double up every group.
   const runTurns = activeSession.messages.filter(
-    (message): message is typeof message & { runId: string } => message.runId !== undefined,
+    (message): message is typeof message & { runId: string } => message.role === "user" && message.runId !== undefined,
   );
   const currentTurn = runTurns.find((turn) => turn.runId === activeSession.runId);
   const historicalTurns = runTurns.filter((turn) => turn.runId !== activeSession.runId);
@@ -82,10 +84,20 @@ export function App() {
     // activeSessionId is captured fresh on every render this effect can run in (it's a dep), so
     // this always appends to whichever session actually owns the run timeline came from — not
     // necessarily whatever's active by the time the effect body executes.
-    updateSession(activeSessionId, (session) => ({
-      ...session,
-      messages: [...session.messages, { id: crypto.randomUUID(), role: "assistant", text: reply }],
-    }));
+    updateSession(activeSessionId, (session) => {
+      const runId = session.runId;
+      // A page reload (or revisiting this session) reconnects useRunEvents' SSE for a run that's
+      // already "done" — the server replays its full history and re-delivers a fresh finalState
+      // object every time, so without this guard, this effect would append another duplicate
+      // copy of the same reply on every single reconnect.
+      const alreadyRecorded =
+        runId !== undefined && session.messages.some((message) => message.role === "assistant" && message.runId === runId);
+      if (alreadyRecorded) return session;
+      return {
+        ...session,
+        messages: [...session.messages, { id: crypto.randomUUID(), role: "assistant", text: reply, runId }],
+      };
+    });
   }, [timeline.finalState, activeSessionId]);
 
   useEffect(() => {
