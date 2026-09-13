@@ -12,6 +12,7 @@ apps/web/playwright-report
 apps/web/test-results
 apps/web/e2e/.fixture-api-key.json
 .gstack/
+/logs
 
 .env
 .env.*

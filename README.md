@@ -103,6 +103,15 @@ pnpm run test
 
 ### Running the full stack locally
 
+`scripts/dev.sh` (or `pnpm dev` / `pnpm dev:stop` / `pnpm dev:restart` / `pnpm dev:status` /
+`pnpm dev:logs <service>`) wraps the manual steps below into one command — it builds worker/api
+before starting them, and start/stop/restart accept an optional service name (`worker`, `api`,
+`web`, `admin`; default is all four). Postgres is managed separately via
+`scripts/dev.sh postgres:up` / `postgres:down`, since restarting the app shouldn't take the
+database down with it. Run `scripts/dev.sh` with no arguments for the full command list.
+
+To do the same steps by hand instead:
+
 ```bash
 # 1. Start Postgres
 docker compose -f apps/web/e2e/docker-compose.yml up -d
