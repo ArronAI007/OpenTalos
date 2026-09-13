@@ -34,6 +34,17 @@ export function App() {
 
   const activeSession = sessions.find((session) => session.id === activeSessionId) ?? sessions[0];
   const timeline = useRunEvents(activeSessionId, activeSession.runId);
+  // Reconnecting useRunEvents' SSE (e.g. right after a page reload) always starts from
+  // initialTraceTimelineState — status "running", no finalState — even for a run that finished
+  // long ago, until the replayed status_changed/done events round-trip back. Without this, that
+  // brief window would flash the composer disabled and re-play the reply as a transient
+  // "streaming" bubble alongside the already-persisted message, every single time this run's
+  // stream is reconnected to. A locally-recorded reply for this exact run is known synchronously
+  // from session state — no round trip needed — so it's a more trustworthy "is this run actually
+  // still going" signal than the freshly-reset timeline is, right after a reconnect.
+  const activeRunAlreadyCompletedLocally =
+    activeSession.runId !== undefined &&
+    activeSession.messages.some((message) => message.role === "assistant" && message.runId === activeSession.runId);
   // Once the SSE connection is confirmed terminally dead, no more trace events or status changes
   // will ever arrive for this run, so timeline.status can never reach "done" on its own. Without
   // excluding connectionError here, the run would stay "in flight" forever and the user could
@@ -41,6 +52,7 @@ export function App() {
   // user start a fresh conversation (implicitly abandoning the stuck run) instead of being
   // permanently locked out.
   const isRunInFlight =
+    !activeRunAlreadyCompletedLocally &&
     activeSession.runId !== undefined &&
     !timeline.connectionError &&
     (timeline.status === "running" || timeline.status === "paused");
@@ -245,7 +257,7 @@ export function App() {
             onSend={handleSend}
             error={error}
             disabled={isRunInFlight}
-            streamingText={timeline.finalState ? undefined : timeline.streamingText}
+            streamingText={activeRunAlreadyCompletedLocally || timeline.finalState ? undefined : timeline.streamingText}
           />
         ) : (
           <TracePanel
