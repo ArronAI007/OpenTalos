@@ -2,10 +2,14 @@ node_modules
 dist
 .turbo
 *.tsbuildinfo
-.claude/worktrees
+.claude/
 /docs
-.superpowers
 /CLAUDE.md
+
+# Agent skills (npx skills), installed locally via `npx skills add obra/superpowers --all`.
+/.agents
+/agent
+/skills-lock.json
 
 apps/web/e2e/screenshots
 apps/web/playwright-report
