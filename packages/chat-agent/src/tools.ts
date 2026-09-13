@@ -32,3 +32,26 @@ export const lookupExchangeRateTool: Tool = {
     };
   },
 };
+
+/**
+ * Kimi/Moonshot's server-hosted web search: the provider adapter declares this as a bare
+ * `builtin_function` (see packages/model-providers/openai-compatible.ts), so the model calls it
+ * like any other tool, but the actual search runs on Moonshot's servers, not here. Per Moonshot's
+ * documented protocol, the client's only job is to echo the model's own arguments straight back —
+ * doing anything else (real HTTP calls, transforming the payload) would just be wrong, not
+ * merely redundant. Only registered when MODEL_PROVIDER=kimi (see registry.ts) — sending this
+ * tool type to a provider that doesn't understand it would be meaningless at best.
+ */
+export const webSearchTool: Tool = {
+  definition: {
+    name: "$web_search",
+    kind: "builtin",
+    // Ignored by the provider adapter for a builtin tool (only `name` is ever sent), but
+    // ToolDefinition requires the field — kept accurate for anyone reading this locally.
+    description: "Kimi's server-hosted web search. The client never executes this itself.",
+    inputSchema: {},
+  },
+  async execute(input) {
+    return { id: "", output: JSON.stringify(input) };
+  },
+};

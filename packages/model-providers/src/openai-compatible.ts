@@ -24,13 +24,22 @@ interface OpenAIOutMessage {
   tool_call_id?: string;
 }
 
+// A "builtin_function" tool (e.g. Kimi/Moonshot's `$web_search`) is provider-hosted: only its
+// name is declared, never description/parameters — the provider knows what it does and executes
+// it server-side. Sending description/parameters for one would be meaningless (and Moonshot's API
+// docs don't show any), so the two variants are kept structurally distinct rather than just making
+// description/parameters optional on one shared shape.
+type OpenAIToolDeclaration =
+  | { type: "function"; function: { name: string; description: string; parameters: JSONSchema } }
+  | { type: "builtin_function"; function: { name: string } };
+
 export interface OpenAIClientLike {
   chat: {
     completions: {
       create(params: {
         model: string;
         messages: OpenAIOutMessage[];
-        tools?: { type: "function"; function: { name: string; description: string; parameters: JSONSchema } }[];
+        tools?: OpenAIToolDeclaration[];
         stream: true;
       }): AsyncIterable<OpenAIStreamChunk>;
     };
@@ -63,10 +72,11 @@ export function createOpenAICompatibleProvider(
             : {}),
           ...(m.toolCallId ? { tool_call_id: m.toolCallId } : {}),
         })),
-        tools: request.tools?.map((t) => ({
-          type: "function",
-          function: { name: t.name, description: t.description, parameters: t.inputSchema },
-        })),
+        tools: request.tools?.map((t): OpenAIToolDeclaration =>
+          t.kind === "builtin"
+            ? { type: "builtin_function", function: { name: t.name } }
+            : { type: "function", function: { name: t.name, description: t.description, parameters: t.inputSchema } },
+        ),
         stream: true,
       });
 

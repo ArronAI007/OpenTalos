@@ -46,10 +46,11 @@ const checkpointStore = new PostgresCheckpointStore(pool);
 const eventBus = new PostgresEventBus(pool);
 const tenantStore = new TenantStore(pool);
 const modelProvider = createModelProviderFromEnv();
+const toolRegistryOptions = { modelProvider: process.env.MODEL_PROVIDER };
 const registry = new GraphRegistry();
 registry.register("chat-agent", {
-  buildGraph: () => buildChatAgentGraph(modelProvider, createChatAgentToolRegistry()),
-  buildDeps: () => ({ toolRegistry: createChatAgentToolRegistry(), eventBus }),
+  buildGraph: () => buildChatAgentGraph(modelProvider, createChatAgentToolRegistry(toolRegistryOptions)),
+  buildDeps: () => ({ toolRegistry: createChatAgentToolRegistry(toolRegistryOptions), eventBus }),
 });
 const scheduler = new Scheduler(pool, registry, checkpointStore);
 

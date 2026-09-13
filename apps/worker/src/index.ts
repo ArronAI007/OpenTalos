@@ -18,9 +18,10 @@ import { createTenantConcurrencyResolver } from "./tenant-quota.js";
 export function buildWorkerRegistry(eventBus: EventBus): GraphRegistry {
   const registry = new GraphRegistry();
   const modelProvider = createModelProviderFromEnv();
+  const toolRegistryOptions = { modelProvider: process.env.MODEL_PROVIDER };
   registry.register("chat-agent", {
-    buildGraph: () => buildChatAgentGraph(modelProvider, createChatAgentToolRegistry()),
-    buildDeps: () => ({ toolRegistry: createChatAgentToolRegistry(), eventBus }),
+    buildGraph: () => buildChatAgentGraph(modelProvider, createChatAgentToolRegistry(toolRegistryOptions)),
+    buildDeps: () => ({ toolRegistry: createChatAgentToolRegistry(toolRegistryOptions), eventBus }),
   });
   return registry;
 }

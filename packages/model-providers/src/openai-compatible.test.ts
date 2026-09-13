@@ -137,6 +137,27 @@ describe("createOpenAICompatibleProvider", () => {
     });
   });
 
+  it("maps a builtin tool definition to a bare builtin_function declaration, with no description or parameters", async () => {
+    const requestWithBuiltinTool: ModelRequest = {
+      messages: [{ role: "user", content: "hi" }],
+      tools: [
+        { name: "$web_search", description: "unused for builtin tools", inputSchema: {}, kind: "builtin" },
+        { name: "search", description: "search the web", inputSchema: { type: "object" } },
+      ],
+    };
+    const { client, getCapturedParams } = capturingClient([{ choices: [{ delta: {}, finish_reason: "stop" }] }]);
+    const provider = createOpenAICompatibleProvider(client, { model: "gpt-test" });
+    for await (const _chunk of provider.complete(requestWithBuiltinTool)) {
+      // draining the iterator to trigger the create() call
+    }
+    const params = getCapturedParams() as { tools?: unknown[] };
+    expect(params.tools?.[0]).toEqual({ type: "builtin_function", function: { name: "$web_search" } });
+    expect(params.tools?.[1]).toEqual({
+      type: "function",
+      function: { name: "search", description: "search the web", parameters: { type: "object" } },
+    });
+  });
+
   it("sends tool_calls on an assistant message and tool_call_id on a tool message", async () => {
     const requestWithHistory: ModelRequest = {
       messages: [

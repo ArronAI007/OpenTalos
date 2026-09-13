@@ -21,6 +21,11 @@ export interface ToolDefinition {
   name: string;
   description: string;
   inputSchema: JSONSchema;
+  /** Absent (or "function") is a normal client-executed tool. "builtin" is a provider-hosted tool
+   * (e.g. Kimi's `$web_search`) — the provider adapter sends a minimal declaration (just the
+   * name, no description/inputSchema) and executes it server-side; the client-side Tool for one
+   * of these just echoes the model's arguments back rather than doing real work. */
+  kind?: "function" | "builtin";
 }
 
 export interface ToolCall {
