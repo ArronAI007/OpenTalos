@@ -1,5 +1,20 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import type { ChatMessage } from "../types.js";
+
+/** Assistant replies render as Markdown (headings/lists/code/tables/etc. from the model come
+ * through formatted instead of as literal `**`/`#`/backtick characters); user messages stay plain
+ * text — it's what the user actually typed, not something meant to be interpreted as markup.
+ * react-markdown never renders raw HTML unless rehype-raw is added (it isn't here), so this is
+ * safe against the model's own output regardless of what it contains. */
+function AssistantMarkdown({ text }: { text: string }) {
+  return (
+    <div className="markdown-body">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+    </div>
+  );
+}
 
 interface ChatPanelProps {
   messages: ChatMessage[];
@@ -53,12 +68,12 @@ export function ChatPanel({ messages, onSend, error, disabled, streamingText }: 
         <ul className="message-list">
           {messages.map((message) => (
             <li key={message.id} className={`message message-${message.role}`}>
-              {message.text}
+              {message.role === "assistant" ? <AssistantMarkdown text={message.text} /> : message.text}
             </li>
           ))}
           {streamingText && (
             <li className="message message-assistant message-streaming">
-              {streamingText}
+              <AssistantMarkdown text={streamingText} />
               <span className="streaming-cursor" aria-hidden="true" />
             </li>
           )}
