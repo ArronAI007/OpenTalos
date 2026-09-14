@@ -112,6 +112,11 @@ database down with it. Run `scripts/dev.sh` with no arguments for the full comma
 
 To do the same steps by hand instead:
 
+If you already have a Postgres instance from before 2026-09-14, apply
+`scripts/migrations/2026-09-14-add-checkpoints-cancel-requested.sql` by hand first
+(`psql $DATABASE_URL -f scripts/migrations/2026-09-14-add-checkpoints-cancel-requested.sql`) —
+there is no migration runner in this repo.
+
 ```bash
 # 1. Start Postgres
 docker compose -f apps/web/e2e/docker-compose.yml up -d
