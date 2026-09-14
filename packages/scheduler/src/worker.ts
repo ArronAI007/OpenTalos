@@ -184,20 +184,50 @@ export class Worker {
       throw new Error(`No checkpoint found for run "${task.runId}"`);
     }
 
-    // Dispatch on the CHECKPOINT's actual status, not blindly on task.kind: a "resume" task
-    // whose first attempt already replayed past the paused node (advancing the checkpoint to
-    // "running") must continue via run(), not resumeFromCheckpoint() again — the latter requires
-    // status "paused" and would otherwise throw "not in a resumable paused state" on every retry,
-    // destroying the real error and getting the run permanently stuck. See Fix 1 in the
-    // post-review notes for the full failure mode.
     if (checkpoint.status === "done") {
       return; // Already complete (e.g. a prior attempt finished after this attempt's timeout raced it); nothing to do.
     }
-    if (task.kind === "resume" && checkpoint.status === "paused") {
-      await engine.resumeFromCheckpoint(checkpoint, task.resumeValue as NodeResumeValue);
-      return;
+
+    // An AbortController wired to a poll loop that re-reads this run's own checkpoint row every
+    // ~500ms: once a POST /runs/:runId/cancel request has flipped `cancelRequested` to true
+    // (Task 6), this is what actually stops the in-flight engine.run()/resumeFromCheckpoint()
+    // call — the signal is forwarded all the way down into the model provider's HTTP call
+    // (Tasks 2-5). `checkingCancel` is a reentrancy guard: if a single checkpointStore.load()
+    // takes longer than 500ms, we skip overlapping ticks rather than piling up concurrent loads.
+    const controller = new AbortController();
+    let checkingCancel = false;
+    const cancelPoll = setInterval(() => {
+      if (checkingCancel) return;
+      checkingCancel = true;
+      this.checkpointStore
+        .load(task.runId)
+        .then((latest) => {
+          if (latest?.cancelRequested) controller.abort();
+        })
+        .catch(() => {
+          // Best-effort: a transient DB error here just means this tick doesn't check; the next
+          // tick tries again. Not fatal to the run.
+        })
+        .finally(() => {
+          checkingCancel = false;
+        });
+    }, 500);
+
+    try {
+      // Dispatch on the CHECKPOINT's actual status, not blindly on task.kind: a "resume" task
+      // whose first attempt already replayed past the paused node (advancing the checkpoint to
+      // "running") must continue via run(), not resumeFromCheckpoint() again — the latter requires
+      // status "paused" and would otherwise throw "not in a resumable paused state" on every retry,
+      // destroying the real error and getting the run permanently stuck. See Fix 1 in the
+      // post-review notes for the full failure mode.
+      if (task.kind === "resume" && checkpoint.status === "paused") {
+        await engine.resumeFromCheckpoint(checkpoint, task.resumeValue as NodeResumeValue, { signal: controller.signal });
+        return;
+      }
+      await engine.run(checkpoint, { signal: controller.signal });
+    } finally {
+      clearInterval(cancelPoll);
     }
-    await engine.run(checkpoint);
   }
 }
 

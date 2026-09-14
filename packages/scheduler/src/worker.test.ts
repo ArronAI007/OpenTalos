@@ -81,6 +81,20 @@ beforeAll(async () => {
   };
   registry.register("hangs-forever", { buildGraph: () => hangingGraph, buildDeps: makeDeps });
 
+  const waitAndObserveSignal: NodeFn<CounterState> = async function* (state, ctx) {
+    // Long enough to comfortably outlast one 500ms cancel-poll tick with margin either side.
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    return { count: state.count + (ctx.signal?.aborted ? 1000 : 1) };
+  };
+  const cancelGraph: GraphDefinition<CounterState> = {
+    id: "cancel-wait",
+    entryNode: "wait",
+    nodes: { wait: waitAndObserveSignal },
+    edges: [],
+    reducer: shallowMergeReducer,
+  };
+  registry.register("cancel-wait", { buildGraph: () => cancelGraph, buildDeps: makeDeps });
+
   // Two-node graph: "ask" pauses for HITL approval; "flaky" (the node reached only AFTER a
   // resume replays "ask") throws on its first invocation and succeeds on every subsequent one.
   // Used by the Fix 1 regression test to prove a resume-task retry after the checkpoint has
@@ -319,5 +333,19 @@ describe("Worker", () => {
 
     const rows = await db.select().from(tasks).where(eq(tasks.tenantId, "tenant-quota-error"));
     expect(rows.filter((r) => r.status === "done").length).toBe(3);
+  });
+
+  it("aborts a task's AbortSignal once cancelRequested becomes true mid-execution", async () => {
+    await scheduler.enqueueStart("cancel-wait", { count: 0 }, { tenantId: "tenant-cancel", sessionId: "s1" }, "worker-cancel-run");
+    const worker = new Worker(testDb.pool, registry, checkpointStore, { globalConcurrency: 10, tenantConcurrency: 10 });
+
+    const pollPromise = worker.pollOnce();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await checkpointStore.requestCancel("worker-cancel-run");
+    await pollPromise;
+
+    const checkpoint = await checkpointStore.load("worker-cancel-run");
+    expect(checkpoint?.status).toBe("done");
+    expect(checkpoint?.state).toEqual({ count: 1000 });
   });
 });
