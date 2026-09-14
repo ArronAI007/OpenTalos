@@ -144,4 +144,81 @@ describe("runModelWithTools", () => {
     expect(result.finalText).toBe("done on round 10");
     expect(result.messages.filter((m) => m.role === "tool")).toHaveLength(9);
   });
+
+  it("returns the partial text streamed so far when the signal aborts mid-stream, instead of throwing", async () => {
+    const controller = new AbortController();
+    const provider: ModelProvider = {
+      async *complete(_request, options) {
+        yield { type: "text_delta", textDelta: "hel" };
+        controller.abort();
+        if (options?.signal?.aborted) return; // simulates the underlying HTTP call stopping here
+        yield { type: "text_delta", textDelta: "lo world" };
+        yield { type: "message_stop" };
+      },
+    };
+    const gen = runModelWithTools(provider, tools, [{ role: "user", content: "hi" }], undefined, controller.signal);
+    let next = await gen.next();
+    while (!next.done) {
+      if (next.value.type !== "emit") throw new Error(`Unexpected yield type in this test: ${next.value.type}`);
+      next = await gen.next(undefined);
+    }
+    expect(next.value.finalText).toBe("hel");
+  });
+
+  it("returns a placeholder when the signal aborts before any text streamed at all", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const provider: ModelProvider = {
+      async *complete(_request, options) {
+        if (options?.signal?.aborted) return;
+        yield { type: "text_delta", textDelta: "unreachable" };
+        yield { type: "message_stop" };
+      },
+    };
+    const gen = runModelWithTools(provider, tools, [{ role: "user", content: "hi" }], undefined, controller.signal);
+    let next = await gen.next();
+    while (!next.done) {
+      next = await gen.next(undefined);
+    }
+    expect(next.value.finalText).toBe("（已停止，无内容）");
+  });
+
+  it("returns the partial text streamed so far even when the provider THROWS on abort (the real anthropic/openai-compatible/ollama behavior, unlike the two mock-style providers above)", async () => {
+    const controller = new AbortController();
+    const provider: ModelProvider = {
+      async *complete(_request, options) {
+        yield { type: "text_delta", textDelta: "par" };
+        controller.abort();
+        yield { type: "text_delta", textDelta: "tial" };
+        // A real fetch()/SDK call rejects with an AbortError once its signal fires — simulate that
+        // directly rather than only the mock provider's cooperative early-return style.
+        const error = new Error("The operation was aborted");
+        error.name = "AbortError";
+        throw error;
+      },
+    };
+    const gen = runModelWithTools(provider, tools, [{ role: "user", content: "hi" }], undefined, controller.signal);
+    let next = await gen.next();
+    while (!next.done) {
+      if (next.value.type !== "emit") throw new Error(`Unexpected yield type in this test: ${next.value.type}`);
+      next = await gen.next(undefined);
+    }
+    expect(next.value.finalText).toBe("partial");
+  });
+
+  it("re-throws a non-abort error instead of swallowing it", async () => {
+    const provider: ModelProvider = {
+      async *complete() {
+        yield { type: "text_delta", textDelta: "x" };
+        throw new Error("a real network failure, unrelated to any signal");
+      },
+    };
+    const gen = runModelWithTools(provider, tools, [{ role: "user", content: "hi" }]);
+    let next = await gen.next();
+    await expect(
+      (async () => {
+        while (!next.done) next = await gen.next(undefined);
+      })(),
+    ).rejects.toThrow("a real network failure");
+  });
 });

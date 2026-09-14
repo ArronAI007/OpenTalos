@@ -24,19 +24,29 @@ export async function* runModelWithTools(
   tools: ToolDefinition[],
   messages: Message[],
   maxRounds: number = DEFAULT_MAX_ROUNDS,
+  signal?: AbortSignal,
 ): AsyncGenerator<NodeYield, AgentTurnResult, NodeResumeValue> {
   let conversation = messages;
   for (let round = 0; round < maxRounds; round++) {
     let assistantText = "";
     const pendingToolCalls: ToolCall[] = [];
     yield { type: "emit", eventType: "llm_call_start" };
-    for await (const chunk of provider.complete({ messages: conversation, tools })) {
-      if (chunk.type === "text_delta") {
-        assistantText += chunk.textDelta;
-        yield { type: "emit", eventType: "llm_text_delta", payload: { delta: chunk.textDelta } };
-      } else if (chunk.type === "tool_call") {
-        pendingToolCalls.push(chunk.toolCall);
+    try {
+      for await (const chunk of provider.complete({ messages: conversation, tools }, { signal })) {
+        if (chunk.type === "text_delta") {
+          assistantText += chunk.textDelta;
+          yield { type: "emit", eventType: "llm_text_delta", payload: { delta: chunk.textDelta } };
+        } else if (chunk.type === "tool_call") {
+          pendingToolCalls.push(chunk.toolCall);
+        }
       }
+    } catch (error) {
+      // An aborted signal surfaces as a thrown error from the underlying HTTP call partway
+      // through the stream — not a real failure, so it's treated exactly like the model
+      // finishing early with whatever text had already streamed in. A non-abort error (a real
+      // network failure, a malformed response, etc.) must still propagate: only swallow the
+      // throw when it's actually the signal that fired, not merely correlated with one existing.
+      if (!signal?.aborted) throw error;
     }
     yield {
       type: "emit",
@@ -46,6 +56,13 @@ export async function* runModelWithTools(
       // replying, how many) is exactly what someone reviewing the trace wants to see here.
       payload: { text: assistantText, toolCallCount: pendingToolCalls.length },
     };
+
+    // A cancelled turn is treated exactly like the model finishing early with no tool calls —
+    // never proceeds to tool dispatch even if a tool_call chunk had already arrived, per the
+    // "only cancellable during model streaming" scope decision.
+    if (signal?.aborted) {
+      return { messages: conversation, finalText: assistantText || "（已停止，无内容）" };
+    }
 
     if (pendingToolCalls.length === 0) {
       return { messages: conversation, finalText: assistantText };
