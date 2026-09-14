@@ -296,6 +296,9 @@ importers:
       '@opentalos/sdk':
         specifier: workspace:*
         version: link:../sdk
+      '@opentalos/skills':
+        specifier: workspace:*
+        version: link:../skills
       '@opentalos/tool-registry':
         specifier: workspace:*
         version: link:../tool-registry

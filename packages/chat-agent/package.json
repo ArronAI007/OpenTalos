@@ -14,7 +14,8 @@
     "@opentalos/core-types": "workspace:*",
     "@opentalos/core-graph": "workspace:*",
     "@opentalos/tool-registry": "workspace:*",
-    "@opentalos/sdk": "workspace:*"
+    "@opentalos/sdk": "workspace:*",
+    "@opentalos/skills": "workspace:*"
   },
   "devDependencies": {
     "@opentalos/checkpoint": "workspace:*",

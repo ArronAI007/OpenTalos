@@ -3,6 +3,7 @@ import { GraphEngine } from "@opentalos/core-graph";
 import { InMemoryEventBus } from "@opentalos/tracing";
 import { InMemoryCheckpointStore } from "@opentalos/checkpoint";
 import type { ModelProvider, ModelResponseChunk } from "@opentalos/core-types";
+import type { Skill } from "@opentalos/skills";
 import { buildChatAgentGraph } from "./graph.js";
 import { createChatAgentToolRegistry } from "./registry.js";
 import type { ChatState } from "./state.js";
@@ -126,5 +127,37 @@ describe("chat agent", () => {
 
     expect(checkpoint.status).toBe("done");
     expect(checkpoint.state.reply).toBe("部分回复");
+  });
+
+  it("registers load_skill and run_skill_script when skills are provided, and the model can use them in one turn", async () => {
+    const fakeSkill: Skill = {
+      name: "fake-skill",
+      description: "A fake skill for this test.",
+      content: "# fake-skill\ninstructions",
+      dir: "/tmp/does-not-matter-for-this-test",
+    };
+    const toolRegistry = createChatAgentToolRegistry({ skills: [fakeSkill] });
+    const toolNames = toolRegistry.list().map((t) => t.name);
+    expect(toolNames).toContain("load_skill");
+    expect(toolNames).toContain("run_skill_script");
+
+    const eventBus = new InMemoryEventBus();
+    const checkpointStore = new InMemoryCheckpointStore();
+    const modelProvider = scriptedProvider([
+      [{ type: "tool_call", toolCall: { id: "call-1", name: "load_skill", input: { name: "fake-skill" } } }],
+      [{ type: "text_delta", textDelta: "loaded the fake skill" }, { type: "message_stop" }],
+    ]);
+    const engine = new GraphEngine<ChatState>(buildChatAgentGraph(modelProvider, toolRegistry), {
+      toolRegistry,
+      eventBus,
+      checkpointStore,
+    });
+    const initialState: ChatState = { message: "use the fake skill" };
+    let checkpoint = engine.start(initialState, { tenantId: "tenant-a", sessionId: "session-skill" }, "run-skill-1");
+    checkpoint = await engine.run(checkpoint);
+    expect(checkpoint.status).toBe("paused"); // load_skill is a tool call, so the usual HITL gate still applies
+    checkpoint = await engine.resume(checkpoint, { type: "approval", approved: true });
+    expect(checkpoint.status).toBe("done");
+    expect(checkpoint.state.reply).toBe("loaded the fake skill");
   });
 });
