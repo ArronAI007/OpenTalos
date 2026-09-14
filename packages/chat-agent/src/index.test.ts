@@ -97,4 +97,34 @@ describe("chat agent", () => {
     const eventTypes = eventBus.getEvents().map((e) => e.type);
     expect(eventTypes).not.toContain("hitl_interrupt");
   });
+
+  it("returns the partial reply and skips HITL approval when the signal is aborted mid-stream", async () => {
+    const toolRegistry = createChatAgentToolRegistry();
+    const eventBus = new InMemoryEventBus();
+    const checkpointStore = new InMemoryCheckpointStore();
+    const controller = new AbortController();
+    const modelProvider: ModelProvider = {
+      async *complete(_request, options) {
+        yield { type: "text_delta", textDelta: "部分回复" };
+        controller.abort();
+        if (options?.signal?.aborted) return;
+        yield { type: "text_delta", textDelta: "，不应该出现" };
+        yield { type: "message_stop" };
+      },
+    };
+    const engine = new GraphEngine<ChatState>(buildChatAgentGraph(modelProvider, toolRegistry), {
+      toolRegistry,
+      eventBus,
+      checkpointStore,
+    });
+
+    const initialState: ChatState = { message: "你好" };
+    const checkpoint = await engine.run(
+      engine.start(initialState, { tenantId: "tenant-a", sessionId: "session-1" }, "run-cancel"),
+      { signal: controller.signal },
+    );
+
+    expect(checkpoint.status).toBe("done");
+    expect(checkpoint.state.reply).toBe("部分回复");
+  });
 });

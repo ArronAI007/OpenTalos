@@ -1,4 +1,4 @@
-import { shallowMergeReducer, type GraphDefinition, type NodeFn } from "@opentalos/core-graph";
+import { shallowMergeReducer, type GraphDefinition, type NodeContext, type NodeFn } from "@opentalos/core-graph";
 import type { ModelProvider, ToolRegistry } from "@opentalos/core-types";
 import { runModelWithTools } from "@opentalos/sdk";
 import type { ChatState } from "./state.js";
@@ -11,11 +11,17 @@ const SYSTEM_PROMPT =
   "你是 OpenTalos 的聊天助手。如果现有工具能帮助更好地回答用户的问题，请调用相应工具；否则直接自然地回复。";
 
 function buildRespondNode(modelProvider: ModelProvider, toolRegistry: ToolRegistry): NodeFn<ChatState> {
-  return async function* respond(state) {
-    const { finalText, messages } = yield* runModelWithTools(modelProvider, toolRegistry.list(), [
-      { role: "system", content: SYSTEM_PROMPT },
-      { role: "user", content: state.message },
-    ]);
+  return async function* respond(state: ChatState, ctx: NodeContext) {
+    const { finalText, messages } = yield* runModelWithTools(
+      modelProvider,
+      toolRegistry.list(),
+      [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: state.message },
+      ],
+      undefined,
+      ctx.signal,
+    );
     // Only turns that actually called a tool (e.g. looked up an exchange rate) go through human
     // approval before their result is sent — plain conversational replies skip the HITL pause
     // entirely, so an ordinary "你好" doesn't stop and wait for a click every time.
