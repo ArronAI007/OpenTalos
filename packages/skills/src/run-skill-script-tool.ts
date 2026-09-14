@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import { isAbsolute, resolve, sep } from "node:path";
 import type { Tool } from "@opentalos/core-types";
 import { runSandboxedScript } from "@opentalos/sandbox";
@@ -74,8 +75,39 @@ export function createRunSkillScriptTool(skills: Skill[]): Tool {
         };
       }
 
+      // The lexical check above is purely textual (`path.resolve` never touches the filesystem or
+      // follows symlinks), so it is NOT sufficient on its own: a symlink placed *inside* skill.dir
+      // (whose name contains no ".." at all) can still point anywhere on disk, pass the check
+      // above, and then have its real target followed and mounted by the sandbox's read-only bind
+      // mount. Resolve BOTH sides through the real filesystem (following symlinks) and re-check the
+      // prefix against those real paths, so a symlink escape is caught even though the textual path
+      // never left skill.dir.
+      let realSkillDir: string;
+      let realResolvedPath: string;
+      try {
+        realSkillDir = realpathSync(skill.dir);
+        realResolvedPath = realpathSync(resolvedPath);
+      } catch (error) {
+        return {
+          id: "",
+          output: `Invalid scriptRelativePath: "${scriptRelativePath}" does not resolve to a real file for skill "${skillName}" (${error instanceof Error ? error.message : String(error)}).`,
+          isError: true,
+        };
+      }
+      const realSkillDirWithSep = realSkillDir.endsWith(sep) ? realSkillDir : realSkillDir + sep;
+      if (!realResolvedPath.startsWith(realSkillDirWithSep)) {
+        return {
+          id: "",
+          output: `Invalid scriptRelativePath: "${scriptRelativePath}" resolves (after following symlinks) outside skill "${skillName}"'s own directory (path traversal rejected).`,
+          isError: true,
+        };
+      }
+
+      // Use the already symlink-resolved real path for the mount itself (rather than the lexical
+      // `resolvedPath`, or re-resolving later) so there is no TOCTOU window between this check and
+      // what actually gets bind-mounted into the sandbox.
       const result = await runSandboxedScript({
-        scriptHostPath: resolvedPath,
+        scriptHostPath: realResolvedPath,
         args: args ?? [],
         inputText: input,
       });

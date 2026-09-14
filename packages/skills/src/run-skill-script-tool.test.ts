@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import { createRunSkillScriptTool } from "./run-skill-script-tool.js";
@@ -82,5 +82,34 @@ describe("createRunSkillScriptTool", () => {
       expect(result.isError).toBe(true);
       expect(String(result.output)).toMatch(/outside|traversal|invalid/i);
     },
+  );
+
+  it(
+    "rejects a symlink inside the skill dir that points outside it, without executing or " +
+      "returning the linked-to file's content (real Docker bind-mount symlink-escape bypass)",
+    async () => {
+      // Distinctive secret content living OUTSIDE the skill directory entirely. If the guard's
+      // lexical-only prefix check is bypassed, the sandbox's read-only bind mount follows the
+      // symlink and this content would end up executed (and/or its text observable in output).
+      const outsideSecretPath = resolve(FIXTURES_ROOT, "outside-secret.js");
+      writeFileSync(outsideSecretPath, `console.log("PWNED-VIA-SYMLINK-ESCAPE");`);
+
+      // The symlink lives INSIDE the skill's own directory — its name never contains "..", so a
+      // purely lexical `path.resolve(skill.dir, name)` + string-prefix check sees it as textually
+      // "inside" skill.dir and lets it straight through, even though it really points elsewhere.
+      const symlinkPath = resolve(SKILL_DIR, "innocuous-link.js");
+      symlinkSync(outsideSecretPath, symlinkPath);
+
+      const tool = createRunSkillScriptTool(skills);
+      const result = await tool.execute(
+        { skillName: "greeter", scriptRelativePath: "innocuous-link.js", args: [] },
+        { tenantId: "t", sessionId: "s" },
+      );
+
+      expect(result.isError).toBe(true);
+      expect(String(result.output)).toMatch(/outside|traversal|invalid/i);
+      expect(String(result.output)).not.toContain("PWNED-VIA-SYMLINK-ESCAPE");
+    },
+    30_000,
   );
 });
