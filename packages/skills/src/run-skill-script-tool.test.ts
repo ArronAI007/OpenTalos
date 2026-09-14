@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
+import { MAX_INPUT_TEXT_BYTES } from "@opentalos/sandbox";
 import { createRunSkillScriptTool } from "./run-skill-script-tool.js";
 import type { Skill } from "./discovery.js";
 
@@ -112,4 +113,23 @@ describe("createRunSkillScriptTool", () => {
     },
     30_000,
   );
+
+  it("returns a clean isError result (never a raw exception) when the sandbox layer rejects oversized input", async () => {
+    const tool = createRunSkillScriptTool(skills);
+    const oversizedInput = "a".repeat(MAX_INPUT_TEXT_BYTES + 1);
+
+    // execute() must never throw here — it should catch runSandboxedScript's rejection itself and
+    // translate it into a clean tool result, independent of whatever generic catch-all the tool
+    // registry that calls this tool also happens to have.
+    const result = await tool.execute(
+      { skillName: "greeter", scriptRelativePath: "greet.js", args: [], input: oversizedInput },
+      { tenantId: "t", sessionId: "s" },
+    );
+
+    expect(result.isError).toBe(true);
+    expect(String(result.output)).toMatch(/too large/i);
+    // Must not leak the sandbox layer's low-level implementation details.
+    expect(String(result.output)).not.toContain("/bin/sh");
+    expect(String(result.output)).not.toMatch(/at runSandboxedScript|\.ts:\d+:\d+/);
+  });
 });

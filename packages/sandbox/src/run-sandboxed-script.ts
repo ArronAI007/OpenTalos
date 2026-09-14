@@ -70,7 +70,47 @@ const globalSemaphore = new Semaphore(
     : DEFAULT_MAX_CONCURRENT_SANDBOXES,
 );
 
+/**
+ * Maximum size, in bytes, allowed for `inputText`. `inputText` is written into the container by
+ * passing it as the value of a *single* exec-scoped environment variable (`SANDBOX_INPUT_TEXT`,
+ * see the `started.exec(["sh", "-c", ...], { env: { SANDBOX_INPUT_TEXT: ... } })` call below).
+ *
+ * The naive assumption is that the relevant ceiling is the total `ARG_MAX` for the whole
+ * argv+envp block passed to `execve()` (commonly ~2MB on Linux, higher on macOS). That is NOT
+ * what actually bites here: this was empirically verified against this project's real sandbox
+ * (testcontainers + Docker, `node:22-alpine`) by bisecting `inputText` sizes directly against
+ * `started.exec(...)`, and a *single* environment variable string starts failing with
+ * `exec /bin/sh: argument list too long` once it crosses 128 KiB (131,072 bytes) — reproducible
+ * consistently between 125,000 bytes (succeeds) and 131,072 bytes (fails). That matches Linux's
+ * `MAX_ARG_STRLEN` (32 pages, i.e. 32 × 4096 = 131,072 bytes): the kernel caps the length of any
+ * *individual* argv/envp string well below the much larger total `ARG_MAX`, and one big
+ * `SANDBOX_INPUT_TEXT` value hits that per-string cap directly, regardless of how much of the
+ * total budget is otherwise free.
+ *
+ * 64 KiB (65,536 bytes) is chosen as a conservative limit: roughly half of the empirically
+ * confirmed 128 KiB per-string ceiling (2x safety margin, covering variance across kernels/distros
+ * without needing to shave right up to the edge), while still comfortably covering realistic
+ * inputs for this feature's actual use case — e.g. the `text-to-table` demo skill reformatting a
+ * user-pasted block of delimited text. It deliberately does NOT attempt to support arbitrarily
+ * large input (e.g. a multi-megabyte, 100k-row CSV paste): doing that losslessly would require a
+ * different transport mechanism entirely (chunking, a mounted file, etc.), which is out of scope
+ * here. The goal of this limit is only to fail fast with a clear, actionable error instead of
+ * letting an oversized value hit the OS-level per-argument wall and surface as a confusing
+ * `exec /bin/sh: argument list too long`-style failure.
+ */
+export const MAX_INPUT_TEXT_BYTES = 65_536;
+
 export async function runSandboxedScript(request: SandboxExecutionRequest): Promise<SandboxExecutionResult> {
+  if (request.inputText !== undefined) {
+    const inputByteLength = Buffer.byteLength(request.inputText, "utf8");
+    if (inputByteLength > MAX_INPUT_TEXT_BYTES) {
+      throw new Error(
+        `Sandbox input text is too large: ${inputByteLength} bytes exceeds the ${MAX_INPUT_TEXT_BYTES}-byte limit. ` +
+          `Provide a smaller input — this sandbox transport cannot support arbitrarily large payloads.`,
+      );
+    }
+  }
+
   const release = await globalSemaphore.acquire();
   try {
     const container = new GenericContainer("node:22-alpine")

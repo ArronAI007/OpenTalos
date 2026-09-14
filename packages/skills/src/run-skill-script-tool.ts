@@ -106,11 +106,35 @@ export function createRunSkillScriptTool(skills: Skill[]): Tool {
       // Use the already symlink-resolved real path for the mount itself (rather than the lexical
       // `resolvedPath`, or re-resolving later) so there is no TOCTOU window between this check and
       // what actually gets bind-mounted into the sandbox.
-      const result = await runSandboxedScript({
-        scriptHostPath: realResolvedPath,
-        args: args ?? [],
-        inputText: input,
-      });
+      //
+      // `runSandboxedScript` can throw (e.g. oversized `inputText` rejected up front, or an
+      // unexpected sandbox-layer failure such as a Docker/container error). This tool's own
+      // contract is to never let a raw internal exception escape its `execute()` — regardless of
+      // whatever generic catch-all a caller (like the tool registry) also happens to have — so we
+      // catch here and translate into a clean, actionable `isError` result rather than relying on
+      // an outer layer to paper over an internal detail leaking through (e.g. `/bin/sh`, a stack
+      // trace).
+      let result;
+      try {
+        result = await runSandboxedScript({
+          scriptHostPath: realResolvedPath,
+          args: args ?? [],
+          inputText: input,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        // Surface the specific "input too large" case clearly, since it is the realistic failure
+        // this tool's caller (the model) can actually act on by shrinking its input. Any other
+        // sandbox-layer failure gets a generic, non-leaky message.
+        const isInputTooLarge = /input.*too large/i.test(message);
+        return {
+          id: "",
+          output: isInputTooLarge
+            ? `Script "${scriptRelativePath}" for skill "${skillName}" could not run: ${message}`
+            : `Script "${scriptRelativePath}" for skill "${skillName}" failed to run in the sandbox due to an unexpected internal error.`,
+          isError: true,
+        };
+      }
 
       if (result.timedOut) {
         return { id: "", output: `Script "${scriptRelativePath}" for skill "${skillName}" timed out.`, isError: true };
