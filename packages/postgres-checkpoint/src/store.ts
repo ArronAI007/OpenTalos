@@ -23,6 +23,7 @@ export class PostgresCheckpointStore implements CheckpointStore {
       state: checkpoint.state,
       pendingYields: checkpoint.pendingYields,
       status: checkpoint.status,
+      cancelRequested: checkpoint.cancelRequested,
       createdAt: new Date(checkpoint.createdAt),
     };
     await this.db
@@ -38,6 +39,7 @@ export class PostgresCheckpointStore implements CheckpointStore {
           state: values.state,
           pendingYields: values.pendingYields,
           status: values.status,
+          cancelRequested: values.cancelRequested,
           updatedAt: new Date(),
         },
       });
@@ -70,6 +72,11 @@ export class PostgresCheckpointStore implements CheckpointStore {
       pendingYields: row.pendingYields as unknown[],
       status: row.status as Checkpoint["status"],
       createdAt: row.createdAt.toISOString(),
+      cancelRequested: row.cancelRequested,
     };
+  }
+
+  async requestCancel(runId: string): Promise<void> {
+    await this.db.update(checkpoints).set({ cancelRequested: true }).where(eq(checkpoints.runId, runId));
   }
 }

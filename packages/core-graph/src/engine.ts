@@ -52,6 +52,7 @@ export class GraphEngine<TState> {
       pendingYields: [],
       status: "running",
       createdAt: new Date().toISOString(),
+      cancelRequested: false,
     };
   }
 

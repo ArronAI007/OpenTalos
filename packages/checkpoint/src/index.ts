@@ -18,4 +18,9 @@ export class InMemoryCheckpointStore implements CheckpointStore {
       return true;
     });
   }
+
+  async requestCancel(runId: string): Promise<void> {
+    const checkpoint = this.checkpoints.get(runId);
+    if (checkpoint) this.checkpoints.set(runId, { ...checkpoint, cancelRequested: true });
+  }
 }

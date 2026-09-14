@@ -11,6 +11,7 @@ export const CREATE_TABLES_SQL = `
     state JSONB NOT NULL,
     pending_yields JSONB NOT NULL,
     status TEXT NOT NULL,
+    cancel_requested BOOLEAN NOT NULL DEFAULT false,
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
   );

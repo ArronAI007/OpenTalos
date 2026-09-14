@@ -92,6 +92,11 @@ export interface Checkpoint<TState = unknown> {
   pendingYields: unknown[];
   status: "running" | "paused" | "done";
   createdAt: string;
+  /** Set via CheckpointStore.requestCancel(). Only honored by chat-agent's respond node while a
+   * model call is actively streaming (see NodeContext.signal) — a request that arrives during
+   * tool execution or while paused for approval has no effect until (if ever) another streaming
+   * phase happens for this run. */
+  cancelRequested: boolean;
 }
 
 export interface CheckpointQuery {
@@ -103,6 +108,11 @@ export interface CheckpointStore {
   save(checkpoint: Checkpoint): Promise<void>;
   load(runId: string): Promise<Checkpoint | undefined>;
   list(query: CheckpointQuery): Promise<Checkpoint[]>;
+  /** Sets cancelRequested without disturbing any other field — deliberately NOT implemented via
+   * save(), which would race a concurrently-executing worker's own save() of state/status for
+   * the same run (last-write-wins on a full-row upsert risks silently clobbering whichever side
+   * writes last). A no-op if runId doesn't exist. */
+  requestCancel(runId: string): Promise<void>;
 }
 
 export type TraceEventType =

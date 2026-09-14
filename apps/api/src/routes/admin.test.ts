@@ -24,6 +24,7 @@ beforeAll(async () => {
     CREATE TABLE checkpoints (
       run_id TEXT PRIMARY KEY, graph_id TEXT NOT NULL, tenant_id TEXT NOT NULL, session_id TEXT NOT NULL,
       node_cursor JSONB NOT NULL, state JSONB NOT NULL, pending_yields JSONB NOT NULL, status TEXT NOT NULL,
+      cancel_requested BOOLEAN NOT NULL DEFAULT false,
       created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE TABLE tasks (

@@ -1,4 +1,4 @@
-import { jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 
 export const checkpoints = pgTable("checkpoints", {
   runId: text("run_id").primaryKey(),
@@ -9,6 +9,7 @@ export const checkpoints = pgTable("checkpoints", {
   state: jsonb("state").notNull(),
   pendingYields: jsonb("pending_yields").notNull(),
   status: text("status").notNull(),
+  cancelRequested: boolean("cancel_requested").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

@@ -21,6 +21,7 @@ beforeAll(async () => {
       state JSONB NOT NULL,
       pending_yields JSONB NOT NULL,
       status TEXT NOT NULL,
+      cancel_requested BOOLEAN NOT NULL DEFAULT false,
       created_at TIMESTAMPTZ NOT NULL,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
@@ -44,6 +45,7 @@ function makeCheckpoint(overrides: Partial<Checkpoint> = {}): Checkpoint {
     pendingYields: [],
     status: "running",
     createdAt: new Date().toISOString(),
+    cancelRequested: false,
     ...overrides,
   };
 }
@@ -87,5 +89,14 @@ describe("PostgresCheckpointStore", () => {
     await store.save(makeCheckpoint({ runId: "run-parallel-cursor", nodeCursor: parallelCursor }));
     const loaded = await store.load("run-parallel-cursor");
     expect(loaded?.nodeCursor).toEqual(parallelCursor);
+  });
+
+  it("requestCancel sets cancel_requested without disturbing other columns", async () => {
+    await store.save(makeCheckpoint({ runId: "run-cancel-pg", state: { count: 1 } }));
+    await store.requestCancel("run-cancel-pg");
+    const loaded = await store.load("run-cancel-pg");
+    expect(loaded?.cancelRequested).toBe(true);
+    expect(loaded?.state).toEqual({ count: 1 });
+    expect(loaded?.status).toBe("running");
   });
 });

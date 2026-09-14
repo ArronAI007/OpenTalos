@@ -13,6 +13,7 @@ function makeCheckpoint(overrides: Partial<Checkpoint> = {}): Checkpoint {
     pendingYields: [],
     status: "running",
     createdAt: new Date().toISOString(),
+    cancelRequested: false,
     ...overrides,
   };
 }
@@ -49,5 +50,18 @@ describe("InMemoryCheckpointStore", () => {
 
     const tenantAAndSession1 = await store.list({ tenantId: "tenant-a", sessionId: "s1" });
     expect(tenantAAndSession1.map((c) => c.runId)).toEqual(["run-1"]);
+  });
+
+  it("requestCancel sets cancelRequested on an existing checkpoint", async () => {
+    const store = new InMemoryCheckpointStore();
+    await store.save(makeCheckpoint({ runId: "run-cancel" }));
+    await store.requestCancel("run-cancel");
+    const loaded = await store.load("run-cancel");
+    expect(loaded?.cancelRequested).toBe(true);
+  });
+
+  it("requestCancel on an unknown runId is a silent no-op", async () => {
+    const store = new InMemoryCheckpointStore();
+    await expect(store.requestCancel("does-not-exist")).resolves.toBeUndefined();
   });
 });
