@@ -64,7 +64,7 @@ export type ModelResponseChunk =
   | { type: "message_stop" };
 
 export interface ModelProvider {
-  complete(request: ModelRequest): AsyncIterable<ModelResponseChunk>;
+  complete(request: ModelRequest, options?: { signal?: AbortSignal }): AsyncIterable<ModelResponseChunk>;
 }
 
 export interface MemoryRecord {

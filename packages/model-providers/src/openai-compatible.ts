@@ -36,12 +36,10 @@ type OpenAIToolDeclaration =
 export interface OpenAIClientLike {
   chat: {
     completions: {
-      create(params: {
-        model: string;
-        messages: OpenAIOutMessage[];
-        tools?: OpenAIToolDeclaration[];
-        stream: true;
-      }): AsyncIterable<OpenAIStreamChunk>;
+      create(
+        params: { model: string; messages: OpenAIOutMessage[]; tools?: OpenAIToolDeclaration[]; stream: true },
+        options?: { signal?: AbortSignal },
+      ): AsyncIterable<OpenAIStreamChunk>;
     };
   };
 }
@@ -55,30 +53,33 @@ export function createOpenAICompatibleProvider(
   options: OpenAICompatibleProviderOptions,
 ): ModelProvider {
   return {
-    async *complete(request: ModelRequest): AsyncIterable<ModelResponseChunk> {
-      const stream = client.chat.completions.create({
-        model: options.model,
-        messages: request.messages.map((m): OpenAIOutMessage => ({
-          role: m.role,
-          content: m.content,
-          ...(m.toolCalls
-            ? {
-                tool_calls: m.toolCalls.map((tc) => ({
-                  id: tc.id,
-                  type: "function" as const,
-                  function: { name: tc.name, arguments: JSON.stringify(tc.input) },
-                })),
-              }
-            : {}),
-          ...(m.toolCallId ? { tool_call_id: m.toolCallId } : {}),
-        })),
-        tools: request.tools?.map((t): OpenAIToolDeclaration =>
-          t.kind === "builtin"
-            ? { type: "builtin_function", function: { name: t.name } }
-            : { type: "function", function: { name: t.name, description: t.description, parameters: t.inputSchema } },
-        ),
-        stream: true,
-      });
+    async *complete(request: ModelRequest, callOptions?: { signal?: AbortSignal }): AsyncIterable<ModelResponseChunk> {
+      const stream = client.chat.completions.create(
+        {
+          model: options.model,
+          messages: request.messages.map((m): OpenAIOutMessage => ({
+            role: m.role,
+            content: m.content,
+            ...(m.toolCalls
+              ? {
+                  tool_calls: m.toolCalls.map((tc) => ({
+                    id: tc.id,
+                    type: "function" as const,
+                    function: { name: tc.name, arguments: JSON.stringify(tc.input) },
+                  })),
+                }
+              : {}),
+            ...(m.toolCallId ? { tool_call_id: m.toolCallId } : {}),
+          })),
+          tools: request.tools?.map((t): OpenAIToolDeclaration =>
+            t.kind === "builtin"
+              ? { type: "builtin_function", function: { name: t.name } }
+              : { type: "function", function: { name: t.name, description: t.description, parameters: t.inputSchema } },
+          ),
+          stream: true,
+        },
+        { signal: callOptions?.signal },
+      );
 
       // Keyed by each tool call's `index` (stable across fragments within one completion) and
       // accumulated across chunks until `finish_reason` arrives, since `id`/`function.name` only

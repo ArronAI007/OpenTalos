@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ModelRequest } from "@opentalos/core-types";
+import type { ModelRequest, ModelResponseChunk } from "@opentalos/core-types";
 import { createMockProvider } from "./mock.js";
 
 describe("createMockProvider", () => {
@@ -45,5 +45,18 @@ describe("createMockProvider", () => {
     expect(chunks.some((c) => c.type === "tool_call")).toBe(false);
     const textChunks = chunks.filter((c): c is { type: "text_delta"; textDelta: string } => c.type === "text_delta");
     expect(textChunks.map((c) => c.textDelta).join("").length).toBeGreaterThan(0);
+  });
+
+  it("stops yielding once the signal is aborted, without throwing", async () => {
+    const provider = createMockProvider();
+    const controller = new AbortController();
+    const chunks: ModelResponseChunk[] = [];
+    const iterator = provider.complete({ messages: [{ role: "user", content: "hi" }] }, { signal: controller.signal });
+    for await (const chunk of iterator) {
+      chunks.push(chunk);
+      if (chunks.length === 1) controller.abort();
+    }
+    expect(chunks.length).toBeGreaterThanOrEqual(1);
+    expect(chunks.every((c) => c.type !== "message_stop")).toBe(true);
   });
 });

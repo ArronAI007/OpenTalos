@@ -33,6 +33,23 @@ function capturingClient(chunks: unknown[]): { client: OpenAIClientLike; getCapt
   return { client, getCapturedParams: () => capturedParams };
 }
 
+function capturingClientWithOptions(chunks: unknown[]): { client: OpenAIClientLike; getCapturedOptions: () => unknown } {
+  let capturedOptions: unknown;
+  const client: OpenAIClientLike = {
+    chat: {
+      completions: {
+        create(_params, options) {
+          capturedOptions = options;
+          return (async function* () {
+            for (const chunk of chunks) yield chunk as never;
+          })();
+        },
+      },
+    },
+  };
+  return { client, getCapturedOptions: () => capturedOptions };
+}
+
 const request: ModelRequest = { messages: [{ role: "user", content: "hi" }] };
 
 describe("createOpenAICompatibleProvider", () => {
@@ -184,5 +201,15 @@ describe("createOpenAICompatibleProvider", () => {
       tool_calls: [{ id: "call-1", type: "function", function: { name: "lookup_rate", arguments: JSON.stringify({ pair: "USD/CNY" }) } }],
     });
     expect(params.messages[2]).toEqual({ role: "tool", content: "7.13", tool_call_id: "call-1" });
+  });
+
+  it("forwards an AbortSignal to the underlying client.chat.completions.create call", async () => {
+    const controller = new AbortController();
+    const { client, getCapturedOptions } = capturingClientWithOptions([{ choices: [{ delta: {}, finish_reason: "stop" }] }]);
+    const provider = createOpenAICompatibleProvider(client, { model: "gpt-test" });
+    for await (const _chunk of provider.complete(request, { signal: controller.signal })) {
+      // draining the iterator to trigger the create() call
+    }
+    expect(getCapturedOptions()).toEqual({ signal: controller.signal });
   });
 });

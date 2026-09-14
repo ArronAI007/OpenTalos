@@ -27,13 +27,16 @@ interface AnthropicOutMessage {
 
 export interface AnthropicClientLike {
   messages: {
-    stream(params: {
-      model: string;
-      max_tokens: number;
-      system?: string;
-      messages: AnthropicOutMessage[];
-      tools?: { name: string; description: string; input_schema: JSONSchema }[];
-    }): AsyncIterable<AnthropicStreamEvent>;
+    stream(
+      params: {
+        model: string;
+        max_tokens: number;
+        system?: string;
+        messages: AnthropicOutMessage[];
+        tools?: { name: string; description: string; input_schema: JSONSchema }[];
+      },
+      options?: { signal?: AbortSignal },
+    ): AsyncIterable<AnthropicStreamEvent>;
   };
 }
 
@@ -67,19 +70,22 @@ function toAnthropicMessage(message: Message): AnthropicOutMessage | undefined {
 
 export function createAnthropicProvider(client: AnthropicClientLike, options: AnthropicProviderOptions): ModelProvider {
   return {
-    async *complete(request: ModelRequest): AsyncIterable<ModelResponseChunk> {
+    async *complete(request: ModelRequest, callOptions?: { signal?: AbortSignal }): AsyncIterable<ModelResponseChunk> {
       const system = request.messages.find((m) => m.role === "system");
       const conversation = request.messages
         .map(toAnthropicMessage)
         .filter((m): m is AnthropicOutMessage => m !== undefined);
 
-      const stream = client.messages.stream({
-        model: options.model,
-        max_tokens: options.maxTokens ?? 1024,
-        system: system?.content,
-        messages: conversation,
-        tools: request.tools?.map((t) => ({ name: t.name, description: t.description, input_schema: t.inputSchema })),
-      });
+      const stream = client.messages.stream(
+        {
+          model: options.model,
+          max_tokens: options.maxTokens ?? 1024,
+          system: system?.content,
+          messages: conversation,
+          tools: request.tools?.map((t) => ({ name: t.name, description: t.description, input_schema: t.inputSchema })),
+        },
+        { signal: callOptions?.signal },
+      );
 
       // Keyed by the block's `index` (Anthropic streams multiple content blocks — text and
       // tool_use — interleaved in one message, each independently identified by index). Holds

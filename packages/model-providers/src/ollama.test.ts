@@ -185,4 +185,18 @@ describe("createOllamaProvider", () => {
     });
     expect(sentBody.messages[2]).toEqual({ role: "tool", content: "7.13", tool_name: "lookup_rate" });
   });
+
+  it("forwards an AbortSignal to the fetch call's init.signal", async () => {
+    const controller = new AbortController();
+    let capturedInit: { signal?: AbortSignal } | undefined;
+    const fetchFn: OllamaFetchLike = async (_url, init) => {
+      capturedInit = init;
+      return { ok: true, status: 200, body: streamFromLines([JSON.stringify({ done: true })]) };
+    };
+    const provider = createOllamaProvider(fetchFn, { baseUrl: "http://localhost:11434", model: "llama-test" });
+    for await (const _chunk of provider.complete(request, { signal: controller.signal })) {
+      // drain
+    }
+    expect(capturedInit?.signal).toBe(controller.signal);
+  });
 });

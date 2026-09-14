@@ -141,4 +141,24 @@ describe("createAnthropicProvider", () => {
       content: [{ type: "tool_result", tool_use_id: "call-1", content: "7.13" }],
     });
   });
+
+  it("forwards an AbortSignal to client.messages.stream", async () => {
+    const controller = new AbortController();
+    let capturedOptions: unknown;
+    const client: AnthropicClientLike = {
+      messages: {
+        stream(_params, options) {
+          capturedOptions = options;
+          return (async function* () {
+            yield { type: "message_stop" } as never;
+          })();
+        },
+      },
+    };
+    const provider = createAnthropicProvider(client, { model: "claude-test" });
+    for await (const _chunk of provider.complete(request, { signal: controller.signal })) {
+      // drain
+    }
+    expect(capturedOptions).toEqual({ signal: controller.signal });
+  });
 });

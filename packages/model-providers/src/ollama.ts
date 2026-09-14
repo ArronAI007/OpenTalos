@@ -8,7 +8,7 @@ export interface OllamaFetchResponse {
 
 export type OllamaFetchLike = (
   url: string,
-  init: { method: string; body: string; headers: Record<string, string> },
+  init: { method: string; body: string; headers: Record<string, string>; signal?: AbortSignal },
 ) => Promise<OllamaFetchResponse>;
 
 export interface OllamaProviderOptions {
@@ -116,7 +116,7 @@ function parseLine(line: string): ModelResponseChunk[] {
 
 export function createOllamaProvider(fetchFn: OllamaFetchLike, options: OllamaProviderOptions): ModelProvider {
   return {
-    async *complete(request: ModelRequest): AsyncIterable<ModelResponseChunk> {
+    async *complete(request: ModelRequest, callOptions?: { signal?: AbortSignal }): AsyncIterable<ModelResponseChunk> {
       const tools: { type: "function"; function: { name: string; description: string; parameters: JSONSchema } }[] | undefined =
         request.tools?.map((t) => ({
           type: "function",
@@ -132,6 +132,7 @@ export function createOllamaProvider(fetchFn: OllamaFetchLike, options: OllamaPr
           ...(tools ? { tools } : {}),
           stream: true,
         }),
+        signal: callOptions?.signal,
       });
 
       if (!response.ok || !response.body) {

@@ -6,7 +6,7 @@ import type { ModelProvider, ModelResponseChunk } from "@opentalos/core-types";
  * MODEL_PROVIDER is explicitly set to "mock". */
 export function createMockProvider(): ModelProvider {
   return {
-    async *complete(request): AsyncIterable<ModelResponseChunk> {
+    async *complete(request, options): AsyncIterable<ModelResponseChunk> {
       const hasToolResult = request.messages.some((m) => m.role === "tool");
       if (!hasToolResult && request.tools && request.tools.length > 0) {
         const tool = request.tools[0];
@@ -21,9 +21,11 @@ export function createMockProvider(): ModelProvider {
       // manual smoke testing without a real API key — also visibly demonstrates streaming rather
       // than looking identical to the old one-shot behavior. Final concatenated text is unchanged.
       for (const chunk of reply.match(/.{1,4}/gu) ?? [reply]) {
+        if (options?.signal?.aborted) return;
         yield { type: "text_delta", textDelta: chunk };
         await new Promise((resolve) => setTimeout(resolve, 15));
       }
+      if (options?.signal?.aborted) return;
       yield { type: "message_stop" };
     },
   };
