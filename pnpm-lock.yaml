@@ -357,7 +357,11 @@ importers:
         specifier: ^22.20.1
         version: 22.20.1
 
-  packages/core-types: {}
+  packages/core-types:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.1
+        version: 22.20.1
 
   packages/memory:
     dependencies:
@@ -504,6 +508,10 @@ importers:
       '@opentalos/tracing':
         specifier: workspace:*
         version: link:../tracing
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.1
+        version: 22.20.1
 
   packages/tool-registry:
     dependencies:

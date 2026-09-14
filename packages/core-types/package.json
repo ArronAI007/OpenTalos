@@ -9,5 +9,8 @@
     "build": "tsc -p tsconfig.json",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1"
   }
 }

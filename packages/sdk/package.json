@@ -16,5 +16,8 @@
     "@opentalos/checkpoint": "workspace:*",
     "@opentalos/tracing": "workspace:*",
     "@opentalos/tool-registry": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1"
   }
 }
