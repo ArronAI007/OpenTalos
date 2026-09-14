@@ -463,6 +463,12 @@ importers:
         specifier: ^12.1.0
         version: 12.1.0
 
+  packages/sandbox:
+    dependencies:
+      testcontainers:
+        specifier: ^12.1.0
+        version: 12.1.0
+
   packages/scheduler:
     dependencies:
       '@opentalos/core-graph':
