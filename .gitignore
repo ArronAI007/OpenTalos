@@ -5,6 +5,7 @@ dist
 .claude/
 /docs
 /CLAUDE.md
+.DS_Store
 
 # Agent skills (npx skills), installed locally via `npx skills add obra/superpowers --all`.
 /.agents
