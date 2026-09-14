@@ -64,4 +64,17 @@ describe("InMemoryCheckpointStore", () => {
     const store = new InMemoryCheckpointStore();
     await expect(store.requestCancel("does-not-exist")).resolves.toBeUndefined();
   });
+
+  it("a later save() with a stale cancelRequested: false does not clobber a concurrent requestCancel()", async () => {
+    const store = new InMemoryCheckpointStore();
+    await store.save(makeCheckpoint({ runId: "run-race", cancelRequested: false }));
+    await store.requestCancel("run-race");
+
+    // Simulate the engine's own next node-boundary save() call, still carrying the OLD in-memory
+    // checkpoint object from before requestCancel() was called (cancelRequested: false).
+    await store.save(makeCheckpoint({ runId: "run-race", status: "running", cancelRequested: false }));
+
+    const loaded = await store.load("run-race");
+    expect(loaded?.cancelRequested).toBe(true);
+  });
 });

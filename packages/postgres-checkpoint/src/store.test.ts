@@ -99,4 +99,16 @@ describe("PostgresCheckpointStore", () => {
     expect(loaded?.state).toEqual({ count: 1 });
     expect(loaded?.status).toBe("running");
   });
+
+  it("a later save() with a stale cancelRequested: false does not clobber a concurrent requestCancel()", async () => {
+    await store.save(makeCheckpoint({ runId: "run-cancel-race-pg", cancelRequested: false }));
+    await store.requestCancel("run-cancel-race-pg");
+
+    // Simulate the engine's own next node-boundary save() call, still carrying the OLD in-memory
+    // checkpoint object from before requestCancel() flipped the DB row (cancelRequested: false).
+    await store.save(makeCheckpoint({ runId: "run-cancel-race-pg", status: "running", cancelRequested: false }));
+
+    const loaded = await store.load("run-cancel-race-pg");
+    expect(loaded?.cancelRequested).toBe(true);
+  });
 });
