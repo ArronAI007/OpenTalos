@@ -20,10 +20,15 @@ export function createMockProvider(): ModelProvider {
       // Chunked (not yielded whole) so MODEL_PROVIDER=mock — used by the whole E2E suite and for
       // manual smoke testing without a real API key — also visibly demonstrates streaming rather
       // than looking identical to the old one-shot behavior. Final concatenated text is unchanged.
+      // 120ms/chunk (not e.g. 15ms) is deliberate: apps/web's e2e stop-control test needs the
+      // streaming window to be wide enough for Playwright to observe and click the 停止 button
+      // before the reply finishes — a ~50-char reply now takes ~2-3s to stream, comfortably inside
+      // every e2e test's existing per-assertion timeouts (10s+) without approaching the 30s test
+      // timeout even across a whole test's multiple waits.
       for (const chunk of reply.match(/.{1,4}/gu) ?? [reply]) {
         if (options?.signal?.aborted) return;
         yield { type: "text_delta", textDelta: chunk };
-        await new Promise((resolve) => setTimeout(resolve, 15));
+        await new Promise((resolve) => setTimeout(resolve, 120));
       }
       if (options?.signal?.aborted) return;
       yield { type: "message_stop" };

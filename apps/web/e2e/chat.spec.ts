@@ -47,18 +47,51 @@ test("send a message, see trace events stream in, approve the HITL pause, see co
   await expect(sendButton).toBeEnabled();
 });
 
-test("clicking stop mid-stream keeps the partial reply and re-enables the composer", async ({ page }) => {
+test("clicking stop mid-stream cancels the model call and the composer recovers", async ({ page }) => {
+  // NOTE: MODEL_PROVIDER=mock's complete() (packages/model-providers/src/mock.ts) calls
+  // lookup_exchange_rate on round 1 for ANY first-turn message whenever a tool is registered --
+  // it never inspects message content -- and chat-agent's registry always registers that tool
+  // (packages/chat-agent/src/registry.ts). Round 1 never streams any text (it goes straight from
+  // nothing to a tool_call chunk), so the stop control (gated on non-empty streamingText) can only
+  // ever become visible during round 2 (narrating the tool result). This means a browser-driven
+  // run under this stack can never reach "done" directly via cancellation the way a tool-free
+  // turn would -- a tool was already called before the cancel took effect, so the graph still
+  // requires approval afterward. That direct "cancel a plain reply straight to done, no tool
+  // involved" path IS covered, at the unit level, by chat-agent's own test suite (see
+  // packages/chat-agent/src/index.test.ts's "returns the partial reply and skips HITL approval
+  // when the signal is aborted mid-stream" test, which uses a custom ModelProvider that never
+  // calls a tool). This e2e test instead verifies the part only a real browser round-trip can
+  // prove: clicking 停止 actually reaches the backend and the UI recovers to a working state
+  // afterward, rather than hanging.
   await page.goto("/");
 
   const chatInput = page.getByPlaceholder("给智能体发消息");
   const sendButton = page.getByRole("button", { name: "发送" });
 
-  await chatInput.fill("你好");
+  let cancelRequestCount = 0;
+  page.on("request", (request) => {
+    if (request.method() === "POST" && request.url().includes("/cancel")) {
+      cancelRequestCount += 1;
+    }
+  });
+
+  await chatInput.fill("今天美元兑人民币汇率是多少？");
   await sendButton.click();
 
   const stopButton = page.getByRole("button", { name: "停止" });
   await expect(stopButton).toBeVisible({ timeout: 10_000 });
   await stopButton.click();
+
+  expect(cancelRequestCount).toBe(1);
+
+  // A tool was already called before the cancel took effect, so the graph still routes through
+  // confirm/paused -- cancelling the model's narration doesn't undo a real tool side-effect.
+  // This is correct: only the model's own streaming phase is cancellable, per the design's
+  // non-goal, and a prior tool call is unaffected by cancelling the text that narrates it.
+  await page.getByRole("button", { name: /轨迹/ }).click();
+  const approveButton = page.getByRole("button", { name: "✓ 批准" });
+  await expect(approveButton).toBeVisible({ timeout: 10_000 });
+  await approveButton.click();
 
   await expect(chatInput).toBeEnabled({ timeout: 10_000 });
   await expect(sendButton).toBeEnabled();
