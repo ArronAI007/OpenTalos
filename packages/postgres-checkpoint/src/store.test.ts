@@ -22,6 +22,7 @@ beforeAll(async () => {
       pending_yields JSONB NOT NULL,
       status TEXT NOT NULL,
       cancel_requested BOOLEAN NOT NULL DEFAULT false,
+      error TEXT,
       created_at TIMESTAMPTZ NOT NULL,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
@@ -110,5 +111,48 @@ describe("PostgresCheckpointStore", () => {
 
     const loaded = await store.load("run-cancel-race-pg");
     expect(loaded?.cancelRequested).toBe(true);
+  });
+
+  it("round-trips status: 'failed' and an error message through save()/load()", async () => {
+    const checkpoint = makeCheckpoint({
+      runId: "run-failed",
+      status: "failed",
+      error: "some message",
+    });
+    await store.save(checkpoint);
+    const loaded = await store.load("run-failed");
+    expect(loaded?.status).toBe("failed");
+    expect(loaded?.error).toBe("some message");
+  });
+
+  it("does not let a later, orphaned save() downgrade an already-'failed' checkpoint", async () => {
+    // Worker.execute()'s final-failure branch records the terminal failure first.
+    await store.save(makeCheckpoint({ runId: "run-orphan-timeout-pg", status: "failed", error: "boom" }));
+
+    // Simulate the orphaned, still-in-flight node execution from runWithTimeout()'s race: its
+    // abort-aware node body finished normally (rather than throwing) after the timeout already
+    // fired, so GraphEngine's ordinary completeNode() path calls save() with a perfectly normal,
+    // stale, non-failed checkpoint arriving AFTER the authoritative failure.
+    await store.save(makeCheckpoint({ runId: "run-orphan-timeout-pg", status: "done", error: undefined }));
+
+    const loaded = await store.load("run-orphan-timeout-pg");
+    expect(loaded?.status).toBe("failed");
+    expect(loaded?.error).toBe("boom");
+  });
+
+  it("still allows a legitimate 'failed' -> 'failed' re-save (same information saved twice)", async () => {
+    await store.save(makeCheckpoint({ runId: "run-refail-pg", status: "failed", error: "boom" }));
+    await store.save(makeCheckpoint({ runId: "run-refail-pg", status: "failed", error: "boom" }));
+    const loaded = await store.load("run-refail-pg");
+    expect(loaded?.status).toBe("failed");
+    expect(loaded?.error).toBe("boom");
+  });
+
+  it("still allows a save() whose incoming status IS 'failed' to overwrite an existing 'failed' checkpoint (a legitimate terminal write, e.g. an updated error message)", async () => {
+    await store.save(makeCheckpoint({ runId: "run-refail-2-pg", status: "failed", error: "first error" }));
+    await store.save(makeCheckpoint({ runId: "run-refail-2-pg", status: "failed", error: "second error" }));
+    const loaded = await store.load("run-refail-2-pg");
+    expect(loaded?.status).toBe("failed");
+    expect(loaded?.error).toBe("second error");
   });
 });

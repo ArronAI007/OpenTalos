@@ -8,7 +8,7 @@ export interface TraceEventDto {
   payload?: Record<string, unknown>;
 }
 
-export type RunStatus = "running" | "paused" | "done";
+export type RunStatus = "running" | "paused" | "done" | "failed";
 
 export interface ChatMessage {
   id: string;

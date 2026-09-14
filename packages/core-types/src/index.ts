@@ -90,13 +90,17 @@ export interface Checkpoint<TState = unknown> {
   nodeCursor: unknown;
   state: TState;
   pendingYields: unknown[];
-  status: "running" | "paused" | "done";
+  status: "running" | "paused" | "done" | "failed";
   createdAt: string;
   /** Set via CheckpointStore.requestCancel(). Only honored by chat-agent's respond node while a
    * model call is actively streaming (see NodeContext.signal) — a request that arrives during
    * tool execution or while paused for approval has no effect until (if ever) another streaming
    * phase happens for this run. */
   cancelRequested: boolean;
+  /** Set when the worker gives up retrying after a node throws (see Worker.execute() in
+   * packages/scheduler) — the human-readable error message from the underlying failure (e.g. a
+   * real model-provider API error). Only meaningful when status === "failed". */
+  error?: string;
 }
 
 export interface CheckpointQuery {

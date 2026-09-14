@@ -75,7 +75,12 @@ export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void 
     if (checkpoint.tenantId !== requireTenantId(request) || checkpoint.sessionId !== sessionId) {
       return reply.code(403).send({ error: "Run belongs to a different session" });
     }
-    return reply.send({ runId: checkpoint.runId, status: checkpoint.status, state: checkpoint.state });
+    return reply.send({
+      runId: checkpoint.runId,
+      status: checkpoint.status,
+      state: checkpoint.state,
+      ...(checkpoint.error !== undefined ? { error: checkpoint.error } : {}),
+    });
   });
 
   app.post<{ Params: { runId: string }; Body: ResumeRunBody; Querystring: SessionQuery }>(
@@ -204,6 +209,22 @@ export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void 
               reply.raw.write(`id: ${event.id}\nevent: trace\ndata: ${JSON.stringify(event)}\n\n`);
             }
             reply.raw.write(`event: done\ndata: {}\n\n`);
+            stopped = true;
+            clearInterval(timer);
+            reply.raw.end();
+            activeSseConnections.delete(reply.raw);
+          } else if (current.status === "failed") {
+            // Mirror the "done" branch above: drain any trailing trace events still landing at
+            // the moment the checkpoint flips to "failed", then tell the client the run failed
+            // (with the underlying error message) and close the stream — otherwise the client
+            // would poll forever, since status only ever leaves "running" via "done" or "failed".
+            const trailingEvents = await deps.listEventsSince(runId, cursor);
+            for (const event of trailingEvents) {
+              if (stopped) return;
+              cursor = event.id;
+              reply.raw.write(`id: ${event.id}\nevent: trace\ndata: ${JSON.stringify(event)}\n\n`);
+            }
+            reply.raw.write(`event: failed\ndata: ${JSON.stringify({ error: current.error ?? "模型调用失败，请重试" })}\n\n`);
             stopped = true;
             clearInterval(timer);
             reply.raw.end();

@@ -118,6 +118,12 @@ export function App() {
     }
   }, [timeline.connectionError]);
 
+  useEffect(() => {
+    if (timeline.runError) {
+      setError(timeline.runError);
+    }
+  }, [timeline.runError]);
+
   async function handleSend(text: string) {
     const sessionId = activeSessionId;
     const messageId = crypto.randomUUID();

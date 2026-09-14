@@ -64,7 +64,7 @@ export async function cancelRun(sessionId: string, runId: string): Promise<void>
 export async function getRun(
   sessionId: string,
   runId: string,
-): Promise<{ runId: string; status: string; state: Record<string, unknown> }> {
+): Promise<{ runId: string; status: string; state: Record<string, unknown>; error?: string }> {
   const res = await authedFetch(`/runs/${runId}`, sessionId);
   if (!res.ok) throw new Error(`Failed to load run: ${res.status}`);
   return res.json();

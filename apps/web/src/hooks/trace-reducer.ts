@@ -9,6 +9,9 @@ export interface TraceTimelineState {
    * to "" whenever a tool call starts, since any text streamed before that point was a preamble
    * for the tool decision, not the model's final answer. */
   streamingText: string;
+  /** Set when the run's status becomes "failed" — the human-readable error from the backend
+   * (see GET /runs/:runId's and the SSE "failed" event's `error` field). */
+  runError?: string;
 }
 
 export const initialTraceTimelineState: TraceTimelineState = { events: [], status: "running", streamingText: "" };
@@ -17,6 +20,7 @@ export type TraceTimelineAction =
   | { kind: "trace"; event: TraceEventDto }
   | { kind: "status"; status: RunStatus }
   | { kind: "final"; state: Record<string, unknown> }
+  | { kind: "failed"; error: string }
   | { kind: "reset" };
 
 export function traceTimelineReducer(state: TraceTimelineState, action: TraceTimelineAction): TraceTimelineState {
@@ -36,6 +40,9 @@ export function traceTimelineReducer(state: TraceTimelineState, action: TraceTim
   }
   if (action.kind === "status") {
     return { ...state, status: action.status };
+  }
+  if (action.kind === "failed") {
+    return { ...state, status: "failed", runError: action.error };
   }
   return { ...state, finalState: action.state };
 }

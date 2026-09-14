@@ -81,6 +81,25 @@ beforeAll(async () => {
   };
   registry.register("hangs-forever", { buildGraph: () => hangingGraph, buildDeps: makeDeps });
 
+  // Used only by the "orphaned save() after a timeout" regression test below: an abort-aware node
+  // that, like chat-agent's real `respond` node, does NOT throw when its signal is aborted — it
+  // just keeps running and finishes normally. Its delay is deliberately longer than the task's
+  // timeoutMs so runWithTimeout()'s Promise.race is won by the timeout, orphaning this node's own
+  // promise (and, eventually, the checkpointStore.save() GraphEngine's completeNode() makes once
+  // it resolves) in the background.
+  const finishesAfterTimeout: NodeFn<CounterState> = async function* (state) {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    return { count: state.count + 1 };
+  };
+  const timeoutRaceGraph: GraphDefinition<CounterState> = {
+    id: "timeout-race",
+    entryNode: "finish-late",
+    nodes: { "finish-late": finishesAfterTimeout },
+    edges: [],
+    reducer: shallowMergeReducer,
+  };
+  registry.register("timeout-race", { buildGraph: () => timeoutRaceGraph, buildDeps: makeDeps });
+
   const waitAndObserveSignal: NodeFn<CounterState> = async function* (state, ctx) {
     // Long enough to comfortably outlast one 500ms cancel-poll tick with margin either side.
     await new Promise((resolve) => setTimeout(resolve, 800));
@@ -220,6 +239,13 @@ describe("Worker", () => {
     rows = await db.select().from(tasks).where(eq(tasks.runId, "worker-fail-run"));
     expect(rows[0].status).toBe("failed");
     expect(rows[0].attempts).toBe(2);
+
+    // The run's checkpoint must ALSO be marked failed with the underlying error message — not
+    // just the tasks table row — otherwise GET /runs/:runId and the SSE stream never learn the
+    // run failed (the checkpoint's status would otherwise stay "running" forever).
+    const checkpoint = await checkpointStore.load("worker-fail-run");
+    expect(checkpoint?.status).toBe("failed");
+    expect(checkpoint?.error).toContain("boom");
   });
 
   it("treats a task exceeding timeoutMs as a failed attempt and schedules a retry", async () => {
@@ -381,5 +407,38 @@ describe("Worker", () => {
 
     expect(callsForThisRun()).toBe(callsAfterSettle);
     loadSpy.mockRestore();
+  });
+
+  it("does not let an orphaned node execution that finishes normally AFTER a timeout-triggered failure silently overwrite the checkpoint's 'failed' status (race regression)", async () => {
+    await scheduler.enqueueStart(
+      "timeout-race",
+      { count: 0 },
+      { tenantId: "tenant-timeout-race", sessionId: "s1" },
+      "worker-timeout-race-run",
+      { maxAttempts: 1, timeoutMs: 30 },
+    );
+    const worker = new Worker(testDb.pool, registry, checkpointStore, { globalConcurrency: 10, tenantConcurrency: 10 });
+
+    // The node's own delay (200ms) comfortably outlasts timeoutMs (30ms), so runWithTimeout()'s
+    // Promise.race is won by the timeout: the task and checkpoint are marked "failed" here, while
+    // the node's own promise keeps running, orphaned, in the background.
+    await worker.pollOnce();
+
+    const rows = await db.select().from(tasks).where(eq(tasks.runId, "worker-timeout-race-run"));
+    expect(rows[0].status).toBe("failed");
+    expect(rows[0].error).toContain("timed out");
+    let checkpoint = await checkpointStore.load("worker-timeout-race-run");
+    expect(checkpoint?.status).toBe("failed");
+    expect(checkpoint?.error).toContain("timed out");
+
+    // Give the orphaned node's promise (200ms delay, started when polling began) plenty of margin
+    // to resolve and for GraphEngine's ordinary completeNode() path to call checkpointStore.save()
+    // with a stale, non-failed checkpoint. Without the save() guard, this would silently flip the
+    // checkpoint back to "done" with no error — reproducing the exact race the reviewer found.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    checkpoint = await checkpointStore.load("worker-timeout-race-run");
+    expect(checkpoint?.status).toBe("failed");
+    expect(checkpoint?.error).toContain("timed out");
   });
 });

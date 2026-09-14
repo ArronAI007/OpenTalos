@@ -27,6 +27,7 @@ beforeAll(async () => {
       pending_yields JSONB NOT NULL,
       status TEXT NOT NULL,
       cancel_requested BOOLEAN NOT NULL DEFAULT false,
+      error TEXT,
       created_at TIMESTAMPTZ NOT NULL,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );

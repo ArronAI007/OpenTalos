@@ -50,6 +50,11 @@ export function useRunEvents(sessionId: string | undefined, runId: string | unde
         })
         .finally(() => source.close());
     });
+    source.addEventListener("failed", (event) => {
+      const { error } = JSON.parse((event as MessageEvent).data);
+      dispatch({ kind: "failed", error });
+      source.close();
+    });
     source.onopen = () => {
       setConnectionError(false);
     };

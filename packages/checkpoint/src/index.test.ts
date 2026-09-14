@@ -77,4 +77,38 @@ describe("InMemoryCheckpointStore", () => {
     const loaded = await store.load("run-race");
     expect(loaded?.cancelRequested).toBe(true);
   });
+
+  it("does not let a later, orphaned save() downgrade an already-'failed' checkpoint", async () => {
+    const store = new InMemoryCheckpointStore();
+    // Worker.execute()'s final-failure branch records the terminal failure first.
+    await store.save(makeCheckpoint({ runId: "run-orphan-timeout", status: "failed", error: "boom" }));
+
+    // Simulate the orphaned, still-in-flight node execution from runWithTimeout()'s race: its
+    // abort-aware node body finished normally (rather than throwing) after the timeout already
+    // fired, so GraphEngine's ordinary completeNode() path calls save() with a perfectly normal,
+    // stale, non-failed checkpoint arriving AFTER the authoritative failure.
+    await store.save(makeCheckpoint({ runId: "run-orphan-timeout", status: "done", error: undefined }));
+
+    const loaded = await store.load("run-orphan-timeout");
+    expect(loaded?.status).toBe("failed");
+    expect(loaded?.error).toBe("boom");
+  });
+
+  it("still allows a legitimate 'failed' -> 'failed' re-save (same information saved twice)", async () => {
+    const store = new InMemoryCheckpointStore();
+    await store.save(makeCheckpoint({ runId: "run-refail", status: "failed", error: "boom" }));
+    await store.save(makeCheckpoint({ runId: "run-refail", status: "failed", error: "boom" }));
+    const loaded = await store.load("run-refail");
+    expect(loaded?.status).toBe("failed");
+    expect(loaded?.error).toBe("boom");
+  });
+
+  it("still allows a save() whose incoming status IS 'failed' to overwrite an existing 'failed' checkpoint (a legitimate terminal write, e.g. an updated error message)", async () => {
+    const store = new InMemoryCheckpointStore();
+    await store.save(makeCheckpoint({ runId: "run-refail-2", status: "failed", error: "first error" }));
+    await store.save(makeCheckpoint({ runId: "run-refail-2", status: "failed", error: "second error" }));
+    const loaded = await store.load("run-refail-2");
+    expect(loaded?.status).toBe("failed");
+    expect(loaded?.error).toBe("second error");
+  });
 });

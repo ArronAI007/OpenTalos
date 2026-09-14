@@ -68,6 +68,15 @@ describe("traceTimelineReducer", () => {
     expect(next.finalState).toEqual({ reply: "done" });
   });
 
+  it("sets status to failed and records the error message when the run fails", () => {
+    const next = traceTimelineReducer(initialTraceTimelineState, {
+      kind: "failed",
+      error: "model provider error: invalid api key",
+    });
+    expect(next.status).toBe("failed");
+    expect(next.runError).toBe("model provider error: invalid api key");
+  });
+
   it("resets to the initial state regardless of accumulated events, status, or finalState", () => {
     let state = initialTraceTimelineState;
     state = traceTimelineReducer(state, { kind: "trace", event: sampleEvent });

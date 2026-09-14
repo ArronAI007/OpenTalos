@@ -148,6 +148,15 @@ export class Worker {
           .update(tasks)
           .set({ status: "failed", attempts, error: errorMessage(error), updatedAt: new Date() })
           .where(eq(tasks.id, task.id));
+
+        // Also surface the failure on the run's checkpoint — without this, the checkpoint's
+        // status stays "running" forever (GraphEngine only ever transitions it to "done"/"paused"
+        // on success, and rethrows on error without touching the checkpoint at all), so
+        // GET /runs/:runId and the SSE stream would otherwise never learn the run failed.
+        const checkpoint = await this.checkpointStore.load(task.runId);
+        if (checkpoint) {
+          await this.checkpointStore.save({ ...checkpoint, status: "failed", error: errorMessage(error) });
+        }
       } else {
         const backoffMs = 2 ** attempts * 1000;
         await this.db

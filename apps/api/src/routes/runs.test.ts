@@ -31,7 +31,7 @@ beforeAll(async () => {
     CREATE TABLE checkpoints (
       run_id TEXT PRIMARY KEY, graph_id TEXT NOT NULL, tenant_id TEXT NOT NULL, session_id TEXT NOT NULL,
       node_cursor JSONB NOT NULL, state JSONB NOT NULL, pending_yields JSONB NOT NULL, status TEXT NOT NULL,
-      cancel_requested BOOLEAN NOT NULL DEFAULT false,
+      cancel_requested BOOLEAN NOT NULL DEFAULT false, error TEXT,
       created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE TABLE tasks (
@@ -208,6 +208,31 @@ describe("GET /runs/:runId", () => {
       headers: authHeaders(),
     });
     expect(res.statusCode).toBe(403);
+  });
+
+  it("returns the error field when the checkpoint's status is failed", async () => {
+    // Simulates what Worker.execute() does once retries are exhausted after a real
+    // model-provider failure: mark the checkpoint failed with a human-readable error, directly
+    // via the checkpoint store rather than driving a real failing model call end-to-end.
+    const start = await app.inject({
+      method: "POST",
+      url: "/runs?sessionId=s-failed",
+      headers: authHeaders(),
+      payload: { message: "hi" },
+    });
+    const { runId } = start.json();
+    const checkpoint = await checkpointStore.load(runId);
+    await checkpointStore.save({
+      ...checkpoint!,
+      status: "failed",
+      error: "model provider error: invalid api key",
+    });
+
+    const res = await app.inject({ method: "GET", url: `/runs/${runId}?sessionId=s-failed`, headers: authHeaders() });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.status).toBe("failed");
+    expect(body.error).toBe("model provider error: invalid api key");
   });
 });
 
@@ -539,6 +564,81 @@ describe("GET /runs/:runId/events (real SSE connection lifecycle)", () => {
       // The trailing trace event must be forwarded BEFORE the stream signals "done" — otherwise
       // the browser closes the EventSource having never seen it.
       expect(buffer.indexOf("event: trace")).toBeLessThan(buffer.indexOf("event: done"));
+    } finally {
+      await testApp.close();
+    }
+  }, 10_000);
+
+  it("emits a failed event with the error message and closes the stream when the checkpoint's status is failed", async () => {
+    // Mirrors the "drains trailing events... (Fix 1)" test above, but for the "failed" branch:
+    // a mocked checkpoint store reports status "failed" with an error message (simulating what
+    // Worker.execute() writes once retries are exhausted after a real model-provider failure).
+    const runId = "failed-run";
+    const sessionId = "failed-1";
+    const errorMessage = "model provider error: invalid api key";
+
+    const mockCheckpointStore = {
+      load: async () => ({
+        runId,
+        graphId: "chat-agent",
+        tenantId: tenant.id,
+        sessionId,
+        nodeCursor: "respond",
+        state: {},
+        pendingYields: [],
+        status: "failed" as const,
+        createdAt: new Date().toISOString(),
+        error: errorMessage,
+      }),
+    } as unknown as PostgresCheckpointStore;
+
+    const mockListEventsSince = async () => [];
+
+    const testApp = buildServer({
+      pool,
+      checkpointStore: mockCheckpointStore,
+      scheduler: {} as unknown as Scheduler,
+      listEventsSince: mockListEventsSince,
+      tenantStore,
+      adminApiKey: "unused-in-this-file",
+    });
+    await testApp.listen({ port: 0, host: "127.0.0.1" });
+    const address = testApp.server.address();
+    if (address === null || typeof address === "string") {
+      throw new Error("expected testApp.listen() to bind a real TCP address");
+    }
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      const response = await fetch(`${baseUrl}/runs/${runId}/events?sessionId=${sessionId}`, {
+        headers: authHeaders(),
+      });
+      expect(response.status).toBe(200);
+
+      const reader = response.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      const deadline = Date.now() + 5000;
+      while (!buffer.includes("event: failed") && Date.now() < deadline) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value);
+      }
+
+      expect(buffer).toContain("event: failed");
+      expect(buffer).toContain(errorMessage);
+
+      // The connection must actually close, not just have written the frame.
+      const streamClosed = await Promise.race([
+        (async () => {
+          for (;;) {
+            const result = await reader.read();
+            if (result.done) return true;
+          }
+        })(),
+        new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 3000)),
+      ]);
+      expect(streamClosed).toBe(true);
     } finally {
       await testApp.close();
     }
