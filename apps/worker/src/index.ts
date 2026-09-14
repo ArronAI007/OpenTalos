@@ -10,6 +10,7 @@ import { TenantStore } from "@opentalos/postgres-tenancy";
 import { GraphRegistry, Worker } from "@opentalos/scheduler";
 import { buildChatAgentGraph, createChatAgentToolRegistry } from "@opentalos/chat-agent";
 import { createModelProviderFromEnv } from "@opentalos/model-providers";
+import { loadSkills, BUNDLED_SKILLS_DIR } from "@opentalos/skills";
 import { createTenantConcurrencyResolver } from "./tenant-quota.js";
 
 /** Builds and registers every graph this worker process knows how to run. Split out from the
@@ -18,7 +19,8 @@ import { createTenantConcurrencyResolver } from "./tenant-quota.js";
 export function buildWorkerRegistry(eventBus: EventBus): GraphRegistry {
   const registry = new GraphRegistry();
   const modelProvider = createModelProviderFromEnv();
-  const toolRegistryOptions = { modelProvider: process.env.MODEL_PROVIDER };
+  const skills = loadSkills(BUNDLED_SKILLS_DIR);
+  const toolRegistryOptions = { modelProvider: process.env.MODEL_PROVIDER, skills };
   registry.register("chat-agent", {
     buildGraph: () => buildChatAgentGraph(modelProvider, createChatAgentToolRegistry(toolRegistryOptions)),
     buildDeps: () => ({ toolRegistry: createChatAgentToolRegistry(toolRegistryOptions), eventBus }),

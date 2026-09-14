@@ -161,6 +161,9 @@ importers:
       '@opentalos/scheduler':
         specifier: workspace:*
         version: link:../../packages/scheduler
+      '@opentalos/skills':
+        specifier: workspace:*
+        version: link:../../packages/skills
       dotenv:
         specifier: ^17.4.2
         version: 17.4.2
@@ -244,6 +247,9 @@ importers:
       '@opentalos/scheduler':
         specifier: workspace:*
         version: link:../../packages/scheduler
+      '@opentalos/skills':
+        specifier: workspace:*
+        version: link:../../packages/skills
       dotenv:
         specifier: ^17.4.2
         version: 17.4.2
