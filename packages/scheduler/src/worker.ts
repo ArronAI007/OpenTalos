@@ -165,38 +165,28 @@ export class Worker {
   }
 
   private async runWithTimeout(task: TaskRow): Promise<void> {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`Task ${task.id} timed out after ${task.timeoutMs}ms`)), task.timeoutMs);
-    });
-    try {
-      await Promise.race([this.runTask(task), timeout]);
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
-  }
-
-  private async runTask(task: TaskRow): Promise<void> {
-    const engine = buildEngine(this.registry, this.checkpointStore, task.graphId);
-
-    const checkpoint = await this.checkpointStore.load(task.runId);
-    if (!checkpoint) {
-      throw new Error(`No checkpoint found for run "${task.runId}"`);
-    }
-
-    if (checkpoint.status === "done") {
-      return; // Already complete (e.g. a prior attempt finished after this attempt's timeout raced it); nothing to do.
-    }
-
     // An AbortController wired to a poll loop that re-reads this run's own checkpoint row every
     // ~500ms: once a POST /runs/:runId/cancel request has flipped `cancelRequested` to true
     // (Task 6), this is what actually stops the in-flight engine.run()/resumeFromCheckpoint()
     // call — the signal is forwarded all the way down into the model provider's HTTP call
     // (Tasks 2-5). `checkingCancel` is a reentrancy guard: if a single checkpointStore.load()
     // takes longer than 500ms, we skip overlapping ticks rather than piling up concurrent loads.
+    //
+    // This lives here (not inside runTask()) so that the `finally` below — which always runs,
+    // since runWithTimeout directly awaits the Promise.race — is the one thing responsible for
+    // clearing the interval, regardless of which side of the race settles. If it lived inside
+    // runTask() instead, a timeout winning the race would orphan runTask()'s promise (and its own
+    // finally) indefinitely for a genuinely hung task, leaking the interval forever — and worse,
+    // execute()'s retry would start a second runTask() call on top, leaking a second interval.
     const controller = new AbortController();
     let checkingCancel = false;
     const cancelPoll = setInterval(() => {
+      if (controller.signal.aborted) {
+        // Already aborted (either by a cancel request or by the timeout below) — stop polling for
+        // the remainder of the run instead of doing redundant work.
+        clearInterval(cancelPoll);
+        return;
+      }
       if (checkingCancel) return;
       checkingCancel = true;
       this.checkpointStore
@@ -213,21 +203,50 @@ export class Worker {
         });
     }, 500);
 
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        // Interrupt the in-flight model call on timeout too, not just fail the task — otherwise a
+        // timed-out task's engine.run()/resumeFromCheckpoint() call keeps running (and billing)
+        // in the background even after runWithTimeout itself has moved on. The controller/interval
+        // now live here (not inside runTask) specifically so this "finally always clears the
+        // interval regardless of which side of the race settles" guarantee holds even when
+        // runTask's own promise is orphaned by the race.
+        controller.abort();
+        reject(new Error(`Task ${task.id} timed out after ${task.timeoutMs}ms`));
+      }, task.timeoutMs);
+    });
     try {
-      // Dispatch on the CHECKPOINT's actual status, not blindly on task.kind: a "resume" task
-      // whose first attempt already replayed past the paused node (advancing the checkpoint to
-      // "running") must continue via run(), not resumeFromCheckpoint() again — the latter requires
-      // status "paused" and would otherwise throw "not in a resumable paused state" on every retry,
-      // destroying the real error and getting the run permanently stuck. See Fix 1 in the
-      // post-review notes for the full failure mode.
-      if (task.kind === "resume" && checkpoint.status === "paused") {
-        await engine.resumeFromCheckpoint(checkpoint, task.resumeValue as NodeResumeValue, { signal: controller.signal });
-        return;
-      }
-      await engine.run(checkpoint, { signal: controller.signal });
+      await Promise.race([this.runTask(task, controller), timeout]);
     } finally {
+      if (timer) clearTimeout(timer);
       clearInterval(cancelPoll);
     }
+  }
+
+  private async runTask(task: TaskRow, controller: AbortController): Promise<void> {
+    const engine = buildEngine(this.registry, this.checkpointStore, task.graphId);
+
+    const checkpoint = await this.checkpointStore.load(task.runId);
+    if (!checkpoint) {
+      throw new Error(`No checkpoint found for run "${task.runId}"`);
+    }
+
+    if (checkpoint.status === "done") {
+      return; // Already complete (e.g. a prior attempt finished after this attempt's timeout raced it); nothing to do.
+    }
+
+    // Dispatch on the CHECKPOINT's actual status, not blindly on task.kind: a "resume" task
+    // whose first attempt already replayed past the paused node (advancing the checkpoint to
+    // "running") must continue via run(), not resumeFromCheckpoint() again — the latter requires
+    // status "paused" and would otherwise throw "not in a resumable paused state" on every retry,
+    // destroying the real error and getting the run permanently stuck. See Fix 1 in the
+    // post-review notes for the full failure mode.
+    if (task.kind === "resume" && checkpoint.status === "paused") {
+      await engine.resumeFromCheckpoint(checkpoint, task.resumeValue as NodeResumeValue, { signal: controller.signal });
+      return;
+    }
+    await engine.run(checkpoint, { signal: controller.signal });
   }
 }
 

@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { and, eq } from "drizzle-orm";
 import type { EngineDeps, NodeFn } from "@opentalos/core-graph";
@@ -347,5 +347,39 @@ describe("Worker", () => {
     const checkpoint = await checkpointStore.load("worker-cancel-run");
     expect(checkpoint?.status).toBe("done");
     expect(checkpoint?.state).toEqual({ count: 1000 });
+  });
+
+  it("clears the cancel-poll interval on the runWithTimeout timeout path instead of leaking it for a genuinely hung task", async () => {
+    await scheduler.enqueueStart(
+      "hangs-forever",
+      { count: 0 },
+      { tenantId: "tenant-timeout-leak", sessionId: "s1" },
+      "worker-timeout-leak-run",
+      { maxAttempts: 1, timeoutMs: 50 },
+    );
+    const worker = new Worker(testDb.pool, registry, checkpointStore, { globalConcurrency: 10, tenantConcurrency: 10 });
+    const loadSpy = vi.spyOn(checkpointStore, "load");
+
+    await worker.pollOnce();
+
+    const rows = await db.select().from(tasks).where(eq(tasks.runId, "worker-timeout-leak-run"));
+    expect(rows[0].status).toBe("failed");
+    expect(rows[0].error).toContain("timed out");
+
+    const callsForThisRun = () =>
+      loadSpy.mock.calls.filter(([runId]) => runId === "worker-timeout-leak-run").length;
+    const callsAfterSettle = callsForThisRun();
+
+    // The cancel-poll interval ticks every 500ms and, on each tick, calls
+    // checkpointStore.load(task.runId). If runWithTimeout's finally didn't clear it on the
+    // timeout path (the leak this test guards against), the interval would still be alive here —
+    // since the underlying "hangs-forever" node never resolves, runTask's own promise is orphaned
+    // forever and its finally never runs — and it would call load() again well within this
+    // 700ms window, even though the task has already been marked "failed" and nothing is polling
+    // it anymore.
+    await new Promise((resolve) => setTimeout(resolve, 700));
+
+    expect(callsForThisRun()).toBe(callsAfterSettle);
+    loadSpy.mockRestore();
   });
 });
