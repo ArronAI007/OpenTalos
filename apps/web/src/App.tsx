@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { startRun, resumeRun, getApiKey, clearApiKey, ApiAuthError } from "./api.js";
+import { startRun, resumeRun, cancelRun, getApiKey, clearApiKey, ApiAuthError } from "./api.js";
 import { useRunEvents } from "./hooks/useRunEvents.js";
 import { useRunHistory } from "./hooks/useRunHistory.js";
 import { ChatPanel } from "./components/ChatPanel.js";
@@ -145,6 +145,21 @@ export function App() {
     }
   }
 
+  async function handleStop() {
+    const runId = activeSession.runId;
+    if (!runId) return;
+    try {
+      await cancelRun(activeSessionId, runId);
+    } catch (err) {
+      if (err instanceof ApiAuthError) {
+        setHasApiKey(false);
+        setAuthError("密钥无效或已被吊销，请重新输入");
+        return;
+      }
+      setError("停止失败，请重试");
+    }
+  }
+
   async function handleApprove(approved: boolean) {
     const runId = activeSession.runId;
     if (!runId) return;
@@ -255,6 +270,7 @@ export function App() {
           <ChatPanel
             messages={activeSession.messages}
             onSend={handleSend}
+            onStop={handleStop}
             error={error}
             disabled={isRunInFlight}
             streamingText={activeRunAlreadyCompletedLocally || timeline.finalState ? undefined : timeline.streamingText}

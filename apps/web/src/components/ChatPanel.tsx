@@ -19,6 +19,7 @@ function AssistantMarkdown({ text }: { text: string }) {
 interface ChatPanelProps {
   messages: ChatMessage[];
   onSend: (text: string) => void;
+  onStop?: () => void;
   error?: string;
   disabled?: boolean;
   /** The assistant's reply so far, while it's still streaming in. Rendered as a trailing bubble
@@ -26,7 +27,7 @@ interface ChatPanelProps {
   streamingText?: string;
 }
 
-export function ChatPanel({ messages, onSend, error, disabled, streamingText }: ChatPanelProps) {
+export function ChatPanel({ messages, onSend, onStop, error, disabled, streamingText }: ChatPanelProps) {
   const [draft, setDraft] = useState("");
   const bottomRef = useRef<HTMLLIElement>(null);
 
@@ -56,6 +57,8 @@ export function ChatPanel({ messages, onSend, error, disabled, streamingText }: 
       submit();
     }
   }
+
+  const isStreaming = disabled && streamingText !== undefined && streamingText.length > 0;
 
   return (
     <section className="chat-panel" aria-label="对话">
@@ -92,17 +95,25 @@ export function ChatPanel({ messages, onSend, error, disabled, streamingText }: 
           disabled={disabled}
         />
         <div className="composer-toolbar">
-          <button className="composer-send" type="submit" disabled={disabled || !draft.trim()} aria-label="发送">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true">
-              <path
-                d="M3 11.5L20.5 3.5L14.5 21L11 13L3 11.5Z"
-                stroke="currentColor"
-                strokeWidth="1.6"
-                strokeLinejoin="round"
-                strokeLinecap="round"
-              />
-            </svg>
-          </button>
+          {isStreaming ? (
+            <button type="button" className="composer-stop" onClick={onStop} aria-label="停止">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
+                <rect x="5" y="5" width="14" height="14" rx="2" />
+              </svg>
+            </button>
+          ) : (
+            <button className="composer-send" type="submit" disabled={disabled || !draft.trim()} aria-label="发送">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true">
+                <path
+                  d="M3 11.5L20.5 3.5L14.5 21L11 13L3 11.5Z"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinejoin="round"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </button>
+          )}
         </div>
       </form>
       <p className="composer-status">{disabled ? "运行中…" : "准备就绪"}</p>

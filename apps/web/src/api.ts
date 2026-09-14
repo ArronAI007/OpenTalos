@@ -56,6 +56,11 @@ export async function resumeRun(sessionId: string, runId: string, approved: bool
   if (!res.ok) throw new Error(`Failed to resume run: ${res.status}`);
 }
 
+export async function cancelRun(sessionId: string, runId: string): Promise<void> {
+  const res = await authedFetch(`/runs/${runId}/cancel`, sessionId, { method: "POST" });
+  if (!res.ok) throw new Error(`Failed to cancel run: ${res.status}`);
+}
+
 export async function getRun(
   sessionId: string,
   runId: string,

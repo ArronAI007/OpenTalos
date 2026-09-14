@@ -47,6 +47,24 @@ test("send a message, see trace events stream in, approve the HITL pause, see co
   await expect(sendButton).toBeEnabled();
 });
 
+test("clicking stop mid-stream keeps the partial reply and re-enables the composer", async ({ page }) => {
+  await page.goto("/");
+
+  const chatInput = page.getByPlaceholder("给智能体发消息");
+  const sendButton = page.getByRole("button", { name: "发送" });
+
+  await chatInput.fill("你好");
+  await sendButton.click();
+
+  const stopButton = page.getByRole("button", { name: "停止" });
+  await expect(stopButton).toBeVisible({ timeout: 10_000 });
+  await stopButton.click();
+
+  await expect(chatInput).toBeEnabled({ timeout: 10_000 });
+  await expect(sendButton).toBeEnabled();
+  await expect(page.locator(".message-assistant").last()).not.toBeEmpty();
+});
+
 test("responsive layout renders without horizontal overflow at key breakpoints", async ({ page }) => {
   for (const width of [320, 768, 1024, 1440]) {
     await page.setViewportSize({ width, height: 800 });
