@@ -291,6 +291,54 @@ describe("POST /runs/:runId/resume", () => {
   });
 });
 
+describe("POST /runs/:runId/cancel", () => {
+  it("sets cancelRequested and returns 204", async () => {
+    const startRes = await app.inject({
+      method: "POST",
+      url: "/runs?sessionId=cancel-s1",
+      headers: authHeaders(),
+      payload: { message: "hi" },
+    });
+    const { runId } = startRes.json();
+
+    const cancelRes = await app.inject({
+      method: "POST",
+      url: `/runs/${runId}/cancel?sessionId=cancel-s1`,
+      headers: authHeaders(),
+    });
+    expect(cancelRes.statusCode).toBe(204);
+
+    const checkpoint = await checkpointStore.load(runId);
+    expect(checkpoint?.cancelRequested).toBe(true);
+  });
+
+  it("404s for an unknown runId", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/runs/does-not-exist/cancel?sessionId=s1",
+      headers: authHeaders(),
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("403s when the run belongs to a different session", async () => {
+    const startRes = await app.inject({
+      method: "POST",
+      url: "/runs?sessionId=cancel-s2",
+      headers: authHeaders(),
+      payload: { message: "hi" },
+    });
+    const { runId } = startRes.json();
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/runs/${runId}/cancel?sessionId=someone-else`,
+      headers: authHeaders(),
+    });
+    expect(res.statusCode).toBe(403);
+  });
+});
+
 describe("GET /runs/:runId/events", () => {
   it("returns 404 for an unknown runId before upgrading to SSE", async () => {
     const res = await app.inject({

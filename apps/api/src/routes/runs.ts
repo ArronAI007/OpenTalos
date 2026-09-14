@@ -112,6 +112,25 @@ export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void 
     },
   );
 
+  app.post<{ Params: { runId: string }; Querystring: SessionQuery }>(
+    "/runs/:runId/cancel",
+    async (request, reply) => {
+      const sessionId = request.query.sessionId;
+      if (!sessionId) {
+        return reply.code(400).send({ error: "sessionId query parameter is required" });
+      }
+      const checkpoint = await checkpointStore.load(request.params.runId);
+      if (!checkpoint) {
+        return reply.code(404).send({ error: `Run "${request.params.runId}" not found` });
+      }
+      if (checkpoint.tenantId !== requireTenantId(request) || checkpoint.sessionId !== sessionId) {
+        return reply.code(403).send({ error: "Run belongs to a different session" });
+      }
+      await checkpointStore.requestCancel(request.params.runId);
+      return reply.code(204).send();
+    },
+  );
+
   app.get<{ Params: { runId: string }; Querystring: SessionQuery }>("/runs/:runId/events", async (request, reply) => {
     const sessionId = request.query.sessionId;
     if (!sessionId) {
