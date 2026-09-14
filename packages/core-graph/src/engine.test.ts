@@ -371,6 +371,27 @@ describe("GraphEngine — sequential execution", () => {
     expect(persistedB?.tenantId).toBe("tenant-b");
     expect(persistedB?.state).toEqual({ count: 105 });
   });
+
+  it("passes an AbortSignal through to the node via ctx.signal", async () => {
+    let observedAborted: boolean | undefined;
+    const readSignal: NodeFn<CounterState> = async function* (state, ctx) {
+      observedAborted = ctx.signal?.aborted;
+      return { count: state.count + 1 };
+    };
+    const graph: GraphDefinition<CounterState> = {
+      id: "g-signal",
+      entryNode: "a",
+      nodes: { a: readSignal },
+      edges: [],
+      reducer: shallowMergeReducer,
+    };
+    const engine = new GraphEngine(graph, makeDeps());
+    const controller = new AbortController();
+    controller.abort();
+    await engine.run(engine.start({ count: 0 }, tenant, "run-signal"), { signal: controller.signal });
+
+    expect(observedAborted).toBe(true);
+  });
 });
 
 describe("GraphEngine — trace durability", () => {

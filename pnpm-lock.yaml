@@ -353,6 +353,9 @@ importers:
       '@opentalos/tracing':
         specifier: workspace:*
         version: link:../tracing
+      '@types/node':
+        specifier: ^22.20.1
+        version: 22.20.1
 
   packages/core-types: {}
 

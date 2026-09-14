@@ -3,6 +3,10 @@ import type { EventBus, TenantContext, ToolCall, ToolResult, TraceEventType } fr
 export interface NodeContext {
   tenant: TenantContext;
   eventBus: EventBus;
+  /** Set only while a run is in a cancellable phase (see GraphEngine.run/resumeFromCheckpoint).
+   * A node that makes an external call it wants to be interruptible (chat-agent's respond node,
+   * calling the model) should forward this to whatever it calls. */
+  signal?: AbortSignal;
 }
 
 export type NodeYield =
