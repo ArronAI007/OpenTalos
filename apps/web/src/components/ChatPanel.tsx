@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { ChatMessage } from "../types.js";
+import type { ChatMessage, RunStatus } from "../types.js";
 
 /** Assistant replies render as Markdown (headings/lists/code/tables/etc. from the model come
  * through formatted instead of as literal `**`/`#`/backtick characters); user messages stay plain
@@ -22,12 +22,18 @@ interface ChatPanelProps {
   onStop?: () => void;
   error?: string;
   disabled?: boolean;
+  /** The run's actual status. Required (in addition to `disabled`/`streamingText`) to gate the
+   * stop control: a paused-for-approval run is also `disabled` and can still have leftover
+   * `streamingText` from before the pause (nothing clears it on pause), so without this the stop
+   * button would stay visible/clickable through the entire HITL approval wait — a phase the
+   * cancellation feature explicitly does not apply to. */
+  status?: RunStatus;
   /** The assistant's reply so far, while it's still streaming in. Rendered as a trailing bubble
    * after `messages` until the real ChatMessage is appended once the run finishes. */
   streamingText?: string;
 }
 
-export function ChatPanel({ messages, onSend, onStop, error, disabled, streamingText }: ChatPanelProps) {
+export function ChatPanel({ messages, onSend, onStop, error, disabled, status, streamingText }: ChatPanelProps) {
   const [draft, setDraft] = useState("");
   const bottomRef = useRef<HTMLLIElement>(null);
 
@@ -58,7 +64,7 @@ export function ChatPanel({ messages, onSend, onStop, error, disabled, streaming
     }
   }
 
-  const isStreaming = disabled && streamingText !== undefined && streamingText.length > 0;
+  const isStreaming = status === "running" && streamingText !== undefined && streamingText.length > 0;
 
   return (
     <section className="chat-panel" aria-label="对话">

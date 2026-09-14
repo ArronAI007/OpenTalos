@@ -273,6 +273,7 @@ export function App() {
             onStop={handleStop}
             error={error}
             disabled={isRunInFlight}
+            status={timeline.status}
             streamingText={activeRunAlreadyCompletedLocally || timeline.finalState ? undefined : timeline.streamingText}
           />
         ) : (
