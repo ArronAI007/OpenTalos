@@ -519,6 +519,19 @@ importers:
         specifier: ^22.20.1
         version: 22.20.1
 
+  packages/skills:
+    dependencies:
+      '@opentalos/core-types':
+        specifier: workspace:*
+        version: link:../core-types
+      '@opentalos/sandbox':
+        specifier: workspace:*
+        version: link:../sandbox
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.1
+        version: 22.20.1
+
   packages/tool-registry:
     dependencies:
       '@modelcontextprotocol/sdk':
