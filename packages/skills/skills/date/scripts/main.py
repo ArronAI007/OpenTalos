@@ -1,37 +1,17 @@
-"""
-日期查询技能脚本
-"""
-
 from datetime import datetime
+from zoneinfo import ZoneInfo
+
+WEEKDAYS = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
 
 
-def get_current_date() -> dict:
-    """
-    获取当前日期
-    
-    Returns:
-        包含当前日期的字典
-    """
-    now = datetime.now()
-    weekdays = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
-    weekday = weekdays[now.weekday()]
-    
-    return {
-        "date": now.strftime("%Y-%m-%d"),
-        "weekday": weekday,
-        "formatted": now.strftime("%Y年%m月%d日") + f" {weekday}",
-        "year": now.year,
-        "month": now.month,
-        "day": now.day,
-    }
-
-
-def main():
-    """主函数"""
-    result = get_current_date()
-    print(f"当前日期: {result['formatted']}")
-    return result
+def format_today() -> str:
+    # The sandbox container's system clock runs in UTC, not China time -- this skill is
+    # Chinese-language-facing, so the date must be computed in Asia/Shanghai (UTC+8) explicitly,
+    # or it would silently show yesterday's date for roughly 16:00-24:00 Beijing time every day.
+    now = datetime.now(ZoneInfo("Asia/Shanghai"))
+    weekday = WEEKDAYS[now.weekday()]
+    return f"{now.strftime('%Y年%m月%d日')} {weekday}"
 
 
 if __name__ == "__main__":
-    main()
+    print(format_today())

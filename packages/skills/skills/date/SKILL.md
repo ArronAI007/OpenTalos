@@ -1,33 +1,16 @@
 ---
-name: "date"
-description: |
-  日期查询技能：获取当前日期。
-  
-  触发条件：
-  (1) 用户询问今天日期
-  (2) 用户问"今天几号"
-  (3) 用户需要知道今天的日期
-  
-  输出：当前日期（年-月-日 星期）
-keywords: ["日期", "几号", "今天", "星期", "年月日", "今天几号", "星期几", "date"]
-category: "utility"
-scope: ["*"]
-execution:
-  scripts:
-    main.py:
-      sha256: "a46ea1ce0532665a9834f79b5e5bc60ccdf50c8230ec4f913e02d2fe353a5d6d"
-      network: false
-      env: []
+name: date
+description: 获取当前日期和星期几（使用中国时区 Asia/Shanghai）。当用户询问"今天几号""今天星期几""现在是什么日期"等需要知道当前日期的问题时使用。
 ---
-# 日期查询技能
-## 功能描述
-获取当前的系统日期。
 
-## 使用示例
-用户："今天几号？"
-系统：调用 get_current_date() 获取当前日期
+# date
 
-## 输出格式
-- `date`: 当前日期，格式为 "YYYY-MM-DD"
-- `weekday`: 星期几
-- `formatted`: 格式化后的日期字符串
+Call `run_skill_script` with:
+- `skillName`: `"date"`
+- `scriptRelativePath`: `"scripts/main.py"`
+- `args`: not needed (omit or pass an empty array)
+- `input`: not needed
+
+The script prints the current date in China Standard Time (Asia/Shanghai, UTC+8) as a single line,
+e.g. `2026年09月15日 星期二` — return that output to the user as-is, or naturally incorporate it into
+your reply.
