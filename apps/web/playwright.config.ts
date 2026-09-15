@@ -1,6 +1,17 @@
 import { defineConfig } from "@playwright/test";
 
-const DATABASE_URL = "postgres://postgres:postgres@localhost:5433/postgres";
+// Port 5434 — the E2E-only Postgres (apps/web/e2e/docker-compose.yml), never the regular local-dev
+// Postgres on 5433 (scripts/docker-compose.postgres.yml, what .env's DATABASE_URL points at).
+// global-setup.ts DROPs and reseeds every table on this database on every run; pointing this at
+// the dev database would destroy real tenant/API-key/chat data every time the suite runs.
+//
+// Caveat this doesn't fully solve: `reuseExistingServer: !process.env.CI` below means that if a
+// real dev stack (scripts/dev.sh start) is ALREADY running on ports 3001/3002/5173/5174, these
+// webServer entries reuse those real processes (still pointed at the real 5433 database) instead
+// of starting fresh ones against this isolated 5434 database — the DROP/reseed here then has no
+// effect on what the tests actually exercise. Stop the real dev stack first
+// (`scripts/dev.sh stop worker api web admin`) for a truly clean, isolated E2E run.
+const DATABASE_URL = "postgres://postgres:postgres@localhost:5434/postgres";
 const ADMIN_API_KEY = "e2e-admin-key";
 
 export default defineConfig({

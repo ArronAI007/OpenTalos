@@ -1,7 +1,18 @@
+# E2E-ONLY Postgres. global-setup.ts DROPs and reseeds every table here on every Playwright run —
+# never point regular local dev (scripts/dev.sh postgres:up, .env's DATABASE_URL) at this port; use
+# scripts/docker-compose.postgres.yml (port 5433) for that instead.
+#
+# Explicit project name: this file previously had no `name`, so Compose defaulted its project name
+# to "e2e" (the directory name) — the SAME default a container already running from an earlier
+# version of this file (port 5433, pre-dating this port split) would still match, meaning `up`
+# would try to recreate that live container in place (risking its data) rather than create a
+# genuinely separate one. Pinning an explicit name guarantees this file only ever manages its own,
+# distinctly-named container.
+name: opentalos-e2e
 services:
   postgres:
     image: postgres:16-alpine
     ports:
-      - "5433:5432"
+      - "5434:5432"
     environment:
       POSTGRES_PASSWORD: postgres

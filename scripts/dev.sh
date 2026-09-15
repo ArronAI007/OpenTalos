@@ -11,7 +11,10 @@ set -uo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOG_DIR="$ROOT_DIR/logs"
-COMPOSE_FILE="$ROOT_DIR/apps/web/e2e/docker-compose.yml"
+# The regular local-dev Postgres — deliberately NOT apps/web/e2e/docker-compose.yml, whose data
+# is dropped and reseeded on every Playwright run (see apps/web/e2e/global-setup.ts). Sharing that
+# file here once destroyed real tenant/API-key data every time the E2E suite ran.
+COMPOSE_FILE="$ROOT_DIR/scripts/docker-compose.postgres.yml"
 
 # Restart/start/stop "all" touches only these — postgres is stateful and managed separately via
 # postgres:up/postgres:down, so a routine app restart can never take the database down with it.

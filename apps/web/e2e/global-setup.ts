@@ -2,7 +2,12 @@ import { Pool } from "pg";
 import { TenantStore } from "@opentalos/postgres-tenancy";
 import { writeFixtureApiKey } from "./fixtures.js";
 
-const DATABASE_URL = "postgres://postgres:postgres@localhost:5433/postgres";
+// Port 5434, NOT 5433 — this is the E2E-only Postgres (apps/web/e2e/docker-compose.yml), a
+// separate container/port from the regular local-dev Postgres (scripts/docker-compose.postgres.yml,
+// port 5433, what .env's DATABASE_URL points at). This file DROPs and reseeds every table below on
+// every run; pointing it at the dev database would destroy real tenant/API-key/chat data every
+// time the E2E suite runs (this actually happened once — see git history for the fix).
+const DATABASE_URL = "postgres://postgres:postgres@localhost:5434/postgres";
 
 export default async function globalSetup(): Promise<void> {
   const pool = new Pool({ connectionString: DATABASE_URL });

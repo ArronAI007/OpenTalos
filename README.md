@@ -118,8 +118,9 @@ If you already have a Postgres instance from before 2026-09-14, apply
 there is no migration runner in this repo.
 
 ```bash
-# 1. Start Postgres
-docker compose -f apps/web/e2e/docker-compose.yml up -d
+# 1. Start Postgres (the regular dev database — NOT apps/web/e2e/docker-compose.yml, whose data
+#    is destroyed and reseeded on every Playwright E2E run)
+docker compose -f scripts/docker-compose.postgres.yml up -d
 
 # 2. Build the processes that need a compiled dist/ to run
 pnpm --filter @opentalos/worker build
@@ -158,6 +159,14 @@ pnpm --filter @opentalos/web test:e2e
 
 Playwright's `webServer` config starts `worker`/`api`/`web`/`admin` automatically and seeds a
 default tenant + API key via `globalSetup` — no manual process startup needed for this path.
+`globalSetup` drops and recreates every table on the E2E-only Postgres (port `5434`, started
+automatically from `apps/web/e2e/docker-compose.yml` if not already running) — a separate database
+from regular dev's (port `5433`), so this never touches real tenant/API-key/chat data.
+
+If a real dev stack (`scripts/dev.sh start`) is already running on ports `3001`/`3002`/`5173`/`5174`,
+Playwright's `reuseExistingServer` setting reuses those processes instead of starting fresh ones
+against the E2E database — stop the real stack first
+(`scripts/dev.sh stop worker api web admin`) for a clean, isolated E2E run.
 
 ## Key Environment Variables
 
