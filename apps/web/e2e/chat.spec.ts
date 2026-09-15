@@ -47,6 +47,32 @@ test("send a message, see trace events stream in, approve the HITL pause, see co
   await expect(sendButton).toBeEnabled();
 });
 
+test("approving a tool-using reply works directly from the 对话 tab, without switching to 轨迹", async ({ page }) => {
+  // Regression coverage for the "运行中…" dead-end: previously, a paused-for-approval run only
+  // ever surfaced its 批准/拒绝 controls on the 轨迹 tab — the 对话 tab just showed a disabled
+  // composer with the misleading "运行中…" label, with no visible way to unblock it.
+  await page.goto("/");
+
+  const chatInput = page.getByPlaceholder("给智能体发消息");
+  const sendButton = page.getByRole("button", { name: "发送" });
+
+  await chatInput.fill("今天美元兑人民币汇率是多少？");
+  await sendButton.click();
+
+  // Stay on the 对话 tab (the default) — do NOT click into 轨迹 for this test.
+  const approveButton = page.getByRole("button", { name: "✓ 批准" });
+  await expect(approveButton).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("等待你确认")).toBeVisible();
+
+  await approveButton.click();
+
+  await expect(page.getByText(/根据查询结果/)).toBeVisible({ timeout: 10_000 });
+  // Only the textarea's enabled-ness reflects "composer usable again" here — 发送 also requires a
+  // non-empty draft (see ChatPanel's `disabled={disabled || !draft.trim()}`), which is correctly
+  // still empty right after sending, independent of run status.
+  await expect(chatInput).toBeEnabled();
+});
+
 test("clicking stop mid-stream cancels the model call and the composer recovers", async ({ page }) => {
   // NOTE: MODEL_PROVIDER=mock's complete() (packages/model-providers/src/mock.ts) calls
   // lookup_exchange_rate on round 1 for ANY first-turn message whenever a tool is registered --

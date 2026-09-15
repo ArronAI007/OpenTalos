@@ -281,6 +281,7 @@ export function App() {
             disabled={isRunInFlight}
             status={timeline.status}
             streamingText={activeRunAlreadyCompletedLocally || timeline.finalState ? undefined : timeline.streamingText}
+            onApprove={handleApprove}
           />
         ) : (
           <TracePanel

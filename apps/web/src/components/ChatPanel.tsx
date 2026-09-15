@@ -31,11 +31,32 @@ interface ChatPanelProps {
   /** The assistant's reply so far, while it's still streaming in. Rendered as a trailing bubble
    * after `messages` until the real ChatMessage is appended once the run finishes. */
   streamingText?: string;
+  /** Resolves the pending HITL pause (see graph.ts's `confirm` node) when `status === "paused"`.
+   * Mirrors TracePanel's onApprove — the same run can be approved/rejected from either place. */
+  onApprove?: (approved: boolean) => void;
 }
 
-export function ChatPanel({ messages, onSend, onStop, error, disabled, status, streamingText }: ChatPanelProps) {
+export function ChatPanel({ messages, onSend, onStop, error, disabled, status, streamingText, onApprove }: ChatPanelProps) {
   const [draft, setDraft] = useState("");
   const bottomRef = useRef<HTMLLIElement>(null);
+
+  // Same double-click/double-tap guard as TracePanel's approval buttons (see its comment for why
+  // a ref is required in addition to the state): reset whenever a NEW pause starts, not just once.
+  const hasRespondedRef = useRef(false);
+  const [hasResponded, setHasResponded] = useState(false);
+  useEffect(() => {
+    if (status === "paused") {
+      hasRespondedRef.current = false;
+      setHasResponded(false);
+    }
+  }, [status]);
+
+  function handleApprove(approved: boolean) {
+    if (hasRespondedRef.current) return;
+    hasRespondedRef.current = true;
+    setHasResponded(true);
+    onApprove?.(approved);
+  }
 
   // message-list scrolls independently of the page now (app.css pins the composer below it), so
   // without this a new message or an in-progress stream would land below the visible fold instead
@@ -81,9 +102,24 @@ export function ChatPanel({ messages, onSend, onStop, error, disabled, status, s
             </li>
           ))}
           {streamingText && (
-            <li className="message message-assistant message-streaming">
+            <li className={`message message-assistant${status === "paused" ? "" : " message-streaming"}`}>
               <AssistantMarkdown text={streamingText} />
-              <span className="streaming-cursor" aria-hidden="true" />
+              {/* Generation is actually finished once paused for approval — a blinking cursor here
+               * would falsely suggest the model is still writing. */}
+              {status !== "paused" && <span className="streaming-cursor" aria-hidden="true" />}
+            </li>
+          )}
+          {status === "paused" && (
+            <li className="chat-approval">
+              <p>⏸ 这条回复调用了工具，是否发送给你？</p>
+              <div className="chat-approval-actions">
+                <button className="approve-button" onClick={() => handleApprove(true)} disabled={hasResponded}>
+                  ✓ 批准
+                </button>
+                <button className="deny-button" onClick={() => handleApprove(false)} disabled={hasResponded}>
+                  ✕ 拒绝
+                </button>
+              </div>
             </li>
           )}
           <li ref={bottomRef} className="message-list-end" aria-hidden="true" />
@@ -122,7 +158,7 @@ export function ChatPanel({ messages, onSend, onStop, error, disabled, status, s
           )}
         </div>
       </form>
-      <p className="composer-status">{disabled ? "运行中…" : "准备就绪"}</p>
+      <p className="composer-status">{status === "paused" ? "等待你确认" : disabled ? "运行中…" : "准备就绪"}</p>
     </section>
   );
 }
