@@ -21,7 +21,11 @@ export interface ServerDeps {
  * without touching environment variables or binding a real network port (via Fastify's
  * `.inject()`). */
 export function buildServer(deps: ServerDeps): FastifyInstance {
-  const app = Fastify({ logger: false });
+  // Fastify's default bodyLimit is 1MB — too small for a chat message carrying base64-encoded
+  // image attachments (see POST /runs's own per-image/per-message size caps in routes/runs.ts,
+  // which are the real UX-facing limits; this is just a generous outer safety net so Fastify
+  // itself never rejects a within-limits request before it even reaches that validation).
+  const app = Fastify({ logger: false, bodyLimit: 20 * 1024 * 1024 });
 
   // Fastify's encapsulation model: a hook added with addHook() inside a register() callback
   // only applies to routes registered within that SAME encapsulated context, not the parent app

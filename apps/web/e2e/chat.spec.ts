@@ -94,6 +94,112 @@ test("pressing Enter to confirm an IME composition fills the textarea instead of
   await expect(sentMessage).toBeVisible();
 });
 
+test("attaching an image previews it, sends it with the message, and shows it in the sent bubble", async ({ page }) => {
+  // A minimal valid 1x1 transparent PNG — small enough to stay well under every size cap this
+  // feature enforces, real enough for the browser to actually decode and render as an <img>.
+  const onePixelPng = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+    "base64",
+  );
+
+  await page.goto("/");
+
+  const fileInput = page.locator('input[type="file"]');
+  await fileInput.setInputFiles({ name: "cat.png", mimeType: "image/png", buffer: onePixelPng });
+
+  // Preview chip appears above the composer before sending.
+  const chip = page.locator(".attachment-chip", { hasText: "cat.png" });
+  await expect(chip).toBeVisible();
+
+  const chatInput = page.getByPlaceholder("给智能体发消息");
+  const sendButton = page.getByRole("button", { name: "发送" });
+  // Sending must work even with an empty draft, as long as there's an attachment.
+  await expect(sendButton).toBeEnabled();
+  await chatInput.fill("这张图里有什么？");
+  await sendButton.click();
+
+  // The preview chip is gone once sent (attachments were consumed into the message).
+  await expect(chip).not.toBeVisible();
+
+  const sentBubble = page.locator("li.message-user");
+  await expect(sentBubble.locator(".message-image")).toBeVisible();
+  await expect(sentBubble).toContainText("这张图里有什么？");
+
+  // MODEL_PROVIDER=mock's tool round pauses for approval before replying — approve it, then check
+  // the final reply acknowledges the image (see mock.ts's imageNote).
+  await page.getByRole("button", { name: /轨迹/ }).click();
+  const approveButton = page.getByRole("button", { name: "✓ 批准" });
+  await expect(approveButton).toBeVisible({ timeout: 10_000 });
+  await approveButton.click();
+  await page.getByRole("button", { name: "对话", exact: true }).click();
+  await expect(page.getByText(/收到 1 张图片/)).toBeVisible({ timeout: 10_000 });
+});
+
+test("attaching a text file shows it as its own code block and inlines it into the message sent to the model", async ({
+  page,
+}) => {
+  await page.goto("/");
+
+  const fileInput = page.locator('input[type="file"]');
+  await fileInput.setInputFiles({
+    name: "notes.py",
+    mimeType: "text/x-python",
+    buffer: Buffer.from("print('hello from attachment')"),
+  });
+
+  const chip = page.locator(".attachment-chip", { hasText: "notes.py" });
+  await expect(chip).toBeVisible();
+
+  const chatInput = page.getByPlaceholder("给智能体发消息");
+  const sendButton = page.getByRole("button", { name: "发送" });
+  await chatInput.fill("这个文件是干什么的？");
+  await sendButton.click();
+
+  const sentBubble = page.locator("li.message-user");
+  // The typed text and the attachment's own labeled code block both render — but the raw
+  // "[附件: notes.py] ```...```" wrapping used for the model is never shown as literal text (see
+  // TextAttachmentBlock, kept deliberately separate from the plain-text user bubble).
+  await expect(sentBubble).toContainText("这个文件是干什么的？");
+  await expect(sentBubble).not.toContainText("[附件: notes.py]");
+  await expect(sentBubble.locator(".text-attachment-name")).toContainText("notes.py");
+  await expect(sentBubble.locator(".text-attachment-content")).toContainText("print('hello from attachment')");
+
+  // The mock model still sees the file content inlined into what was actually sent — approve the
+  // HITL pause and confirm the reply references it (mock.ts echoes back the last tool result, not
+  // this content directly, so just confirm the run actually completes normally).
+  await page.getByRole("button", { name: /轨迹/ }).click();
+  const approveButton = page.getByRole("button", { name: "✓ 批准" });
+  await expect(approveButton).toBeVisible({ timeout: 10_000 });
+  await approveButton.click();
+  await page.getByRole("button", { name: "对话", exact: true }).click();
+  await expect(page.locator("li.message-assistant").last()).not.toBeEmpty({ timeout: 10_000 });
+});
+
+test("removing a pending attachment before sending drops it from the message", async ({ page }) => {
+  await page.goto("/");
+
+  const fileInput = page.locator('input[type="file"]');
+  await fileInput.setInputFiles({
+    name: "notes.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("should not be sent"),
+  });
+
+  const chip = page.locator(".attachment-chip", { hasText: "notes.txt" });
+  await expect(chip).toBeVisible();
+  await chip.getByRole("button", { name: /移除附件/ }).click();
+  await expect(chip).not.toBeVisible();
+
+  const chatInput = page.getByPlaceholder("给智能体发消息");
+  const sendButton = page.getByRole("button", { name: "发送" });
+  await chatInput.fill("普通消息，没有附件");
+  await sendButton.click();
+
+  const sentBubble = page.locator("li.message-user");
+  await expect(sentBubble).toContainText("普通消息，没有附件");
+  await expect(sentBubble).not.toContainText("should not be sent");
+});
+
 test("clicking stop mid-stream cancels the model call and the composer recovers", async ({ page }) => {
   // NOTE: MODEL_PROVIDER=mock's complete() (packages/model-providers/src/mock.ts) calls
   // lookup_exchange_rate on round 1 for ANY first-turn message whenever a tool is registered --

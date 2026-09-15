@@ -13,6 +13,11 @@ export interface Message {
   toolCalls?: ToolCall[];
   /** Set on a role: "tool" message — correlates this result back to the ToolCall.id it answers. */
   toolCallId?: string;
+  /** Base64 data URIs (e.g. "data:image/png;base64,...") attached to this message — only ever set
+   * on a user message. Providers whose API supports vision input translate these into image
+   * content parts alongside `content`'s text (currently only the openai-compatible path, which
+   * Kimi K3 routes through); providers that don't support it simply ignore this field. */
+  images?: string[];
 }
 
 export type JSONSchema = Record<string, unknown>;

@@ -58,6 +58,22 @@ describe("createMockProvider", () => {
     expect(textChunks.map((c) => c.textDelta).join("").length).toBeGreaterThan(0);
   });
 
+  it("acknowledges attached images in its reply, once a tool result is present", async () => {
+    const provider = createMockProvider();
+    const request: ModelRequest = {
+      messages: [
+        { role: "user", content: "这张图是什么？", images: ["data:image/png;base64,AAA", "data:image/png;base64,BBB"] },
+        { role: "assistant", content: "", toolCalls: [{ id: "call-1", name: "lookup_exchange_rate", input: { pair: "USD/CNY" } }] },
+        { role: "tool", content: "1 USD/CNY = 7.13", toolCallId: "call-1" },
+      ],
+      tools: [{ name: "lookup_exchange_rate", description: "looks up a rate", inputSchema: { type: "object" } }],
+    };
+    const chunks = [];
+    for await (const chunk of provider.complete(request)) chunks.push(chunk);
+    const textChunks = chunks.filter((c): c is { type: "text_delta"; textDelta: string } => c.type === "text_delta");
+    expect(textChunks.map((c) => c.textDelta).join("")).toContain("收到 2 张图片");
+  });
+
   it("stops yielding once the signal is aborted, without throwing", async () => {
     const provider = createMockProvider();
     const controller = new AbortController();

@@ -53,11 +53,11 @@ async function authedFetch(path: string, sessionId: string, init: RequestInit = 
   return res;
 }
 
-export async function startRun(sessionId: string, message: string): Promise<{ runId: string }> {
+export async function startRun(sessionId: string, message: string, images?: string[]): Promise<{ runId: string }> {
   const res = await authedFetch("/runs", sessionId, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({ message, ...(images && images.length > 0 ? { images } : {}) }),
   });
   if (!res.ok) throw new Error(`Failed to start run: ${res.status}`);
   return res.json();

@@ -24,8 +24,14 @@ export function createMockProvider(): ModelProvider {
         yield { type: "message_stop" };
         return;
       }
+      // Lets the E2E suite (and manual smoke testing without a real API key) exercise the image-
+      // attachment path deterministically, without a real vision-capable model.
+      const userMessageWithImages = request.messages.find((m) => m.role === "user" && m.images?.length);
+      const imageNote = userMessageWithImages ? `（收到 ${userMessageWithImages.images?.length} 张图片）` : "";
       const lastToolMessage = [...request.messages].reverse().find((m) => m.role === "tool");
-      const reply = lastToolMessage ? `根据查询结果：${lastToolMessage.content}` : "你好，我是 OpenTalos 的模拟回复（MODEL_PROVIDER=mock）。";
+      const reply = lastToolMessage
+        ? `根据查询结果：${lastToolMessage.content}${imageNote}`
+        : `你好，我是 OpenTalos 的模拟回复（MODEL_PROVIDER=mock）。${imageNote}`;
       // Chunked (not yielded whole) so MODEL_PROVIDER=mock — used by the whole E2E suite and for
       // manual smoke testing without a real API key — also visibly demonstrates streaming rather
       // than looking identical to the old one-shot behavior. Final concatenated text is unchanged.

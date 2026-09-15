@@ -234,6 +234,39 @@ describe("createOpenAICompatibleProvider", () => {
     expect(params.messages[2]).toEqual({ role: "tool", content: "7.13", tool_call_id: "call-1" });
   });
 
+  it("sends a message's images as image_url content parts alongside its text, per Moonshot's documented vision format", async () => {
+    const requestWithImages: ModelRequest = {
+      messages: [
+        {
+          role: "user",
+          content: "这张图里有什么？",
+          images: ["data:image/png;base64,AAA", "data:image/jpeg;base64,BBB"],
+        },
+      ],
+    };
+    const { client, getCapturedParams } = capturingClient([{ choices: [{ delta: {}, finish_reason: "stop" }] }]);
+    const provider = createOpenAICompatibleProvider(client, { model: "gpt-test" });
+    for await (const _chunk of provider.complete(requestWithImages)) {
+      // draining the iterator to trigger the create() call
+    }
+    const params = getCapturedParams() as { messages: { content: unknown }[] };
+    expect(params.messages[0].content).toEqual([
+      { type: "image_url", image_url: { url: "data:image/png;base64,AAA" } },
+      { type: "image_url", image_url: { url: "data:image/jpeg;base64,BBB" } },
+      { type: "text", text: "这张图里有什么？" },
+    ]);
+  });
+
+  it("sends a message with no images as a plain string, unchanged from before images were supported", async () => {
+    const { client, getCapturedParams } = capturingClient([{ choices: [{ delta: {}, finish_reason: "stop" }] }]);
+    const provider = createOpenAICompatibleProvider(client, { model: "gpt-test" });
+    for await (const _chunk of provider.complete(request)) {
+      // draining the iterator to trigger the create() call
+    }
+    const params = getCapturedParams() as { messages: { content: unknown }[] };
+    expect(params.messages[0].content).toBe("hi");
+  });
+
   it("forwards an AbortSignal to the underlying client.chat.completions.create call", async () => {
     const controller = new AbortController();
     const { client, getCapturedOptions } = capturingClientWithOptions([{ choices: [{ delta: {}, finish_reason: "stop" }] }]);

@@ -160,6 +160,38 @@ describe("chat agent", () => {
     expect(eventTypes).toContain("llm_reasoning_delta");
   });
 
+  it("forwards the user's image attachments to the model provider on the initial user message", async () => {
+    const toolRegistry = createChatAgentToolRegistry();
+    const eventBus = new InMemoryEventBus();
+    const checkpointStore = new InMemoryCheckpointStore();
+    let capturedMessages: unknown;
+    const modelProvider: ModelProvider = {
+      async *complete(request) {
+        capturedMessages = request.messages;
+        yield { type: "text_delta", textDelta: "这是一只猫。" };
+        yield { type: "message_stop" };
+      },
+    };
+    const engine = new GraphEngine<ChatState>(buildChatAgentGraph(modelProvider, toolRegistry), {
+      toolRegistry,
+      eventBus,
+      checkpointStore,
+    });
+
+    const initialState: ChatState = { message: "这张图里有什么？", images: ["data:image/png;base64,AAA"] };
+    const checkpoint = await engine.run(
+      engine.start(initialState, { tenantId: "tenant-a", sessionId: "session-images" }, "run-images-1"),
+    );
+
+    expect(checkpoint.status).toBe("done");
+    expect(checkpoint.state.reply).toBe("这是一只猫。");
+    expect(capturedMessages).toContainEqual({
+      role: "user",
+      content: "这张图里有什么？",
+      images: ["data:image/png;base64,AAA"],
+    });
+  });
+
   it("registers load_skill and run_skill_script when skills are provided, and the model can use them in one turn", async () => {
     const fakeSkill: Skill = {
       name: "fake-skill",

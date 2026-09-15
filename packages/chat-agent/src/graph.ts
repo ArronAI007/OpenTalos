@@ -18,7 +18,7 @@ function buildRespondNode(modelProvider: ModelProvider, toolRegistry: ToolRegist
       toolRegistry.list(),
       [
         { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: state.message },
+        { role: "user", content: state.message, images: state.images },
       ],
       undefined,
       ctx.signal,

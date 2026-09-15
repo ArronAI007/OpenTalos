@@ -123,6 +123,61 @@ describe("POST /runs", () => {
     expect(res.statusCode).toBe(400);
   });
 
+  it("accepts image attachments and stores them on the run's checkpoint state", async () => {
+    const images = ["data:image/png;base64,iVBORw0KGgo=", "data:image/jpeg;base64,/9j/4AAQ"];
+    const res = await app.inject({
+      method: "POST",
+      url: "/runs?sessionId=s1",
+      headers: authHeaders(),
+      payload: { message: "这两张图里有什么？", images },
+    });
+    expect(res.statusCode).toBe(201);
+    const checkpoint = await checkpointStore.load(res.json().runId);
+    expect((checkpoint?.state as { images?: string[] }).images).toEqual(images);
+  });
+
+  it("returns 400 when an image is not a data:image/... URI string", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/runs?sessionId=s1",
+      headers: authHeaders(),
+      payload: { message: "hi", images: ["https://example.com/cat.png"] },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("returns 400 when more than 4 images are attached", async () => {
+    const images = Array.from({ length: 5 }, () => "data:image/png;base64,AAA");
+    const res = await app.inject({
+      method: "POST",
+      url: "/runs?sessionId=s1",
+      headers: authHeaders(),
+      payload: { message: "hi", images },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("returns 400 when an image data URI exceeds the size cap", async () => {
+    const oversized = `data:image/png;base64,${"A".repeat(7 * 1024 * 1024)}`;
+    const res = await app.inject({
+      method: "POST",
+      url: "/runs?sessionId=s1",
+      headers: authHeaders(),
+      payload: { message: "hi", images: [oversized] },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("returns 400 when the message exceeds the length cap", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/runs?sessionId=s1",
+      headers: authHeaders(),
+      payload: { message: "x".repeat(200_001) },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
   it("returns 401 when no Authorization header is present", async () => {
     const res = await app.inject({ method: "POST", url: "/runs?sessionId=noauth", payload: { message: "hi" } });
     expect(res.statusCode).toBe(401);

@@ -1,5 +1,7 @@
 export interface ChatState {
   message: string;
+  /** Base64 data URIs the user attached to this turn's message — see Message.images. */
+  images?: string[];
   searchResult?: string;
   /** The model's reasoning/thinking trace for this turn (see AgentTurnResult.reasoningText) —
    * empty/absent for providers or models that don't emit it. Never gated by `approved`: it's the

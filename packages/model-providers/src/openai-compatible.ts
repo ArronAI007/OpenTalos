@@ -21,9 +21,16 @@ export interface OpenAIStreamChunk {
   }[];
 }
 
+type OpenAIContentPart = { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } };
+
 interface OpenAIOutMessage {
   role: string;
-  content: string;
+  // A plain string for an ordinary text-only message; an array of parts only when this message
+  // carries image attachments (see `images` below) — matches Moonshot's documented vision format
+  // (https://platform.kimi.ai/docs/guide/use-kimi-vision-model): "message.content must be an
+  // array[object] ... Serializing it as a string is non-standard and may not process visual input
+  // correctly."
+  content: string | OpenAIContentPart[];
   tool_calls?: { id: string; type: "function"; function: { name: string; arguments: string } }[];
   tool_call_id?: string;
 }
@@ -63,7 +70,9 @@ export function createOpenAICompatibleProvider(
           model: options.model,
           messages: request.messages.map((m): OpenAIOutMessage => ({
             role: m.role,
-            content: m.content,
+            content: m.images?.length
+              ? [...m.images.map((url): OpenAIContentPart => ({ type: "image_url", image_url: { url } })), { type: "text", text: m.content }]
+              : m.content,
             ...(m.toolCalls
               ? {
                   tool_calls: m.toolCalls.map((tc) => ({

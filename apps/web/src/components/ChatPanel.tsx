@@ -1,7 +1,18 @@
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { ChatMessage, RunStatus } from "../types.js";
+import type { ChatMessage, OutgoingChatMessage, RunStatus } from "../types.js";
+import {
+  formatTextAttachment,
+  isImageFile,
+  isTextFile,
+  MAX_IMAGES_PER_MESSAGE,
+  MAX_IMAGE_FILE_BYTES,
+  MAX_TEXT_FILE_BYTES,
+  readFileAsDataUrl,
+  readFileAsText,
+  type PendingAttachment,
+} from "../lib/attachments.js";
 
 /** Assistant replies render as Markdown (headings/lists/code/tables/etc. from the model come
  * through formatted instead of as literal `**`/`#`/backtick characters); user messages stay plain
@@ -46,9 +57,35 @@ function ReasoningBlock({ text, isThinking }: { text: string; isThinking: boolea
   );
 }
 
+/** Read-only thumbnail grid for a message's attached images — used both for a historical
+ * ChatMessage and for the live streaming bubble is NOT needed here, since only the user ever
+ * attaches images (the model doesn't send any back). */
+function MessageImages({ images }: { images: string[] }) {
+  return (
+    <div className="message-images">
+      {images.map((src, index) => (
+        <img key={index} src={src} alt="用户上传的图片附件" className="message-image" />
+      ))}
+    </div>
+  );
+}
+
+/** Read-only, labeled code block for a message's attached text/code files — kept separate from
+ * `AssistantMarkdown`'s markdown rendering (user messages are intentionally never markdown-parsed,
+ * see that component's own comment) and from plain `message.text`, so a file's raw content never
+ * shows up as literal ``` characters in the middle of a plain-text bubble. */
+function TextAttachmentBlock({ name, content }: { name: string; content: string }) {
+  return (
+    <div className="text-attachment-block">
+      <p className="text-attachment-name">📄 {name}</p>
+      <pre className="text-attachment-content">{content}</pre>
+    </div>
+  );
+}
+
 interface ChatPanelProps {
   messages: ChatMessage[];
-  onSend: (text: string) => void;
+  onSend: (message: OutgoingChatMessage) => void;
   onStop?: () => void;
   error?: string;
   disabled?: boolean;
@@ -81,7 +118,10 @@ export function ChatPanel({
   onApprove,
 }: ChatPanelProps) {
   const [draft, setDraft] = useState("");
+  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
+  const [attachmentError, setAttachmentError] = useState<string>();
   const bottomRef = useRef<HTMLLIElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Same double-click/double-tap guard as TracePanel's approval buttons (see its comment for why
   // a ref is required in addition to the state): reset whenever a NEW pause starts, not just once.
@@ -108,12 +148,92 @@ export function ChatPanel({
     bottomRef.current?.scrollIntoView({ block: "end" });
   }, [messages, streamingText, reasoningStreamingText]);
 
+  async function handleFilesSelected(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files ?? []);
+    // Cleared immediately (not after processing) so selecting the exact same file again still
+    // fires onChange next time — the browser otherwise treats an unchanged file list as a no-op.
+    event.target.value = "";
+    if (files.length === 0) return;
+
+    setAttachmentError(undefined);
+    const currentImageCount = pendingAttachments.filter((a) => a.kind === "image").length;
+    let imageCount = currentImageCount;
+    const accepted: PendingAttachment[] = [];
+
+    for (const file of files) {
+      if (isImageFile(file)) {
+        if (imageCount >= MAX_IMAGES_PER_MESSAGE) {
+          setAttachmentError(`最多只能附加 ${MAX_IMAGES_PER_MESSAGE} 张图片`);
+          continue;
+        }
+        if (file.size > MAX_IMAGE_FILE_BYTES) {
+          setAttachmentError(`"${file.name}" 超过 ${Math.floor(MAX_IMAGE_FILE_BYTES / (1024 * 1024))}MB 限制`);
+          continue;
+        }
+        try {
+          const dataUrl = await readFileAsDataUrl(file);
+          accepted.push({ id: crypto.randomUUID(), name: file.name, size: file.size, kind: "image", dataUrl });
+          imageCount += 1;
+        } catch {
+          setAttachmentError(`读取 "${file.name}" 失败，请重试`);
+        }
+        continue;
+      }
+      if (isTextFile(file)) {
+        if (file.size > MAX_TEXT_FILE_BYTES) {
+          setAttachmentError(`"${file.name}" 超过 ${Math.floor(MAX_TEXT_FILE_BYTES / 1024)}KB 限制`);
+          continue;
+        }
+        try {
+          const textContent = await readFileAsText(file);
+          accepted.push({ id: crypto.randomUUID(), name: file.name, size: file.size, kind: "text", textContent });
+        } catch {
+          setAttachmentError(`读取 "${file.name}" 失败，请重试`);
+        }
+        continue;
+      }
+      setAttachmentError(`不支持的文件类型："${file.name}"，仅支持图片和文本/代码文件`);
+    }
+
+    if (accepted.length > 0) {
+      setPendingAttachments((prev) => [...prev, ...accepted]);
+    }
+  }
+
+  function removeAttachment(id: string) {
+    setPendingAttachments((prev) => prev.filter((attachment) => attachment.id !== id));
+  }
+
+  function attachmentPlaceholderText(): string {
+    const hasImages = pendingAttachments.some((a) => a.kind === "image");
+    const hasText = pendingAttachments.some((a) => a.kind === "text");
+    if (hasImages && hasText) return "[图片和附件]";
+    return hasImages ? "[图片]" : "[附件]";
+  }
+
   function submit() {
     if (disabled) return;
     const trimmed = draft.trim();
-    if (!trimmed) return;
-    onSend(trimmed);
+    if (!trimmed && pendingAttachments.length === 0) return;
+    const images = pendingAttachments.filter((a) => a.kind === "image").map((a) => a.dataUrl!);
+    const textAttachments = pendingAttachments
+      .filter((a) => a.kind === "text")
+      .map((a) => ({ name: a.name, content: a.textContent! }));
+    const displayText = trimmed || attachmentPlaceholderText();
+    // The model has no separate channel for attachment content — this project deliberately has no
+    // attachment storage layer of its own — so it's inlined into the text actually sent, even
+    // though the LOCAL display keeps it out of displayText (see TextAttachmentBlock).
+    const modelText =
+      displayText + textAttachments.map((a) => formatTextAttachment(a.name, a.content)).join("");
+    onSend({
+      modelText,
+      displayText,
+      images: images.length > 0 ? images : undefined,
+      textAttachments: textAttachments.length > 0 ? textAttachments : undefined,
+    });
     setDraft("");
+    setPendingAttachments([]);
+    setAttachmentError(undefined);
   }
 
   function handleSubmit(event: FormEvent) {
@@ -150,7 +270,11 @@ export function ChatPanel({
               {message.role === "assistant" && message.reasoningText && (
                 <ReasoningBlock text={message.reasoningText} isThinking={false} />
               )}
+              {message.images && message.images.length > 0 && <MessageImages images={message.images} />}
               {message.role === "assistant" ? <AssistantMarkdown text={message.text} /> : message.text}
+              {message.textAttachments?.map((attachment) => (
+                <TextAttachmentBlock key={attachment.name} name={attachment.name} content={attachment.content} />
+              ))}
             </li>
           ))}
           {(streamingText || reasoningStreamingText) && (
@@ -188,6 +312,31 @@ export function ChatPanel({
         </ul>
       )}
       {error && <p className="chat-error">{error}</p>}
+      {attachmentError && <p className="chat-error">{attachmentError}</p>}
+      {pendingAttachments.length > 0 && (
+        <ul className="attachment-preview-list">
+          {pendingAttachments.map((attachment) => (
+            <li key={attachment.id} className="attachment-chip">
+              {attachment.kind === "image" ? (
+                <img src={attachment.dataUrl} alt={attachment.name} className="attachment-chip-thumb" />
+              ) : (
+                <span className="attachment-chip-icon" aria-hidden="true">
+                  📄
+                </span>
+              )}
+              <span className="attachment-chip-name">{attachment.name}</span>
+              <button
+                type="button"
+                className="attachment-chip-remove"
+                onClick={() => removeAttachment(attachment.id)}
+                aria-label={`移除附件 ${attachment.name}`}
+              >
+                ×
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
       <form className="composer" onSubmit={handleSubmit}>
         <textarea
           className="composer-input"
@@ -199,6 +348,23 @@ export function ChatPanel({
           disabled={disabled}
         />
         <div className="composer-toolbar">
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept="image/*,.txt,.md,.py,.js,.jsx,.ts,.tsx,.json,.csv,.yaml,.yml,.html,.css,.sh,.sql,.java,.go,.rs,.c,.cpp,.h,.rb,.php"
+            onChange={handleFilesSelected}
+            hidden
+          />
+          <button
+            type="button"
+            className="composer-attach"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={disabled}
+            aria-label="添加附件"
+          >
+            📎
+          </button>
           {isStreaming ? (
             <button type="button" className="composer-stop" onClick={onStop} aria-label="停止">
               <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
@@ -206,7 +372,12 @@ export function ChatPanel({
               </svg>
             </button>
           ) : (
-            <button className="composer-send" type="submit" disabled={disabled || !draft.trim()} aria-label="发送">
+            <button
+              className="composer-send"
+              type="submit"
+              disabled={disabled || (!draft.trim() && pendingAttachments.length === 0)}
+              aria-label="发送"
+            >
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true">
                 <path
                   d="M3 11.5L20.5 3.5L14.5 21L11 13L3 11.5Z"

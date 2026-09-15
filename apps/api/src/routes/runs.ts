@@ -29,6 +29,34 @@ export function getActiveSseConnectionCountForTests(): number {
 
 interface StartRunBody {
   message?: string;
+  images?: string[];
+}
+
+// Text attachments (see apps/web's ChatPanel) are merged into `message` client-side before it
+// ever reaches this route, so this cap bounds both a pasted essay and a few merged text files at
+// once — not just what a human would type by hand.
+const MAX_MESSAGE_LENGTH = 200_000;
+const MAX_IMAGES_PER_MESSAGE = 4;
+// ~4.5MB decoded (base64 inflates by ~4/3) — generous headroom for a phone photo, well under
+// buildServer's 20MB Fastify bodyLimit even with MAX_IMAGES_PER_MESSAGE of them in one request.
+const MAX_IMAGE_DATA_URI_BYTES = 6 * 1024 * 1024;
+
+/** Returns a human-readable validation error, or undefined if `images` is absent or valid. */
+function validateImages(images: unknown): string | undefined {
+  if (images === undefined) return undefined;
+  if (!Array.isArray(images)) return "images must be an array of data URI strings";
+  if (images.length > MAX_IMAGES_PER_MESSAGE) {
+    return `at most ${MAX_IMAGES_PER_MESSAGE} images are allowed per message`;
+  }
+  for (const image of images) {
+    if (typeof image !== "string" || !image.startsWith("data:image/")) {
+      return 'each image must be a "data:image/...;base64,..." URI string';
+    }
+    if (Buffer.byteLength(image, "utf8") > MAX_IMAGE_DATA_URI_BYTES) {
+      return `each image must be under ${Math.floor(MAX_IMAGE_DATA_URI_BYTES / (1024 * 1024))}MB`;
+    }
+  }
+  return undefined;
 }
 
 interface ResumeRunBody {
@@ -51,9 +79,16 @@ export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void 
     if (typeof message !== "string" || message.trim().length === 0) {
       return reply.code(400).send({ error: "message body field is required and must be a non-empty string" });
     }
+    if (message.length > MAX_MESSAGE_LENGTH) {
+      return reply.code(400).send({ error: `message must be at most ${MAX_MESSAGE_LENGTH} characters` });
+    }
+    const imagesError = validateImages(request.body?.images);
+    if (imagesError) {
+      return reply.code(400).send({ error: imagesError });
+    }
 
     const runId = randomUUID();
-    const initialState: ChatState = { message };
+    const initialState: ChatState = { message, images: request.body?.images };
     await scheduler.enqueueStart(
       "chat-agent",
       initialState,

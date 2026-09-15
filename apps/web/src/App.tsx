@@ -10,7 +10,7 @@ import { SessionLogMenu } from "./components/SessionLogMenu.js";
 import { SettingsPanel } from "./components/SettingsPanel.js";
 import { createEmptySession, loadSessions, saveSessions, sessionTitle } from "./lib/sessions.js";
 import { applyTheme, loadTheme, saveTheme, type ThemePreference } from "./lib/theme.js";
-import type { ChatSession } from "./types.js";
+import type { ChatSession, OutgoingChatMessage } from "./types.js";
 import "./styles/tokens.css";
 import "./styles/app.css";
 
@@ -137,15 +137,15 @@ export function App() {
     }
   }, [timeline.runError]);
 
-  async function handleSend(text: string) {
+  async function handleSend({ modelText, displayText, images, textAttachments }: OutgoingChatMessage) {
     const sessionId = activeSessionId;
     const messageId = crypto.randomUUID();
     updateSession(sessionId, (session) => ({
       ...session,
-      messages: [...session.messages, { id: messageId, role: "user", text }],
+      messages: [...session.messages, { id: messageId, role: "user", text: displayText, images, textAttachments }],
     }));
     try {
-      const { runId: newRunId } = await startRun(sessionId, text);
+      const { runId: newRunId } = await startRun(sessionId, modelText, images);
       updateSession(sessionId, (session) => ({
         ...session,
         runId: newRunId,
