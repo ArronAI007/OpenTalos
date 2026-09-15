@@ -7,16 +7,19 @@ export class ApiAuthError extends Error {
   }
 }
 
-/** Thrown by getRun when the server has no checkpoint for this runId at all (never "belongs to a
- * different session" or any other 4xx — those still throw the generic Error below). Distinct from
- * a real connectivity failure: useRunEvents uses this to recognize "this run genuinely no longer
- * exists" (e.g. a stale runId left over in localStorage from before its checkpoint was deleted)
- * and recover silently, rather than showing a "connection lost, please refresh" message that a
- * refresh could never actually fix — reloading would just retry the same gone-forever runId. */
-export class RunNotFoundError extends Error {
+/** Thrown by getRun when the server will never serve this runId to the CURRENT api key/session
+ * again — either there's no checkpoint for it at all (404: e.g. deleted, or a wiped dev database),
+ * or it exists but belongs to a different tenant/session (403: e.g. the user entered a different
+ * API key — a different tenant — while a stale runId from the previous one was still cached
+ * locally). Any other 4xx/5xx still throws the generic Error below. Distinct from a real
+ * connectivity failure: useRunEvents uses this to recognize "this specific runId reference is
+ * permanently unusable now" and recover silently, rather than showing a "connection lost, please
+ * refresh" message that a refresh could never actually fix — reloading would just retry the same
+ * runId under the same conditions and fail identically. */
+export class RunUnavailableError extends Error {
   constructor() {
-    super("Run not found");
-    this.name = "RunNotFoundError";
+    super("Run unavailable");
+    this.name = "RunUnavailableError";
   }
 }
 
@@ -79,7 +82,7 @@ export async function getRun(
   runId: string,
 ): Promise<{ runId: string; status: string; state: Record<string, unknown>; error?: string }> {
   const res = await authedFetch(`/runs/${runId}`, sessionId);
-  if (res.status === 404) throw new RunNotFoundError();
+  if (res.status === 404 || res.status === 403) throw new RunUnavailableError();
   if (!res.ok) throw new Error(`Failed to load run: ${res.status}`);
   return res.json();
 }

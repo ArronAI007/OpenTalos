@@ -268,6 +268,66 @@ test("a stale runId with no matching checkpoint recovers silently instead of sho
   await expect(page.getByText(/连接已断开/)).not.toBeVisible();
 });
 
+test("a stale runId belonging to a different tenant (e.g. after switching API keys) also recovers silently", async ({
+  page,
+}) => {
+  // Regression coverage: entering a different API key (a different tenant) while a session's
+  // runId still pointed at a run created under the PREVIOUS key returned 403 (not 404) from
+  // GET /runs/:runId -- a case the original stale-runId fix didn't cover, so it fell through to
+  // the same misleading "与服务器的连接已断开，请刷新页面重试" as a real connectivity failure,
+  // even though everything actually still worked fine for new messages.
+  const adminHeaders = { Authorization: "Bearer e2e-admin-key", "Content-Type": "application/json" };
+
+  const tenantAResponse = await page.request.post("http://localhost:3001/admin/tenants", {
+    headers: adminHeaders,
+    data: { name: `tenant-a-${Date.now()}` },
+  });
+  const tenantA = await tenantAResponse.json();
+  const tenantAKeyResponse = await page.request.post(`http://localhost:3001/admin/tenants/${tenantA.id}/api-keys`, {
+    headers: adminHeaders,
+  });
+  const { rawKey: tenantAKey } = await tenantAKeyResponse.json();
+
+  const runResponse = await page.request.post("http://localhost:3001/runs?sessionId=cross-tenant-session", {
+    headers: { Authorization: `Bearer ${tenantAKey}`, "Content-Type": "application/json" },
+    data: { message: "tenant A 的消息" },
+  });
+  const { runId: tenantARunId } = await runResponse.json();
+
+  const tenantBResponse = await page.request.post("http://localhost:3001/admin/tenants", {
+    headers: adminHeaders,
+    data: { name: `tenant-b-${Date.now()}` },
+  });
+  const tenantB = await tenantBResponse.json();
+  const tenantBKeyResponse = await page.request.post(`http://localhost:3001/admin/tenants/${tenantB.id}/api-keys`, {
+    headers: adminHeaders,
+  });
+  const { rawKey: tenantBKey } = await tenantBKeyResponse.json();
+
+  // Simulate: the browser now has tenant B's key active (as if the user just re-entered a
+  // different API key), but the session it was last looking at still references tenant A's run.
+  const staleSession = {
+    id: "cross-tenant-session",
+    createdAt: Date.now(),
+    runId: tenantARunId,
+    messages: [{ id: "m1", role: "user", text: "tenant A 的消息", runId: tenantARunId }],
+  };
+  await page.addInitScript(
+    ({ key, session }) => {
+      window.localStorage.setItem("opentalos-api-key", key);
+      window.localStorage.setItem("opentalos-sessions", JSON.stringify([session]));
+      window.localStorage.setItem("opentalos-active-session", session.id);
+    },
+    { key: tenantBKey, session: staleSession },
+  );
+
+  await page.goto("/");
+
+  const chatInput = page.getByPlaceholder("给智能体发消息");
+  await expect(chatInput).toBeEnabled({ timeout: 10_000 });
+  await expect(page.getByText(/连接已断开/)).not.toBeVisible();
+});
+
 test("a terminal SSE connection failure re-enables sending a new message (Fix 5)", async ({ page }) => {
   // Regression test: isRunInFlight was computed purely from timeline.status, which never
   // advances to "done" if the SSE connection dies terminally (no more events or status changes
