@@ -12,6 +12,12 @@ export interface TraceTimelineState {
   /** Set when the run's status becomes "failed" — the human-readable error from the backend
    * (see GET /runs/:runId's and the SSE "failed" event's `error` field). */
   runError?: string;
+  /** Set when the SSE connection died AND a follow-up GET /runs/:runId confirmed the server has no
+   * checkpoint for this runId at all (see useRunEvents' onerror handler) — a stale local reference
+   * to a run that's genuinely gone (e.g. its checkpoint was deleted), not a real connectivity
+   * failure. App.tsx uses this to silently drop the session's runId instead of showing a
+   * "connection lost, please refresh" message that a refresh could never actually fix. */
+  runNotFound?: boolean;
 }
 
 export const initialTraceTimelineState: TraceTimelineState = { events: [], status: "running", streamingText: "" };
@@ -21,11 +27,15 @@ export type TraceTimelineAction =
   | { kind: "status"; status: RunStatus }
   | { kind: "final"; state: Record<string, unknown> }
   | { kind: "failed"; error: string }
+  | { kind: "run_not_found" }
   | { kind: "reset" };
 
 export function traceTimelineReducer(state: TraceTimelineState, action: TraceTimelineAction): TraceTimelineState {
   if (action.kind === "reset") {
     return initialTraceTimelineState;
+  }
+  if (action.kind === "run_not_found") {
+    return { ...state, runNotFound: true };
   }
   if (action.kind === "trace") {
     const { event } = action;

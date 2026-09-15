@@ -7,6 +7,19 @@ export class ApiAuthError extends Error {
   }
 }
 
+/** Thrown by getRun when the server has no checkpoint for this runId at all (never "belongs to a
+ * different session" or any other 4xx — those still throw the generic Error below). Distinct from
+ * a real connectivity failure: useRunEvents uses this to recognize "this run genuinely no longer
+ * exists" (e.g. a stale runId left over in localStorage from before its checkpoint was deleted)
+ * and recover silently, rather than showing a "connection lost, please refresh" message that a
+ * refresh could never actually fix — reloading would just retry the same gone-forever runId. */
+export class RunNotFoundError extends Error {
+  constructor() {
+    super("Run not found");
+    this.name = "RunNotFoundError";
+  }
+}
+
 export function getApiKey(): string | null {
   return localStorage.getItem(API_KEY_STORAGE_KEY);
 }
@@ -66,6 +79,7 @@ export async function getRun(
   runId: string,
 ): Promise<{ runId: string; status: string; state: Record<string, unknown>; error?: string }> {
   const res = await authedFetch(`/runs/${runId}`, sessionId);
+  if (res.status === 404) throw new RunNotFoundError();
   if (!res.ok) throw new Error(`Failed to load run: ${res.status}`);
   return res.json();
 }

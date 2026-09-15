@@ -119,6 +119,18 @@ export function App() {
   }, [timeline.connectionError]);
 
   useEffect(() => {
+    // The run this session was tracking genuinely no longer exists server-side (see useRunEvents'
+    // onerror handler) — most likely a stale runId left over from before its checkpoint was
+    // deleted. Recover silently by dropping the reference: the session's message history is
+    // untouched, the composer already isn't blocked (isRunInFlight excludes this case), and
+    // there's nothing productive for the user to do about a run that's gone for good — showing an
+    // error here would just be alarming and, unlike a real connection failure, unfixable by the
+    // "refresh and retry" a connectionError banner suggests.
+    if (!timeline.runNotFound) return;
+    updateSession(activeSessionId, (session) => ({ ...session, runId: undefined }));
+  }, [timeline.runNotFound, activeSessionId]);
+
+  useEffect(() => {
     if (timeline.runError) {
       setError(timeline.runError);
     }

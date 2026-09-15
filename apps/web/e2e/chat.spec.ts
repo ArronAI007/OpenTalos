@@ -216,6 +216,37 @@ test("double-clicking 批准 does not enqueue a duplicate resume request (Fix 4)
   expect(resumeRequestCount).toBe(1);
 });
 
+test("a stale runId with no matching checkpoint recovers silently instead of showing a connection-lost error", async ({
+  page,
+}) => {
+  // Regression coverage: opening the app with a session (from localStorage) whose runId points at
+  // a checkpoint that no longer exists server-side (e.g. deleted, or from a wiped dev database —
+  // this genuinely happened once) previously showed "与服务器的连接已断开，请刷新页面重试" — a
+  // message a refresh can never fix, since the same stale runId just gets reloaded and retried,
+  // failing identically forever. It should instead recover silently: the composer stays usable,
+  // and the earlier message text is still visible.
+  const staleSession = {
+    id: "stale-session-1",
+    createdAt: Date.now(),
+    runId: "does-not-exist-anymore",
+    messages: [{ id: "m1", role: "user", text: "旧消息，对应的 run 已经不存在了", runId: "does-not-exist-anymore" }],
+  };
+  await page.addInitScript((session) => {
+    window.localStorage.setItem("opentalos-sessions", JSON.stringify([session]));
+    window.localStorage.setItem("opentalos-active-session", session.id);
+  }, staleSession);
+
+  await page.goto("/");
+
+  const chatInput = page.getByPlaceholder("给智能体发消息");
+  const sendButton = page.getByRole("button", { name: "发送" });
+
+  await expect(page.getByRole("region", { name: "对话" }).getByText("旧消息，对应的 run 已经不存在了")).toBeVisible();
+  await expect(chatInput).toBeEnabled({ timeout: 10_000 });
+  await expect(sendButton).toBeVisible();
+  await expect(page.getByText(/连接已断开/)).not.toBeVisible();
+});
+
 test("a terminal SSE connection failure re-enables sending a new message (Fix 5)", async ({ page }) => {
   // Regression test: isRunInFlight was computed purely from timeline.status, which never
   // advances to "done" if the SSE connection dies terminally (no more events or status changes

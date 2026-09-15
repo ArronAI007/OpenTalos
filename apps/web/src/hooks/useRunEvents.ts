@@ -1,5 +1,5 @@
 import { useEffect, useReducer, useState } from "react";
-import { eventsUrl, getRun } from "../api.js";
+import { RunNotFoundError, eventsUrl, getRun } from "../api.js";
 import { initialTraceTimelineState, traceTimelineReducer } from "./trace-reducer.js";
 
 export function useRunEvents(sessionId: string | undefined, runId: string | undefined) {
@@ -64,8 +64,21 @@ export function useRunEvents(sessionId: string | undefined, runId: string | unde
       // (e.g. the server returned a non-retryable HTTP status), so surface that to the UI —
       // otherwise a chat waiting on a paused/running run would sit silently forever with no
       // indication that no further trace events or status changes will ever arrive.
+      //
+      // EventSource's onerror never exposes the actual HTTP status that closed it, so a follow-up
+      // plain GET is the only way to tell "this run's checkpoint genuinely doesn't exist anymore"
+      // (a stale runId — recover silently, no fix a refresh could ever provide) apart from a real
+      // connectivity failure (getRun succeeds, or fails some other way — show the error as before).
       if (source.readyState === EventSource.CLOSED) {
-        setConnectionError(true);
+        getRun(sessionId, runId)
+          .then(() => setConnectionError(true))
+          .catch((error) => {
+            if (error instanceof RunNotFoundError) {
+              dispatch({ kind: "run_not_found" });
+            } else {
+              setConnectionError(true);
+            }
+          });
       }
     };
 

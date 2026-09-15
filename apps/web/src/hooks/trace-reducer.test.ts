@@ -77,6 +77,13 @@ describe("traceTimelineReducer", () => {
     expect(next.runError).toBe("model provider error: invalid api key");
   });
 
+  it("sets runNotFound without touching other fields", () => {
+    const withEvent = traceTimelineReducer(initialTraceTimelineState, { kind: "trace", event: sampleEvent });
+    const next = traceTimelineReducer(withEvent, { kind: "run_not_found" });
+    expect(next.runNotFound).toBe(true);
+    expect(next.events).toEqual([sampleEvent]);
+  });
+
   it("resets to the initial state regardless of accumulated events, status, or finalState", () => {
     let state = initialTraceTimelineState;
     state = traceTimelineReducer(state, { kind: "trace", event: sampleEvent });
