@@ -1,3 +1,4 @@
+import { extname } from "node:path";
 import { GenericContainer } from "testcontainers";
 
 export interface SandboxExecutionRequest {
@@ -20,7 +21,44 @@ export interface SandboxExecutionResult {
 }
 
 const DEFAULT_TIMEOUT_MS = 10_000;
-const CONTAINER_SCRIPT_PATH = "/skill/script.js";
+const CONTAINER_SCRIPT_DIR = "/skill";
+
+/**
+ * Maps a script's file extension to how it's invoked inside the container. This allowlist is
+ * itself part of the sandbox's security boundary — an unrecognized extension is rejected up front
+ * (see resolveRuntime below) rather than attempting to sniff a shebang line and execute
+ * accordingly; only these exact, known-safe invocation shapes are ever used.
+ */
+const RUNTIME_COMMAND_BY_EXTENSION: Record<string, (containerPath: string, args: string[]) => string[]> = {
+  ".js": (containerPath, args) => ["node", containerPath, ...args],
+  ".mjs": (containerPath, args) => ["node", containerPath, ...args],
+  ".cjs": (containerPath, args) => ["node", containerPath, ...args],
+  ".py": (containerPath, args) => ["python3", containerPath, ...args],
+};
+
+interface ResolvedRuntime {
+  /** Absolute in-container path the script is bind-mounted at, preserving its real extension. */
+  containerPath: string;
+  /** The full command to exec inside the container to run the script. */
+  command: string[];
+}
+
+/** Throws a clear error for any extension not in RUNTIME_COMMAND_BY_EXTENSION. Called before the
+ * concurrency semaphore is acquired or any container is started, so an unsupported script type
+ * fails fast without touching Docker at all. */
+function resolveRuntime(scriptHostPath: string, args: string[]): ResolvedRuntime {
+  const ext = extname(scriptHostPath);
+  const buildCommand = RUNTIME_COMMAND_BY_EXTENSION[ext];
+  if (!buildCommand) {
+    throw new Error(
+      `Unsupported script type "${ext || "(no extension)"}" for "${scriptHostPath}". ` +
+        `Supported extensions: ${Object.keys(RUNTIME_COMMAND_BY_EXTENSION).join(", ")}.`,
+    );
+  }
+  const containerPath = `${CONTAINER_SCRIPT_DIR}/script${ext}`;
+  return { containerPath, command: buildCommand(containerPath, args) };
+}
+
 /** The fixed path a script reads its `inputText` from, if any. Exported so skill scripts and this
  * package's own tests agree on the contract without duplicating the literal string. */
 export const SANDBOX_INPUT_PATH = "/scratch/input.txt";
@@ -111,14 +149,21 @@ export async function runSandboxedScript(request: SandboxExecutionRequest): Prom
     }
   }
 
+  // Resolved before acquiring the concurrency semaphore or starting any container, so an
+  // unsupported script extension fails fast without touching Docker at all.
+  const runtime = resolveRuntime(request.scriptHostPath, request.args);
+
   const release = await globalSemaphore.acquire();
   try {
-    const container = new GenericContainer("node:22-alpine")
+    const container = new GenericContainer("nikolaik/python-nodejs:python3.12-nodejs22")
       .withNetworkMode("none")
-      .withUser("node")
+      // "pn" (uid 1000) is this image's only unprivileged user — verified via
+      // `docker run --rm --user pn nikolaik/python-nodejs:python3.12-nodejs22 id`. The plain
+      // `node:22-alpine` image used a "node" user; this image has no such user.
+      .withUser("pn")
       .withResourcesQuota({ memory: MEMORY_QUOTA_GIB, cpu: CPU_QUOTA_CORES })
       .withUlimits({ nproc: { soft: 64, hard: 64 } })
-      .withBindMounts([{ source: request.scriptHostPath, target: CONTAINER_SCRIPT_PATH, mode: "ro" }])
+      .withBindMounts([{ source: request.scriptHostPath, target: runtime.containerPath, mode: "ro" }])
       .withTmpFs({ "/scratch": "rw,size=16m" })
       // Idle keep-alive command: the actual script run happens via .exec() below, once the
       // container (and its /scratch tmpfs) is up and we've had a chance to write the input file.
@@ -146,7 +191,7 @@ export async function runSandboxedScript(request: SandboxExecutionRequest): Prom
         }
       }
 
-      const execPromise = started.exec(["node", CONTAINER_SCRIPT_PATH, ...request.args]);
+      const execPromise = started.exec(runtime.command);
       const timeoutMs = request.timeoutMs ?? DEFAULT_TIMEOUT_MS;
       const timeout = new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), timeoutMs));
 

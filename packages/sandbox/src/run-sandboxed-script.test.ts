@@ -53,6 +53,38 @@ describe("runSandboxedScript", () => {
   );
 
   it(
+    "runs a Python script and captures its stdout, given args and input text",
+    async () => {
+      const result = await runSandboxedScript({
+        scriptHostPath: resolve(FIXTURES_DIR, "echo.py"),
+        args: ["hello", "world"],
+        inputText: "some input text",
+      });
+      expect(result.exitCode).toBe(0);
+      expect(result.timedOut).toBe(false);
+      expect(JSON.parse(result.stdout.trim())).toEqual({
+        args: ["hello", "world"],
+        inputText: "some input text",
+      });
+    },
+    30_000,
+  );
+
+  it("rejects an unsupported script extension immediately, without starting a container", async () => {
+    const start = Date.now();
+    await expect(
+      runSandboxedScript({
+        scriptHostPath: resolve(FIXTURES_DIR, "not-a-real-script.sh"),
+        args: [],
+      }),
+    ).rejects.toThrow(/unsupported script type/i);
+
+    // Must fail on the extension check alone — never reaches Docker (the fixture path above isn't
+    // even a real file), so this must resolve near-instantly.
+    expect(Date.now() - start).toBeLessThan(1_000);
+  });
+
+  it(
     "runs with no network access",
     async () => {
       const result = await runSandboxedScript({
