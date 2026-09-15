@@ -24,16 +24,17 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 const CONTAINER_SCRIPT_DIR = "/skill";
 
 /**
- * Maps a script's file extension to how it's invoked inside the container. This allowlist is
- * itself part of the sandbox's security boundary — an unrecognized extension is rejected up front
- * (see resolveRuntime below) rather than attempting to sniff a shebang line and execute
- * accordingly; only these exact, known-safe invocation shapes are ever used.
+ * Maps a script's file extension to the interpreter binary that runs it inside the container. This
+ * allowlist is itself part of the sandbox's security boundary — an unrecognized extension is
+ * rejected up front (see resolveRuntime below) rather than attempting to sniff a shebang line and
+ * execute accordingly; only these exact, known-safe interpreters are ever invoked.
  */
-const RUNTIME_COMMAND_BY_EXTENSION: Record<string, (containerPath: string, args: string[]) => string[]> = {
-  ".js": (containerPath, args) => ["node", containerPath, ...args],
-  ".mjs": (containerPath, args) => ["node", containerPath, ...args],
-  ".cjs": (containerPath, args) => ["node", containerPath, ...args],
-  ".py": (containerPath, args) => ["python3", containerPath, ...args],
+const INTERPRETER_BY_EXTENSION: Record<string, string> = {
+  ".js": "node",
+  ".mjs": "node",
+  ".cjs": "node",
+  // python3, not python: the sandbox image (nikolaik/python-nodejs) only guarantees a `python3` binary.
+  ".py": "python3",
 };
 
 interface ResolvedRuntime {
@@ -43,20 +44,22 @@ interface ResolvedRuntime {
   command: string[];
 }
 
-/** Throws a clear error for any extension not in RUNTIME_COMMAND_BY_EXTENSION. Called before the
+/** Throws a clear error for any extension not in INTERPRETER_BY_EXTENSION. Called before the
  * concurrency semaphore is acquired or any container is started, so an unsupported script type
  * fails fast without touching Docker at all. */
 function resolveRuntime(scriptHostPath: string, args: string[]): ResolvedRuntime {
+  // extname() is case-sensitive (".JS"/".PY" are rejected). Intentional: script paths come from
+  // internal skill definitions, not external input, so no case-insensitive matching is needed.
   const ext = extname(scriptHostPath);
-  const buildCommand = RUNTIME_COMMAND_BY_EXTENSION[ext];
-  if (!buildCommand) {
+  const interpreter = INTERPRETER_BY_EXTENSION[ext];
+  if (!interpreter) {
     throw new Error(
       `Unsupported script type "${ext || "(no extension)"}" for "${scriptHostPath}". ` +
-        `Supported extensions: ${Object.keys(RUNTIME_COMMAND_BY_EXTENSION).join(", ")}.`,
+        `Supported extensions: ${Object.keys(INTERPRETER_BY_EXTENSION).join(", ")}.`,
     );
   }
   const containerPath = `${CONTAINER_SCRIPT_DIR}/script${ext}`;
-  return { containerPath, command: buildCommand(containerPath, args) };
+  return { containerPath, command: [interpreter, containerPath, ...args] };
 }
 
 /** The fixed path a script reads its `inputText` from, if any. Exported so skill scripts and this
