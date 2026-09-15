@@ -28,7 +28,10 @@ body {
   height: 100%;
   display: flex;
   flex-direction: column;
-  max-width: 720px;
+  /* 960px, not 720px: on a common desktop viewport (1440px, minus the 240px sidebar) the old
+   * 720px cap left ~240px of empty space on each side of the centered content; 960px roughly
+   * halves that. */
+  max-width: 960px;
   margin: 0 auto;
   padding: var(--space-lg);
   box-sizing: border-box;
