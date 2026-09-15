@@ -123,15 +123,19 @@ export function createRunSkillScriptTool(skills: Skill[]): Tool {
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        // Surface the specific "input too large" case clearly, since it is the realistic failure
-        // this tool's caller (the model) can actually act on by shrinking its input. Any other
-        // sandbox-layer failure gets a generic, non-leaky message.
+        // Both of these are known, actionable failures the caller (the model, or a developer
+        // reading logs) can actually fix — shrink the input, or use a supported script extension —
+        // so surface them verbatim instead of flattening them into the generic "unexpected
+        // internal error" message below, which is reserved for truly unexpected sandbox-layer
+        // failures.
         const isInputTooLarge = /input.*too large/i.test(message);
+        const isUnsupportedScriptType = /unsupported script type/i.test(message);
         return {
           id: "",
-          output: isInputTooLarge
-            ? `Script "${scriptRelativePath}" for skill "${skillName}" could not run: ${message}`
-            : `Script "${scriptRelativePath}" for skill "${skillName}" failed to run in the sandbox due to an unexpected internal error.`,
+          output:
+            isInputTooLarge || isUnsupportedScriptType
+              ? `Script "${scriptRelativePath}" for skill "${skillName}" could not run: ${message}`
+              : `Script "${scriptRelativePath}" for skill "${skillName}" failed to run in the sandbox due to an unexpected internal error.`,
           isError: true,
         };
       }

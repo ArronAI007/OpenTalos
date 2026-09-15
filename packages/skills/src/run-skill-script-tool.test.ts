@@ -132,4 +132,17 @@ describe("createRunSkillScriptTool", () => {
     expect(String(result.output)).not.toContain("/bin/sh");
     expect(String(result.output)).not.toMatch(/at runSandboxedScript|\.ts:\d+:\d+/);
   });
+
+  it("surfaces an unsupported script extension error verbatim, not as a generic internal error", async () => {
+    writeFileSync(resolve(SKILL_DIR, "unsupported.sh"), `echo "should never run"`);
+
+    const tool = createRunSkillScriptTool(skills);
+    const result = await tool.execute(
+      { skillName: "greeter", scriptRelativePath: "unsupported.sh", args: [] },
+      { tenantId: "t", sessionId: "s" },
+    );
+
+    expect(result.isError).toBe(true);
+    expect(String(result.output)).toMatch(/unsupported script type/i);
+  });
 });
