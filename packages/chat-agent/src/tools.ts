@@ -23,6 +23,11 @@ export const lookupExchangeRateTool: Tool = {
       },
       required: ["pair"],
     },
+    // Deliberately marked dangerous: this is this codebase's reference example of a tool gated by
+    // chat-agent's human-approval pause (see graph.ts's confirm node) — the test suite and demo UI
+    // are built around this tool exercising that path. A real tool should only set this when it
+    // has a genuinely risky/irreversible effect, not merely because it returns financial data.
+    dangerous: true,
   },
   async execute(input) {
     const { pair } = input as { pair: string };

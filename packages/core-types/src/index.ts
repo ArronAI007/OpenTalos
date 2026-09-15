@@ -26,6 +26,11 @@ export interface ToolDefinition {
    * name, no description/inputSchema) and executes it server-side; the client-side Tool for one
    * of these just echoes the model's arguments back rather than doing real work. */
   kind?: "function" | "builtin";
+  /** True marks this tool as requiring human approval before its result is delivered to the user
+   * (see chat-agent's `confirm` node in graph.ts). Set this only on tools with a genuinely risky
+   * or hard-to-reverse effect — an ordinary read-only lookup or computation should leave this
+   * absent/false so it doesn't force a human-approval pause on every turn that uses it. */
+  dangerous?: boolean;
 }
 
 export interface ToolCall {

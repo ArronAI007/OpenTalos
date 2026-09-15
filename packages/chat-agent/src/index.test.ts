@@ -155,8 +155,8 @@ describe("chat agent", () => {
     const initialState: ChatState = { message: "use the fake skill" };
     let checkpoint = engine.start(initialState, { tenantId: "tenant-a", sessionId: "session-skill" }, "run-skill-1");
     checkpoint = await engine.run(checkpoint);
-    expect(checkpoint.status).toBe("paused"); // load_skill is a tool call, so the usual HITL gate still applies
-    checkpoint = await engine.resume(checkpoint, { type: "approval", approved: true });
+    // load_skill isn't marked `dangerous` (it's a read-only lookup), so it skips the HITL pause
+    // entirely — unlike lookup_exchange_rate (see the tests above), which is.
     expect(checkpoint.status).toBe("done");
     expect(checkpoint.state.reply).toBe("loaded the fake skill");
   });

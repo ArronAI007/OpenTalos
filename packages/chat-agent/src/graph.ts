@@ -22,11 +22,15 @@ function buildRespondNode(modelProvider: ModelProvider, toolRegistry: ToolRegist
       undefined,
       ctx.signal,
     );
-    // Only turns that actually called a tool (e.g. looked up an exchange rate) go through human
-    // approval before their result is sent — plain conversational replies skip the HITL pause
-    // entirely, so an ordinary "你好" doesn't stop and wait for a click every time.
-    const usedTool = messages.some((message) => message.role === "tool");
-    return { searchResult: finalText, usedTool };
+    // Only turns that called a tool explicitly marked `dangerous` in its own ToolDefinition (see
+    // core-types.ts) go through human approval before their result is sent — an ordinary read-only
+    // lookup or computation (load_skill, run_skill_script, $web_search, ...) skips the HITL pause
+    // entirely, so using one of those doesn't stop and wait for a click every time. Collected from
+    // every assistant turn's toolCalls (not merely "does a tool message exist") so this is driven
+    // by which specific tool(s) were actually called.
+    const calledToolNames = messages.flatMap((message) => message.toolCalls?.map((call) => call.name) ?? []);
+    const requiresApproval = calledToolNames.some((name) => toolRegistry.get(name)?.definition.dangerous);
+    return { searchResult: finalText, requiresApproval };
   };
 }
 
@@ -37,7 +41,7 @@ const confirm: NodeFn<ChatState> = async function* confirm() {
 };
 
 const respondFinal: NodeFn<ChatState> = async function* respondFinal(state) {
-  const reply = state.usedTool
+  const reply = state.requiresApproval
     ? state.approved
       ? state.searchResult ?? ""
       : "好的，我不会发送这条回复。"
@@ -51,8 +55,8 @@ export function buildChatAgentGraph(modelProvider: ModelProvider, toolRegistry: 
     entryNode: "respond",
     nodes: { respond: buildRespondNode(modelProvider, toolRegistry), confirm, respondFinal },
     edges: [
-      { from: "respond", to: "confirm", condition: (state) => !!state.usedTool },
-      { from: "respond", to: "respondFinal", condition: (state) => !state.usedTool },
+      { from: "respond", to: "confirm", condition: (state) => !!state.requiresApproval },
+      { from: "respond", to: "respondFinal", condition: (state) => !state.requiresApproval },
       { from: "confirm", to: "respondFinal" },
     ],
     reducer: shallowMergeReducer,
