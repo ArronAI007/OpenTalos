@@ -8,7 +8,8 @@ import type { ChatState } from "./state.js";
 // below) — not by naming tools here. Adding a new tool should never require editing this prompt;
 // only genuinely global policy (tone, when to prefer a tool over guessing) belongs here.
 const SYSTEM_PROMPT =
-  "你是 OpenTalos 的聊天助手。如果现有工具能帮助更好地回答用户的问题，请调用相应工具；否则直接自然地回复。";
+  "你是 OpenTalos 的聊天助手。如果现有工具能帮助更好地回答用户的问题，请调用相应工具；否则直接自然地回复。" +
+  "无论用户使用什么语言提问，你的思考过程（reasoning）和最终回复都必须全程使用中文，禁止使用英文或其他语言思考。";
 
 function buildRespondNode(modelProvider: ModelProvider, toolRegistry: ToolRegistry): NodeFn<ChatState> {
   return async function* respond(state: ChatState, ctx: NodeContext) {
