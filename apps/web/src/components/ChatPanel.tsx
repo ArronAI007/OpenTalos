@@ -79,6 +79,12 @@ export function ChatPanel({ messages, onSend, onStop, error, disabled, status, s
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    // Pressing Enter to confirm an IME composition (e.g. selecting a candidate while typing
+    // Chinese/Japanese/Korean pinyin/kana) must fill that text into the textarea, not submit it.
+    // `isComposing` covers most browsers; `keyCode === 229` is Safari's documented way of marking
+    // the composition-ending keydown even once `isComposing` has already flipped back to false by
+    // the time this handler runs.
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return;
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       submit();

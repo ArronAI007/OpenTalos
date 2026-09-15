@@ -73,6 +73,27 @@ test("approving a tool-using reply works directly from the 对话 tab, without s
   await expect(chatInput).toBeEnabled();
 });
 
+test("pressing Enter to confirm an IME composition fills the textarea instead of sending", async ({ page }) => {
+  // Regression coverage: typing via an IME (e.g. Chinese pinyin) and pressing Enter to confirm a
+  // candidate was previously treated identically to a real Enter keypress -- submitting whatever
+  // partial/incorrect text was in the composer at that moment, instead of just completing the
+  // composition. `isComposing: true` on the keydown event is what a real IME sets in this case.
+  await page.goto("/");
+
+  const chatInput = page.getByPlaceholder("给智能体发消息");
+  const sentMessage = page.locator("li.message-user", { hasText: "测试" });
+
+  await chatInput.fill("测试");
+  await chatInput.dispatchEvent("keydown", { key: "Enter", isComposing: true });
+
+  await expect(chatInput).toHaveValue("测试");
+  await expect(sentMessage).not.toBeVisible();
+
+  // A real Enter afterward (composition over) still sends normally.
+  await chatInput.dispatchEvent("keydown", { key: "Enter", isComposing: false });
+  await expect(sentMessage).toBeVisible();
+});
+
 test("clicking stop mid-stream cancels the model call and the composer recovers", async ({ page }) => {
   // NOTE: MODEL_PROVIDER=mock's complete() (packages/model-providers/src/mock.ts) calls
   // lookup_exchange_rate on round 1 for ANY first-turn message whenever a tool is registered --
