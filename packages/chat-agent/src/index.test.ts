@@ -129,6 +129,37 @@ describe("chat agent", () => {
     expect(checkpoint.state.reply).toBe("部分回复");
   });
 
+  it("carries the model's reasoning text through to the checkpoint state, regardless of the approval gate", async () => {
+    const toolRegistry = createChatAgentToolRegistry();
+    const eventBus = new InMemoryEventBus();
+    const checkpointStore = new InMemoryCheckpointStore();
+    const modelProvider = scriptedProvider([
+      [
+        { type: "reasoning_delta", reasoningDelta: "用户在问候，我直接回复就好。" },
+        { type: "text_delta", textDelta: "你好！" },
+        { type: "message_stop" },
+      ],
+    ]);
+    const engine = new GraphEngine<ChatState>(buildChatAgentGraph(modelProvider, toolRegistry), {
+      toolRegistry,
+      eventBus,
+      checkpointStore,
+    });
+
+    const initialState: ChatState = { message: "你好" };
+    let checkpoint = engine.start(initialState, { tenantId: "tenant-a", sessionId: "session-reasoning" }, "run-reasoning-1");
+    checkpoint = await engine.run(checkpoint);
+
+    // No tool was called (lookup_exchange_rate isn't relevant here), so this skips the approval
+    // pause entirely — reasoningText must still be present on the final state either way.
+    expect(checkpoint.status).toBe("done");
+    expect(checkpoint.state.reply).toBe("你好！");
+    expect(checkpoint.state.reasoningText).toBe("用户在问候，我直接回复就好。");
+
+    const eventTypes = eventBus.getEvents().map((e) => e.type);
+    expect(eventTypes).toContain("llm_reasoning_delta");
+  });
+
   it("registers load_skill and run_skill_script when skills are provided, and the model can use them in one turn", async () => {
     const fakeSkill: Skill = {
       name: "fake-skill",

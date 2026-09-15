@@ -16,6 +16,36 @@ function AssistantMarkdown({ text }: { text: string }) {
   );
 }
 
+/** Collapsible block for a model's reasoning/thinking trace. Expanded by default only while
+ * `isThinking` is true (the model is actively producing reasoning and hasn't started its final
+ * answer yet); auto-collapses the moment `isThinking` flips to false, mirroring how it behaves for
+ * an already-completed historical message (`isThinking` is always false there, so it starts
+ * collapsed). The user can still manually re-expand afterward — that choice is never overridden. */
+function ReasoningBlock({ text, isThinking }: { text: string; isThinking: boolean }) {
+  const [expanded, setExpanded] = useState(isThinking);
+  const wasThinking = useRef(isThinking);
+  useEffect(() => {
+    if (wasThinking.current && !isThinking) {
+      setExpanded(false);
+    }
+    wasThinking.current = isThinking;
+  }, [isThinking]);
+
+  return (
+    <div className="reasoning-block">
+      <button
+        type="button"
+        className="reasoning-toggle"
+        onClick={() => setExpanded((value) => !value)}
+        aria-expanded={expanded}
+      >
+        {isThinking ? "⚙ 思考中…" : expanded ? "▾ 思考过程" : "▸ 已完成思考"}
+      </button>
+      {expanded && <p className="reasoning-content">{text}</p>}
+    </div>
+  );
+}
+
 interface ChatPanelProps {
   messages: ChatMessage[];
   onSend: (text: string) => void;
@@ -31,12 +61,25 @@ interface ChatPanelProps {
   /** The assistant's reply so far, while it's still streaming in. Rendered as a trailing bubble
    * after `messages` until the real ChatMessage is appended once the run finishes. */
   streamingText?: string;
+  /** The model's reasoning/thinking trace so far, while it's still streaming in — see
+   * ReasoningBlock. Empty/undefined for turns (or models) that never produce one. */
+  reasoningStreamingText?: string;
   /** Resolves the pending HITL pause (see graph.ts's `confirm` node) when `status === "paused"`.
    * Mirrors TracePanel's onApprove — the same run can be approved/rejected from either place. */
   onApprove?: (approved: boolean) => void;
 }
 
-export function ChatPanel({ messages, onSend, onStop, error, disabled, status, streamingText, onApprove }: ChatPanelProps) {
+export function ChatPanel({
+  messages,
+  onSend,
+  onStop,
+  error,
+  disabled,
+  status,
+  streamingText,
+  reasoningStreamingText,
+  onApprove,
+}: ChatPanelProps) {
   const [draft, setDraft] = useState("");
   const bottomRef = useRef<HTMLLIElement>(null);
 
@@ -63,7 +106,7 @@ export function ChatPanel({ messages, onSend, onStop, error, disabled, status, s
   // of the composer following it down.
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: "end" });
-  }, [messages, streamingText]);
+  }, [messages, streamingText, reasoningStreamingText]);
 
   function submit() {
     if (disabled) return;
@@ -95,7 +138,7 @@ export function ChatPanel({ messages, onSend, onStop, error, disabled, status, s
 
   return (
     <section className="chat-panel" aria-label="对话">
-      {messages.length === 0 && !streamingText ? (
+      {messages.length === 0 && !streamingText && !reasoningStreamingText ? (
         <div className="chat-empty">
           <p className="chat-empty-title">开始对话</p>
           <p className="chat-empty-subtitle">在下方输入框输入消息开始对话</p>
@@ -104,15 +147,28 @@ export function ChatPanel({ messages, onSend, onStop, error, disabled, status, s
         <ul className="message-list">
           {messages.map((message) => (
             <li key={message.id} className={`message message-${message.role}`}>
+              {message.role === "assistant" && message.reasoningText && (
+                <ReasoningBlock text={message.reasoningText} isThinking={false} />
+              )}
               {message.role === "assistant" ? <AssistantMarkdown text={message.text} /> : message.text}
             </li>
           ))}
-          {streamingText && (
+          {(streamingText || reasoningStreamingText) && (
             <li className={`message message-assistant${status === "paused" ? "" : " message-streaming"}`}>
-              <AssistantMarkdown text={streamingText} />
-              {/* Generation is actually finished once paused for approval — a blinking cursor here
-               * would falsely suggest the model is still writing. */}
-              {status !== "paused" && <span className="streaming-cursor" aria-hidden="true" />}
+              {reasoningStreamingText && (
+                <ReasoningBlock
+                  text={reasoningStreamingText}
+                  isThinking={status === "running" && !streamingText}
+                />
+              )}
+              {streamingText && (
+                <>
+                  <AssistantMarkdown text={streamingText} />
+                  {/* Generation is actually finished once paused for approval — a blinking cursor
+                   * here would falsely suggest the model is still writing. */}
+                  {status !== "paused" && <span className="streaming-cursor" aria-hidden="true" />}
+                </>
+              )}
             </li>
           )}
           {status === "paused" && (

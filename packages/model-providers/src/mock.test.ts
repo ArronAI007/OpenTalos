@@ -11,11 +11,22 @@ describe("createMockProvider", () => {
     };
     const chunks = [];
     for await (const chunk of provider.complete(request)) chunks.push(chunk);
-    expect(chunks[0]).toEqual({
+    expect(chunks[0].type).toBe("reasoning_delta");
+    expect(chunks.find((c) => c.type === "tool_call")).toEqual({
       type: "tool_call",
       toolCall: { id: expect.any(String), name: "lookup_exchange_rate", input: { pair: "USD/CNY" } },
     });
     expect(chunks[chunks.length - 1]).toEqual({ type: "message_stop" });
+  });
+
+  it("emits a reasoning_delta chunk ahead of every round, for exercising the reasoning-display UI without a real model", async () => {
+    const provider = createMockProvider();
+    const request: ModelRequest = { messages: [{ role: "user", content: "你好" }] };
+    const chunks = [];
+    for await (const chunk of provider.complete(request)) chunks.push(chunk);
+    const reasoningChunks = chunks.filter((c): c is { type: "reasoning_delta"; reasoningDelta: string } => c.type === "reasoning_delta");
+    expect(reasoningChunks.length).toBeGreaterThan(0);
+    expect(reasoningChunks[0].reasoningDelta.length).toBeGreaterThan(0);
   });
 
   it("replies with the tool result once one is present in history, without requesting another tool", async () => {

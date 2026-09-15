@@ -9,6 +9,11 @@ export interface TraceTimelineState {
    * to "" whenever a tool call starts, since any text streamed before that point was a preamble
    * for the tool decision, not the model's final answer. */
   streamingText: string;
+  /** The model's reasoning/thinking trace as it streams in, accumulated from llm_reasoning_delta
+   * trace events. Unlike streamingText, this is NEVER reset on tool_call_start — the model's
+   * reasoning about which tool to call is part of the same thinking process as its reasoning about
+   * the final answer, so it just keeps growing across every round of a turn. */
+  reasoningStreamingText: string;
   /** Set when the run's status becomes "failed" — the human-readable error from the backend
    * (see GET /runs/:runId's and the SSE "failed" event's `error` field). */
   runError?: string;
@@ -20,7 +25,12 @@ export interface TraceTimelineState {
   runNotFound?: boolean;
 }
 
-export const initialTraceTimelineState: TraceTimelineState = { events: [], status: "running", streamingText: "" };
+export const initialTraceTimelineState: TraceTimelineState = {
+  events: [],
+  status: "running",
+  streamingText: "",
+  reasoningStreamingText: "",
+};
 
 export type TraceTimelineAction =
   | { kind: "trace"; event: TraceEventDto }
@@ -42,6 +52,10 @@ export function traceTimelineReducer(state: TraceTimelineState, action: TraceTim
     if (event.type === "llm_text_delta") {
       const delta = typeof event.payload?.delta === "string" ? event.payload.delta : "";
       return { ...state, streamingText: state.streamingText + delta };
+    }
+    if (event.type === "llm_reasoning_delta") {
+      const delta = typeof event.payload?.delta === "string" ? event.payload.delta : "";
+      return { ...state, reasoningStreamingText: state.reasoningStreamingText + delta };
     }
     if (event.type === "tool_call_start") {
       return { ...state, events: [...state.events, event], streamingText: "" };

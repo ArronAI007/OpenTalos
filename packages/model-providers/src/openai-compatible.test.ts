@@ -68,6 +68,37 @@ describe("createOpenAICompatibleProvider", () => {
     ]);
   });
 
+  it("yields reasoning_delta chunks from delta.reasoning_content, ahead of the matching text_delta", async () => {
+    const client = fakeClient([
+      { choices: [{ delta: { reasoning_content: "let me think" } }] },
+      { choices: [{ delta: { reasoning_content: "..." } }] },
+      { choices: [{ delta: { content: "the answer" }, finish_reason: "stop" }] },
+    ]);
+    const provider = createOpenAICompatibleProvider(client, { model: "gpt-test" });
+    const chunks = [];
+    for await (const chunk of provider.complete(request)) chunks.push(chunk);
+    expect(chunks).toEqual([
+      { type: "reasoning_delta", reasoningDelta: "let me think" },
+      { type: "reasoning_delta", reasoningDelta: "..." },
+      { type: "text_delta", textDelta: "the answer" },
+      { type: "message_stop" },
+    ]);
+  });
+
+  it("yields both reasoning_delta and text_delta when both fields are present on the same chunk", async () => {
+    const client = fakeClient([
+      { choices: [{ delta: { reasoning_content: "thinking", content: "answering" }, finish_reason: "stop" }] },
+    ]);
+    const provider = createOpenAICompatibleProvider(client, { model: "gpt-test" });
+    const chunks = [];
+    for await (const chunk of provider.complete(request)) chunks.push(chunk);
+    expect(chunks).toEqual([
+      { type: "reasoning_delta", reasoningDelta: "thinking" },
+      { type: "text_delta", textDelta: "answering" },
+      { type: "message_stop" },
+    ]);
+  });
+
   it("yields a tool_call chunk once a single-fragment delta.tool_calls completes at finish_reason", async () => {
     const client = fakeClient([
       {

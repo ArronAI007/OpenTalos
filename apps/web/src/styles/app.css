@@ -600,6 +600,44 @@ body {
   height: 0;
 }
 
+.reasoning-block {
+  margin-bottom: var(--space-sm);
+}
+
+.reasoning-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.reasoning-toggle:hover {
+  color: var(--color-text);
+}
+
+.reasoning-toggle:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.reasoning-content {
+  margin: var(--space-sm) 0 0;
+  padding-left: 10px;
+  border-left: 2px solid var(--color-border);
+  font-size: 13px;
+  font-style: italic;
+  color: var(--color-text-muted);
+  white-space: pre-wrap;
+}
+
 .markdown-body {
   display: flex;
   flex-direction: column;

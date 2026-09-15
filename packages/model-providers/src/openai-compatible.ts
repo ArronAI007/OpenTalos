@@ -4,6 +4,10 @@ export interface OpenAIStreamChunk {
   choices: {
     delta: {
       content?: string;
+      // Not part of the standard OpenAI protocol — a Moonshot/DeepSeek-style extension some
+      // "thinking" models (e.g. Kimi K3, which has reasoning on by default) stream as a field
+      // separate from `content`. Absent entirely for non-thinking models/providers.
+      reasoning_content?: string;
       // Real OpenAI-protocol streaming fragments each tool call across many chunks: `index`
       // identifies which tool call a fragment belongs to (always present), `id`/`function.name`
       // arrive only on that call's first fragment, and `function.arguments` is split into partial
@@ -88,6 +92,9 @@ export function createOpenAICompatibleProvider(
 
       for await (const chunk of stream) {
         const choice = chunk.choices[0];
+        if (choice?.delta.reasoning_content) {
+          yield { type: "reasoning_delta", reasoningDelta: choice.delta.reasoning_content };
+        }
         if (choice?.delta.content) {
           yield { type: "text_delta", textDelta: choice.delta.content };
         }

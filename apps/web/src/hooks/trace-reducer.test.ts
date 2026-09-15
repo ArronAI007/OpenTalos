@@ -49,6 +49,33 @@ describe("traceTimelineReducer", () => {
     expect(state.events).toEqual([]);
   });
 
+  it("accumulates llm_reasoning_delta payloads into reasoningStreamingText without adding them to events", () => {
+    let state = initialTraceTimelineState;
+    state = traceTimelineReducer(state, {
+      kind: "trace",
+      event: { ...sampleEvent, type: "llm_reasoning_delta", payload: { delta: "let me think" } },
+    });
+    state = traceTimelineReducer(state, {
+      kind: "trace",
+      event: { ...sampleEvent, id: 2, type: "llm_reasoning_delta", payload: { delta: "..." } },
+    });
+    expect(state.reasoningStreamingText).toBe("let me think...");
+    expect(state.events).toEqual([]);
+  });
+
+  it("does NOT clear reasoningStreamingText when a tool call starts, unlike streamingText", () => {
+    let state = initialTraceTimelineState;
+    state = traceTimelineReducer(state, {
+      kind: "trace",
+      event: { ...sampleEvent, type: "llm_reasoning_delta", payload: { delta: "deciding which tool…" } },
+    });
+    state = traceTimelineReducer(state, {
+      kind: "trace",
+      event: { ...sampleEvent, id: 2, type: "tool_call_start" },
+    });
+    expect(state.reasoningStreamingText).toBe("deciding which tool…");
+  });
+
   it("clears streamingText once a tool call starts, but still records that event", () => {
     let state = initialTraceTimelineState;
     state = traceTimelineReducer(state, {

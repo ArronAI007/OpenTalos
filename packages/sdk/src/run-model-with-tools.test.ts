@@ -121,6 +121,52 @@ describe("runModelWithTools", () => {
     expect(next.value.finalText).toBe("hello");
   });
 
+  it("accumulates reasoningText across rounds and emits llm_reasoning_delta for each fragment", async () => {
+    const provider = scriptedProvider([
+      [
+        { type: "reasoning_delta", reasoningDelta: "I should search first. " },
+        { type: "tool_call", toolCall: { id: "call-1", name: "search", input: { q: "x" } } },
+      ],
+      [
+        { type: "reasoning_delta", reasoningDelta: "Now I can answer." },
+        { type: "text_delta", textDelta: "found it" },
+        { type: "message_stop" },
+      ],
+    ]);
+    const gen = runModelWithTools(provider, tools, [{ role: "user", content: "hi" }]);
+    const emitted: NodeYield[] = [];
+    let next = await gen.next();
+    while (!next.done) {
+      if (next.value.type === "emit") {
+        emitted.push(next.value);
+        next = await gen.next(undefined);
+        continue;
+      }
+      if (next.value.type !== "awaiting_tool") throw new Error(`Unexpected yield type: ${next.value.type}`);
+      const { toolCall } = next.value;
+      next = await gen.next({ type: "tool_result", result: { id: toolCall.id, output: "some result" } });
+    }
+    expect(next.value.reasoningText).toBe("I should search first. Now I can answer.");
+    expect(next.value.finalText).toBe("found it");
+    expect(emitted).toContainEqual({
+      type: "emit",
+      eventType: "llm_reasoning_delta",
+      payload: { delta: "I should search first. " },
+    });
+    expect(emitted).toContainEqual({
+      type: "emit",
+      eventType: "llm_reasoning_delta",
+      payload: { delta: "Now I can answer." },
+    });
+  });
+
+  it("returns an empty reasoningText when the provider never emits reasoning_delta chunks", async () => {
+    const provider = scriptedProvider([[{ type: "text_delta", textDelta: "hello" }, { type: "message_stop" }]]);
+    const gen = runModelWithTools(provider, tools, [{ role: "user", content: "hi" }]);
+    const result = await drive(gen, {});
+    expect(result.reasoningText).toBe("");
+  });
+
   it("throws once maxRounds is exceeded when the model never stops requesting tools", async () => {
     const provider = alwaysToolCallProvider();
     const gen = runModelWithTools(provider, tools, [{ role: "user", content: "hi" }], 3);

@@ -93,6 +93,7 @@ export function App() {
   useEffect(() => {
     const reply = timeline.finalState?.reply;
     if (typeof reply !== "string") return;
+    const reasoningText = typeof timeline.finalState?.reasoningText === "string" ? timeline.finalState.reasoningText : undefined;
     // activeSessionId is captured fresh on every render this effect can run in (it's a dep), so
     // this always appends to whichever session actually owns the run timeline came from — not
     // necessarily whatever's active by the time the effect body executes.
@@ -107,7 +108,7 @@ export function App() {
       if (alreadyRecorded) return session;
       return {
         ...session,
-        messages: [...session.messages, { id: crypto.randomUUID(), role: "assistant", text: reply, runId }],
+        messages: [...session.messages, { id: crypto.randomUUID(), role: "assistant", text: reply, runId, reasoningText }],
       };
     });
   }, [timeline.finalState, activeSessionId]);
@@ -293,6 +294,9 @@ export function App() {
             disabled={isRunInFlight}
             status={timeline.status}
             streamingText={activeRunAlreadyCompletedLocally || timeline.finalState ? undefined : timeline.streamingText}
+            reasoningStreamingText={
+              activeRunAlreadyCompletedLocally || timeline.finalState ? undefined : timeline.reasoningStreamingText
+            }
             onApprove={handleApprove}
           />
         ) : (

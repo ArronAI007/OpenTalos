@@ -65,6 +65,10 @@ export interface ModelRequest {
 
 export type ModelResponseChunk =
   | { type: "text_delta"; textDelta: string }
+  /** A fragment of the model's reasoning/thinking trace, distinct from its final answer (e.g.
+   * Moonshot's Kimi thinking models stream this as `delta.reasoning_content`, separate from
+   * `delta.content`). Only emitted by providers/models that actually support it. */
+  | { type: "reasoning_delta"; reasoningDelta: string }
   | { type: "tool_call"; toolCall: ToolCall }
   | { type: "message_stop" };
 
@@ -130,6 +134,7 @@ export type TraceEventType =
   | "llm_call_start"
   | "llm_call_end"
   | "llm_text_delta"
+  | "llm_reasoning_delta"
   | "tool_call_start"
   | "tool_call_end"
   | "hitl_interrupt"

@@ -8,6 +8,15 @@ export function createMockProvider(): ModelProvider {
   return {
     async *complete(request, options): AsyncIterable<ModelResponseChunk> {
       const hasToolResult = request.messages.some((m) => m.role === "tool");
+      // A short, deterministic reasoning_delta ahead of every round — so MODEL_PROVIDER=mock (the
+      // whole E2E suite, and manual smoke testing without a real API key) also exercises the
+      // reasoning-display path, not just the tools/HITL path a real thinking model like Kimi K3
+      // would otherwise be the only way to see. The delay after it (like the 120ms/chunk delay
+      // below) is deliberate: without it, the "thinking" UI state is visible for well under a
+      // millisecond — long enough to be real, too short for a test (or a person) to ever observe.
+      yield { type: "reasoning_delta", reasoningDelta: "让我想想应该怎么回复……" };
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      if (options?.signal?.aborted) return;
       if (!hasToolResult && request.tools && request.tools.length > 0) {
         const tool = request.tools[0];
         const defaultInput = tool.name === "lookup_exchange_rate" ? { pair: "USD/CNY" } : { query: "test" };

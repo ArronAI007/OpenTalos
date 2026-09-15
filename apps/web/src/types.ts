@@ -21,6 +21,10 @@ export interface ChatMessage {
    * already-finished run's SSE stream replays in full (and re-delivers a fresh finalState) every
    * time it's reconnected to (e.g. on page reload), which would otherwise duplicate the reply. */
   runId?: string;
+  /** The model's reasoning/thinking trace for this reply (see ChatState.reasoningText on the
+   * backend) — only set on assistant messages, and only when the model actually produced one.
+   * Persisted alongside the message so historical turns can still expand it after a reload. */
+  reasoningText?: string;
 }
 
 export interface ChatSession {

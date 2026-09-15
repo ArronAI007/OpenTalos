@@ -4,6 +4,10 @@ import type { NodeResumeValue, NodeYield } from "@opentalos/core-graph";
 export interface AgentTurnResult {
   messages: Message[];
   finalText: string;
+  /** The model's full reasoning/thinking trace for this turn, concatenated across every
+   * tool-calling round (not just the final one) — empty string for providers/models that don't
+   * emit `reasoning_delta` chunks at all. */
+  reasoningText: string;
 }
 
 const DEFAULT_MAX_ROUNDS = 10;
@@ -27,6 +31,10 @@ export async function* runModelWithTools(
   signal?: AbortSignal,
 ): AsyncGenerator<NodeYield, AgentTurnResult, NodeResumeValue> {
   let conversation = messages;
+  // Accumulated across ALL rounds (never reset per-round, unlike assistantText below) — the
+  // model's reasoning about which tool to call is as much a part of "the agent's thinking
+  // process" as its reasoning about the final answer's wording.
+  let reasoningText = "";
   for (let round = 0; round < maxRounds; round++) {
     let assistantText = "";
     const pendingToolCalls: ToolCall[] = [];
@@ -36,6 +44,9 @@ export async function* runModelWithTools(
         if (chunk.type === "text_delta") {
           assistantText += chunk.textDelta;
           yield { type: "emit", eventType: "llm_text_delta", payload: { delta: chunk.textDelta } };
+        } else if (chunk.type === "reasoning_delta") {
+          reasoningText += chunk.reasoningDelta;
+          yield { type: "emit", eventType: "llm_reasoning_delta", payload: { delta: chunk.reasoningDelta } };
         } else if (chunk.type === "tool_call") {
           pendingToolCalls.push(chunk.toolCall);
         }
@@ -61,11 +72,11 @@ export async function* runModelWithTools(
     // never proceeds to tool dispatch even if a tool_call chunk had already arrived, per the
     // "only cancellable during model streaming" scope decision.
     if (signal?.aborted) {
-      return { messages: conversation, finalText: assistantText || "（已停止，无内容）" };
+      return { messages: conversation, finalText: assistantText || "（已停止，无内容）", reasoningText };
     }
 
     if (pendingToolCalls.length === 0) {
-      return { messages: conversation, finalText: assistantText };
+      return { messages: conversation, finalText: assistantText, reasoningText };
     }
 
     conversation = [...conversation, { role: "assistant", content: assistantText, toolCalls: pendingToolCalls }];

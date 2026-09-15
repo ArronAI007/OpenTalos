@@ -12,7 +12,7 @@ const SYSTEM_PROMPT =
 
 function buildRespondNode(modelProvider: ModelProvider, toolRegistry: ToolRegistry): NodeFn<ChatState> {
   return async function* respond(state: ChatState, ctx: NodeContext) {
-    const { finalText, messages } = yield* runModelWithTools(
+    const { finalText, messages, reasoningText } = yield* runModelWithTools(
       modelProvider,
       toolRegistry.list(),
       [
@@ -30,7 +30,7 @@ function buildRespondNode(modelProvider: ModelProvider, toolRegistry: ToolRegist
     // by which specific tool(s) were actually called.
     const calledToolNames = messages.flatMap((message) => message.toolCalls?.map((call) => call.name) ?? []);
     const requiresApproval = calledToolNames.some((name) => toolRegistry.get(name)?.definition.dangerous);
-    return { searchResult: finalText, requiresApproval };
+    return { searchResult: finalText, requiresApproval, reasoningText };
   };
 }
 
