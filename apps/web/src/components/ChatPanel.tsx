@@ -368,7 +368,9 @@ export function ChatPanel({
             disabled={disabled}
             aria-label="添加附件"
           >
-            📎
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true">
+              <path d="M12 5V19M5 12H19" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+            </svg>
           </button>
           {isStreaming && !draft.trim() && pendingAttachments.length === 0 ? (
             // Only show Stop (which cancels the whole run) while the composer is empty. The

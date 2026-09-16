@@ -822,9 +822,11 @@ body {
 
 .composer-toolbar {
   display: flex;
-  justify-content: flex-end;
+  /* Attach (+) on the far left, send/stop on the far right — the DOM order below already puts
+     .composer-attach first and .composer-send/.composer-stop last, so space-between alone spreads
+     them apart without any reordering. */
+  justify-content: space-between;
   align-items: center;
-  gap: 6px;
 }
 
 .composer-attach {
@@ -836,8 +838,7 @@ body {
   background: none;
   border: none;
   border-radius: 50%;
-  font-size: 16px;
-  line-height: 1;
+  color: var(--color-text-muted);
   cursor: pointer;
   transition: background var(--duration-fast) ease;
 }
