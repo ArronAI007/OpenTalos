@@ -78,6 +78,41 @@ describe("InMemoryCheckpointStore", () => {
     expect(loaded?.cancelRequested).toBe(true);
   });
 
+  it("requestSteer sets steerMessage on an existing checkpoint", async () => {
+    const store = new InMemoryCheckpointStore();
+    await store.save(makeCheckpoint({ runId: "run-steer" }));
+    await store.requestSteer("run-steer", "turn left instead");
+    const loaded = await store.load("run-steer");
+    expect(loaded?.steerMessage).toBe("turn left instead");
+  });
+
+  it("requestSteer on an unknown runId is a silent no-op", async () => {
+    const store = new InMemoryCheckpointStore();
+    await expect(store.requestSteer("does-not-exist", "hi")).resolves.toBeUndefined();
+  });
+
+  it("clearSteerMessage resets steerMessage back to undefined", async () => {
+    const store = new InMemoryCheckpointStore();
+    await store.save(makeCheckpoint({ runId: "run-clear-steer" }));
+    await store.requestSteer("run-clear-steer", "turn left instead");
+    await store.clearSteerMessage("run-clear-steer");
+    const loaded = await store.load("run-clear-steer");
+    expect(loaded?.steerMessage).toBeUndefined();
+  });
+
+  it("a later save() with a stale steerMessage does not clobber a concurrent requestSteer()", async () => {
+    const store = new InMemoryCheckpointStore();
+    await store.save(makeCheckpoint({ runId: "run-steer-race" }));
+    await store.requestSteer("run-steer-race", "turn left instead");
+
+    // Simulate the engine's own next node-boundary save() call, still carrying the OLD in-memory
+    // checkpoint object from before requestSteer() was called (steerMessage: undefined).
+    await store.save(makeCheckpoint({ runId: "run-steer-race", status: "running" }));
+
+    const loaded = await store.load("run-steer-race");
+    expect(loaded?.steerMessage).toBe("turn left instead");
+  });
+
   it("does not let a later, orphaned save() downgrade an already-'failed' checkpoint", async () => {
     const store = new InMemoryCheckpointStore();
     // Worker.execute()'s final-failure branch records the terminal failure first.

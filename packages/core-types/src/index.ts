@@ -111,6 +111,13 @@ export interface Checkpoint<TState = unknown> {
    * tool execution or while paused for approval has no effect until (if ever) another streaming
    * phase happens for this run. */
   cancelRequested: boolean;
+  /** A pending steering instruction the user wants spliced into the currently-generating reply —
+   * see CheckpointStore.requestSteer/clearSteerMessage and packages/scheduler's Worker (delivers
+   * it into the run's SteerChannel) and packages/sdk's runModelWithTools (consumes it). Distinct
+   * from cancelRequested: this doesn't end the run, it interrupts the current model call, appends
+   * the instruction as a new turn, and starts a fresh model call. Single-slot, not a queue: a
+   * second steer overwrites a first one that hasn't been delivered yet. */
+  steerMessage?: string;
   /** Set when the worker gives up retrying after a node throws (see Worker.execute() in
    * packages/scheduler) — the human-readable error message from the underlying failure (e.g. a
    * real model-provider API error). Only meaningful when status === "failed". */
@@ -131,6 +138,13 @@ export interface CheckpointStore {
    * the same run (last-write-wins on a full-row upsert risks silently clobbering whichever side
    * writes last). A no-op if runId doesn't exist. */
   requestCancel(runId: string): Promise<void>;
+  /** Sets steerMessage without disturbing any other field — same race-avoidance rationale as
+   * requestCancel. A no-op if runId doesn't exist. */
+  requestSteer(runId: string, message: string): Promise<void>;
+  /** Clears steerMessage back to undefined — called by the Worker immediately after delivering a
+   * pending message into the run's SteerChannel, so it isn't redelivered on the next poll tick.
+   * A no-op if runId doesn't exist. */
+  clearSteerMessage(runId: string): Promise<void>;
 }
 
 export type TraceEventType =

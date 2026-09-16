@@ -22,16 +22,18 @@ export class InMemoryCheckpointStore implements CheckpointStore {
       return;
     }
 
-    // Preserve whatever cancelRequested value is currently stored (set only by requestCancel()
-    // after the first save) rather than blindly overwriting it with the incoming checkpoint's own
-    // field. The engine calls save() with an in-memory Checkpoint object that was loaded/created
-    // once and never re-reads cancelRequested mid-run, so a full-object replace here would
-    // silently clobber a concurrent requestCancel() the moment the engine's next node-boundary
-    // save() lands. Fall back to the incoming value only when there's no existing row yet (the
-    // very first save for this runId), so a brand-new checkpoint is still seeded correctly.
+    // Preserve whatever cancelRequested/steerMessage values are currently stored (set only by
+    // requestCancel()/requestSteer() after the first save) rather than blindly overwriting them
+    // with the incoming checkpoint's own fields. The engine calls save() with an in-memory
+    // Checkpoint object that was loaded/created once and never re-reads either field mid-run, so a
+    // full-object replace here would silently clobber a concurrent requestCancel()/requestSteer()
+    // the moment the engine's next node-boundary save() lands. Fall back to the incoming value only
+    // when there's no existing row yet (the very first save for this runId), so a brand-new
+    // checkpoint is still seeded correctly.
     this.checkpoints.set(checkpoint.runId, {
       ...checkpoint,
       cancelRequested: existing ? existing.cancelRequested : checkpoint.cancelRequested,
+      steerMessage: existing ? existing.steerMessage : checkpoint.steerMessage,
     });
   }
 
@@ -50,5 +52,15 @@ export class InMemoryCheckpointStore implements CheckpointStore {
   async requestCancel(runId: string): Promise<void> {
     const checkpoint = this.checkpoints.get(runId);
     if (checkpoint) this.checkpoints.set(runId, { ...checkpoint, cancelRequested: true });
+  }
+
+  async requestSteer(runId: string, message: string): Promise<void> {
+    const checkpoint = this.checkpoints.get(runId);
+    if (checkpoint) this.checkpoints.set(runId, { ...checkpoint, steerMessage: message });
+  }
+
+  async clearSteerMessage(runId: string): Promise<void> {
+    const checkpoint = this.checkpoints.get(runId);
+    if (checkpoint) this.checkpoints.set(runId, { ...checkpoint, steerMessage: undefined });
   }
 }
