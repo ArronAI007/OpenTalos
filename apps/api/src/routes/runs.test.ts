@@ -411,6 +411,24 @@ describe("POST /runs/:runId/steer", () => {
     expect(res.statusCode).toBe(400);
   });
 
+  it("returns 400 when the message exceeds the maximum length", async () => {
+    const startRes = await app.inject({
+      method: "POST",
+      url: "/runs?sessionId=s1",
+      headers: authHeaders(),
+      payload: { message: "hello" },
+    });
+    const { runId } = startRes.json();
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/runs/${runId}/steer?sessionId=s1`,
+      headers: authHeaders(),
+      payload: { message: "a".repeat(200_001) },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
   it("returns 404 for an unknown runId", async () => {
     const res = await app.inject({
       method: "POST",

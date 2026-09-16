@@ -167,6 +167,9 @@ export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void 
       if (typeof message !== "string" || message.trim().length === 0) {
         return reply.code(400).send({ error: "message body field is required and must be a non-empty string" });
       }
+      if (message.length > MAX_MESSAGE_LENGTH) {
+        return reply.code(400).send({ error: `message must be at most ${MAX_MESSAGE_LENGTH} characters` });
+      }
       const checkpoint = await checkpointStore.load(request.params.runId);
       if (!checkpoint) {
         return reply.code(404).send({ error: `Run "${request.params.runId}" not found` });
