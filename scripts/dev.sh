@@ -5,8 +5,13 @@
 # service's port is the thing that gets signaled. This is deliberately stateless across shells —
 # no stale PID file can ever point at the wrong (or a since-recycled) process.
 #
-# worker/api are built (tsc) before every start, since they run from apps/*/dist — cheap when
-# nothing changed (turbo caches it), necessary when something did.
+# worker/api are built before every start, since they run from apps/*/dist — via `turbo run
+# build --filter`, not a bare `pnpm --filter <pkg> build`, so a package's own workspace
+# dependencies (core-types, chat-agent, a brand-new package, ...) get rebuilt first if their dist
+# is stale or missing entirely — otherwise tsc fails against whatever dist happened to already
+# exist locally (or doesn't exist at all for a package added since this checkout's last build),
+# which looks like a real compile error but is actually just a stale local build cache. Cheap when
+# nothing changed (turbo caches every package), necessary when something did.
 set -uo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -45,8 +50,8 @@ is_running() {
 
 build_service() {
 	case "$1" in
-	worker) (cd "$ROOT_DIR" && pnpm --filter @opentalos/worker build) ;;
-	api) (cd "$ROOT_DIR" && pnpm --filter @opentalos/api build) ;;
+	worker) (cd "$ROOT_DIR" && pnpm exec turbo run build --filter=@opentalos/worker) ;;
+	api) (cd "$ROOT_DIR" && pnpm exec turbo run build --filter=@opentalos/api) ;;
 	esac
 }
 
