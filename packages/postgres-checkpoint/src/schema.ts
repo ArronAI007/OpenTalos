@@ -10,6 +10,7 @@ export const checkpoints = pgTable("checkpoints", {
   pendingYields: jsonb("pending_yields").notNull(),
   status: text("status").notNull(),
   cancelRequested: boolean("cancel_requested").notNull().default(false),
+  steerMessage: text("steer_message"),
   error: text("error"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

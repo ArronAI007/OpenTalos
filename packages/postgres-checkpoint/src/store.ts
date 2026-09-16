@@ -24,6 +24,7 @@ export class PostgresCheckpointStore implements CheckpointStore {
       pendingYields: checkpoint.pendingYields,
       status: checkpoint.status,
       cancelRequested: checkpoint.cancelRequested,
+      steerMessage: checkpoint.steerMessage ?? null,
       error: checkpoint.error ?? null,
       createdAt: new Date(checkpoint.createdAt),
     };
@@ -103,11 +104,20 @@ export class PostgresCheckpointStore implements CheckpointStore {
       status: row.status as Checkpoint["status"],
       createdAt: row.createdAt.toISOString(),
       cancelRequested: row.cancelRequested,
+      steerMessage: row.steerMessage ?? undefined,
       error: row.error ?? undefined,
     };
   }
 
   async requestCancel(runId: string): Promise<void> {
     await this.db.update(checkpoints).set({ cancelRequested: true }).where(eq(checkpoints.runId, runId));
+  }
+
+  async requestSteer(runId: string, message: string): Promise<void> {
+    await this.db.update(checkpoints).set({ steerMessage: message }).where(eq(checkpoints.runId, runId));
+  }
+
+  async clearSteerMessage(runId: string): Promise<void> {
+    await this.db.update(checkpoints).set({ steerMessage: null }).where(eq(checkpoints.runId, runId));
   }
 }

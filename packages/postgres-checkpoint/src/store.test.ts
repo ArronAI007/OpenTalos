@@ -22,6 +22,7 @@ beforeAll(async () => {
       pending_yields JSONB NOT NULL,
       status TEXT NOT NULL,
       cancel_requested BOOLEAN NOT NULL DEFAULT false,
+      steer_message TEXT,
       error TEXT,
       created_at TIMESTAMPTZ NOT NULL,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -111,6 +112,37 @@ describe("PostgresCheckpointStore", () => {
 
     const loaded = await store.load("run-cancel-race-pg");
     expect(loaded?.cancelRequested).toBe(true);
+  });
+
+  it("requestSteer sets steer_message without disturbing other columns", async () => {
+    const store = new PostgresCheckpointStore(pool);
+    await store.save(makeCheckpoint({ runId: "run-steer-pg" }));
+    await store.requestSteer("run-steer-pg", "turn left instead");
+    const loaded = await store.load("run-steer-pg");
+    expect(loaded?.steerMessage).toBe("turn left instead");
+    expect(loaded?.status).toBe("running");
+  });
+
+  it("clearSteerMessage resets steer_message back to undefined", async () => {
+    const store = new PostgresCheckpointStore(pool);
+    await store.save(makeCheckpoint({ runId: "run-clear-steer-pg" }));
+    await store.requestSteer("run-clear-steer-pg", "turn left instead");
+    await store.clearSteerMessage("run-clear-steer-pg");
+    const loaded = await store.load("run-clear-steer-pg");
+    expect(loaded?.steerMessage).toBeUndefined();
+  });
+
+  it("a later save() with a stale steerMessage does not clobber a concurrent requestSteer()", async () => {
+    const store = new PostgresCheckpointStore(pool);
+    await store.save(makeCheckpoint({ runId: "run-steer-race-pg" }));
+    await store.requestSteer("run-steer-race-pg", "turn left instead");
+
+    // Simulate the engine's own next node-boundary save() call, still carrying the OLD in-memory
+    // checkpoint object from before requestSteer() flipped the DB row (steerMessage: undefined).
+    await store.save(makeCheckpoint({ runId: "run-steer-race-pg", status: "running" }));
+
+    const loaded = await store.load("run-steer-race-pg");
+    expect(loaded?.steerMessage).toBe("turn left instead");
   });
 
   it("round-trips status: 'failed' and an error message through save()/load()", async () => {

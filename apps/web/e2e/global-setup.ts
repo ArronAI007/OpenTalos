@@ -22,7 +22,7 @@ export default async function globalSetup(): Promise<void> {
       CREATE TABLE checkpoints (
         run_id TEXT PRIMARY KEY, graph_id TEXT NOT NULL, tenant_id TEXT NOT NULL, session_id TEXT NOT NULL,
         node_cursor JSONB NOT NULL, state JSONB NOT NULL, pending_yields JSONB NOT NULL, status TEXT NOT NULL,
-        cancel_requested BOOLEAN NOT NULL DEFAULT false, error TEXT,
+        cancel_requested BOOLEAN NOT NULL DEFAULT false, steer_message TEXT, error TEXT,
         created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
       );
       CREATE TABLE tasks (
