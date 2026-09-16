@@ -230,6 +230,7 @@ export function App() {
     setSidebarOpen(false);
     setActiveTab("chat");
     setError(undefined);
+    setSteerConfirmation(undefined);
   }
 
   function handleSelectSession(sessionId: string) {
@@ -237,6 +238,7 @@ export function App() {
     setSidebarOpen(false);
     setActiveTab("chat");
     setError(undefined);
+    setSteerConfirmation(undefined);
   }
 
   function handleChangeApiKey() {

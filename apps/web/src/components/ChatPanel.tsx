@@ -370,7 +370,11 @@ export function ChatPanel({
           >
             📎
           </button>
-          {isStreaming ? (
+          {isStreaming && !draft.trim() && pendingAttachments.length === 0 ? (
+            // Only show Stop (which cancels the whole run) while the composer is empty. The
+            // moment the user has something to send, switch to Send — while streaming, that
+            // steers the reply (see App.tsx's handleSteer) rather than cancelling it, so a
+            // user acting on "可发送以调整方向" must see Send, not Stop, as their next click.
             <button type="button" className="composer-stop" onClick={onStop} aria-label="停止">
               <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
                 <rect x="5" y="5" width="14" height="14" rx="2" />
