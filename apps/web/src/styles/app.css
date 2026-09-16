@@ -28,12 +28,11 @@ body {
   height: 100%;
   display: flex;
   flex-direction: column;
-  /* 960px, not 720px: on a common desktop viewport (1440px, minus the 240px sidebar) the old
-   * 720px cap left ~240px of empty space on each side of the centered content; 960px roughly
-   * halves that. */
-  max-width: 960px;
-  margin: 0 auto;
-  padding: var(--space-lg);
+  /* No width cap or horizontal padding here: each child below (.app-header, .message-list, the
+   * composer, ...) applies --content-inline-padding itself instead, so .message-list can span
+   * this element's FULL width and its scrollbar sits flush against the true right edge, instead
+   * of being inset by a width cap + auto-margin here the way an outer max-width would force. */
+  padding: var(--space-lg) 0;
   box-sizing: border-box;
   overflow: hidden;
 }
@@ -42,6 +41,7 @@ body {
   display: flex;
   align-items: flex-start;
   gap: var(--space-sm);
+  padding-inline: var(--content-inline-padding);
   margin-bottom: var(--space-md);
 }
 
@@ -547,6 +547,7 @@ body {
   justify-content: center;
   text-align: center;
   gap: 6px;
+  padding-inline: var(--content-inline-padding);
 }
 
 .chat-empty-title {
@@ -564,7 +565,11 @@ body {
 .message-list {
   list-style: none;
   margin: 0;
-  padding: 0 0 var(--space-sm) 0;
+  /* Spans .chat-panel's FULL width (unlike every other child here, which uses padding/margin-inline
+   * to stay visually centered) so its scrollbar sits flush against the true right edge — its own
+   * padding-inline recreates the same centered column for its actual content instead. */
+  padding-block: 0 var(--space-sm);
+  padding-inline: var(--content-inline-padding);
   display: flex;
   flex-direction: column;
   gap: var(--space-sm);
@@ -772,6 +777,7 @@ body {
 .chat-error {
   color: var(--color-danger-text);
   font-size: 13px;
+  padding-inline: var(--content-inline-padding);
 }
 
 .chat-approval {
@@ -796,6 +802,10 @@ body {
   border: 0.5px solid var(--color-border);
   border-radius: var(--radius-md);
   padding: 10px 12px 8px;
+  /* margin, not padding: the composer is a bordered "pill" box (unlike .message-list, which has
+   * no visible box) — margin-inline keeps its outer width/position matching the centered content
+   * column without changing its own internal padding. */
+  margin-inline: var(--content-inline-padding);
 }
 
 .composer-input {
@@ -864,6 +874,7 @@ body {
   gap: var(--space-sm);
   margin: 0 0 var(--space-sm);
   padding: 0;
+  padding-inline: var(--content-inline-padding);
 }
 
 .attachment-chip {
@@ -1016,6 +1027,7 @@ body {
 
 .composer-status {
   margin: var(--space-sm) 0 0 0;
+  padding-inline: var(--content-inline-padding);
   text-align: center;
   font-size: 11px;
   color: var(--color-text-muted);
@@ -1030,6 +1042,9 @@ body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  /* Same reasoning as .message-list: spans .app-main's full width so its scrollbar sits flush
+   * against the true right edge, with its own padding-inline recreating the centered column. */
+  padding-inline: var(--content-inline-padding);
 }
 
 .trace-empty {

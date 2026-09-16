@@ -40,6 +40,12 @@
   --duration-fast: 150ms;
   --duration-normal: 300ms;
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --content-max-width: 960px;
+  /* Used by .app-main's children (header, message list, composer, ...) to each independently
+   * center themselves within a --content-max-width column, while .app-main itself stays full
+   * width — this is what lets .message-list span the full available width (so its scrollbar sits
+   * flush against the true right edge) while its actual message content still looks centered. */
+  --content-inline-padding: max(var(--space-lg), calc((100% - var(--content-max-width)) / 2));
 }
 
 @media (prefers-color-scheme: dark) {
