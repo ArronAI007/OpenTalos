@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { startRun, resumeRun, cancelRun, steerRun, getApiKey, clearApiKey, ApiAuthError } from "./api.js";
 import { useRunEvents } from "./hooks/useRunEvents.js";
 import { useRunHistory } from "./hooks/useRunHistory.js";
@@ -62,6 +62,16 @@ export function App() {
     activeSession.runId !== undefined &&
     !timeline.connectionError &&
     timeline.status === "paused";
+  // Broader than hasPausedRun: true for "running" too, not just "paused". Used ONLY to gate the
+  // follow-up drain effect below — it must wait for a drained item's own run to reach an actual
+  // terminal state (done/failed), not just stop being paused, before advancing to the next queued
+  // item. Draining on hasPausedRun alone would advance the moment a drained item's run becomes
+  // "running" (before its own eventual pause/approval even happens), racing two sends at once.
+  const hasActiveRun =
+    !activeRunAlreadyCompletedLocally &&
+    activeSession.runId !== undefined &&
+    !timeline.connectionError &&
+    (timeline.status === "running" || timeline.status === "paused");
 
   // Every past run's trace is durably persisted server-side, but ChatSession only ever tracks its
   // most recent runId (needed for resume/approve) — so without this, switching turns or reloading
@@ -141,14 +151,27 @@ export function App() {
     updateSession(activeSessionId, (session) => ({ ...session, runId: undefined }));
   }, [timeline.runNotFound, activeSessionId]);
 
+  // Draining strictly one queued follow-up at a time: `isDrainingFollowUp` blocks the drain effect
+  // below from dequeuing a second item while an earlier drained item's OWN run is still going.
+  // Gating only on hasPausedRun (i.e. "not currently paused") is not enough: the moment a drained
+  // item's handleSend() starts its run, status flips to "running" (not "paused"), which would let
+  // this effect immediately dequeue and send the NEXT item too — racing two sends before the first
+  // one has even reached its own pause/approval, let alone finished. hasActiveRun (running OR
+  // paused) is the real "still busy" signal, so the ref is only released once that goes back to
+  // false — i.e. the drained item's run has actually reached a terminal state.
+  const isDrainingFollowUp = useRef(false);
   useEffect(() => {
-    if (hasPausedRun) return;
+    if (!hasActiveRun) isDrainingFollowUp.current = false;
+  }, [hasActiveRun]);
+  useEffect(() => {
+    if (hasActiveRun || isDrainingFollowUp.current) return;
     const pending = activeSession.pendingFollowUps;
     if (!pending || pending.length === 0) return;
     const [next, ...rest] = pending;
+    isDrainingFollowUp.current = true;
     updateSession(activeSessionId, (session) => ({ ...session, pendingFollowUps: rest }));
-    void handleSend({ modelText: next, displayText: next });
-  }, [hasPausedRun, activeSessionId, activeSession.pendingFollowUps]);
+    void handleSend(next);
+  }, [hasActiveRun, activeSessionId, activeSession.pendingFollowUps]);
 
   useEffect(() => {
     if (timeline.runError) {
@@ -164,10 +187,11 @@ export function App() {
     if (hasPausedRun) {
       // Nothing to steer while paused (the model already produced this turn's output and is just
       // waiting on a human approval click) — queue this message and let the drain effect below
-      // send it once the run reaches a terminal state.
+      // send it once the run is no longer paused. Store the full message (not just modelText) so
+      // images/textAttachments and the separate display text survive the wait.
       updateSession(activeSessionId, (session) => ({
         ...session,
-        pendingFollowUps: [...(session.pendingFollowUps ?? []), modelText],
+        pendingFollowUps: [...(session.pendingFollowUps ?? []), { modelText, displayText, images, textAttachments }],
       }));
       return;
     }

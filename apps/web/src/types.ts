@@ -53,7 +53,10 @@ export interface ChatSession {
   runId?: string;
   /** Messages sent while a run was in flight but not steerable (status "paused" — the model has
    * already produced this turn's output and is just waiting on a human approval click, so there's
-   * nothing to redirect; see App.tsx's handleSend). Drained in order, one at a time, once the run
-   * reaches a terminal state. */
-  pendingFollowUps?: string[];
+   * nothing to redirect; see App.tsx's handleSend). Stores the full OutgoingChatMessage (not just
+   * the model text) so a queued message's images/textAttachments and its separate display text
+   * survive the wait instead of being silently dropped or garbled once sent. Drained strictly one
+   * at a time: the drain effect (App.tsx) waits for each drained item's own run to reach a
+   * terminal state (done/failed) before dequeuing the next one. */
+  pendingFollowUps?: OutgoingChatMessage[];
 }

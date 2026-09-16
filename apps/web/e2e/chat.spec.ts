@@ -156,6 +156,51 @@ test("sending a message while paused for approval queues it as a follow-up, sent
   await expect(queuedBubble).toBeVisible({ timeout: 10_000 });
 });
 
+test("multiple messages queued while paused drain strictly one at a time, in order", async ({ page }) => {
+  // Regression coverage for a race found in code review: dequeuing item N used to re-trigger the
+  // drain effect before item N's own send had settled, so item N+1 could start concurrently
+  // instead of waiting for item N's own run (and, here, its own pause) to resolve first.
+  await page.goto("/");
+
+  const chatInput = page.getByPlaceholder("给智能体发消息");
+  const sendButton = page.getByRole("button", { name: "发送" });
+  await chatInput.fill("今天美元兑人民币汇率是多少？");
+  await sendButton.click();
+
+  await page.getByRole("button", { name: /轨迹/ }).click();
+  const approveButton = page.getByRole("button", { name: "✓ 批准" });
+  await expect(approveButton).toBeVisible({ timeout: 10_000 });
+  await page.getByRole("button", { name: "对话", exact: true }).click();
+
+  await expect(chatInput).toBeEnabled();
+  await chatInput.fill("排队消息一");
+  await sendButton.click();
+  await chatInput.fill("排队消息二");
+  await sendButton.click();
+
+  const bubbleOne = page.locator("li.message-user", { hasText: "排队消息一" });
+  const bubbleTwo = page.locator("li.message-user", { hasText: "排队消息二" });
+  await expect(bubbleOne).not.toBeVisible();
+  await expect(bubbleTwo).not.toBeVisible();
+
+  // Approve the original pause -- this drains queued message #1, which (via the mock provider's
+  // tool call) pauses again itself. #2 must NOT be sent yet: it's still waiting behind #1.
+  await page.getByRole("button", { name: /轨迹/ }).click();
+  await approveButton.click();
+  await page.getByRole("button", { name: "对话", exact: true }).click();
+
+  await expect(bubbleOne).toBeVisible({ timeout: 10_000 });
+  await expect(bubbleTwo).not.toBeVisible();
+
+  // Approve message #1's own pause -- only now should #2 finally drain and get sent.
+  await page.getByRole("button", { name: /轨迹/ }).click();
+  await expect(approveButton).toBeVisible({ timeout: 10_000 });
+  await approveButton.click();
+  await page.getByRole("button", { name: "对话", exact: true }).click();
+
+  await expect(bubbleTwo).toBeVisible({ timeout: 10_000 });
+});
+
 test("attaching an image previews it, sends it with the message, and shows it in the sent bubble", async ({ page }) => {
   // A minimal valid 1x1 transparent PNG — small enough to stay well under every size cap this
   // feature enforces, real enough for the browser to actually decode and render as an <img>.
