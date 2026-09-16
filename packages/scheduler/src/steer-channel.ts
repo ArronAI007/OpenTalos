@@ -7,7 +7,12 @@ import type { SteerChannel } from "@opentalos/core-graph";
  * resumed with the tool result, so a steer arriving in exactly that window must not be lost; it's
  * picked up by the next waitForNext() call instead (see the design spec's non-goal: a steer that
  * arrives mid-tool-execution is applied at the start of the next round, with no special-casing
- * needed as a direct result of this buffering). */
+ * needed as a direct result of this buffering).
+ *
+ * Supports only ONE in-flight waitForNext() call at a time, matching how it's actually used (a
+ * single node awaiting the next steer). A second waitForNext() call before the first has resolved
+ * overwrites `resolver`, so the first caller's promise never resolves — there is no fan-out to
+ * multiple concurrent waiters. */
 export class SteerChannelImpl implements SteerChannel {
   private pendingMessage: string | undefined;
   private resolver: ((message: string) => void) | undefined;
