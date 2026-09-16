@@ -159,6 +159,11 @@ export function App() {
   // one has even reached its own pause/approval, let alone finished. hasActiveRun (running OR
   // paused) is the real "still busy" signal, so the ref is only released once that goes back to
   // false — i.e. the drained item's run has actually reached a terminal state.
+  // If a drained item's own send FAILS (e.g. startRun rejects), hasActiveRun never becomes true in
+  // the first place, so it can never transition back to false to release the guard above via the
+  // effect below — bumping this forces the drain effect to re-check regardless. Only used on the
+  // failure path; the success path relies purely on hasActiveRun's real transition (see above).
+  const [drainRetryTick, setDrainRetryTick] = useState(0);
   const isDrainingFollowUp = useRef(false);
   useEffect(() => {
     if (!hasActiveRun) isDrainingFollowUp.current = false;
@@ -170,8 +175,13 @@ export function App() {
     const [next, ...rest] = pending;
     isDrainingFollowUp.current = true;
     updateSession(activeSessionId, (session) => ({ ...session, pendingFollowUps: rest }));
-    void handleSend(next);
-  }, [hasActiveRun, activeSessionId, activeSession.pendingFollowUps]);
+    void handleSend(next).then((succeeded) => {
+      if (!succeeded) {
+        isDrainingFollowUp.current = false;
+        setDrainRetryTick((tick) => tick + 1);
+      }
+    });
+  }, [hasActiveRun, activeSessionId, activeSession.pendingFollowUps, drainRetryTick]);
 
   useEffect(() => {
     if (timeline.runError) {
@@ -179,10 +189,15 @@ export function App() {
     }
   }, [timeline.runError]);
 
-  async function handleSend({ modelText, displayText, images, textAttachments }: OutgoingChatMessage) {
+  // Returns whether the message actually resulted in an active run (started, or steered into an
+  // already-active one) — false on failure. The follow-up drain effect uses this to tell "send
+  // failed, nothing is now active" apart from "send succeeded, hasActiveRun will flip true then
+  // false on its own" — without it, a failed drained send would leave the drain guard stuck
+  // forever, since hasActiveRun would never transition to unblock it (see that effect's comment).
+  async function handleSend({ modelText, displayText, images, textAttachments }: OutgoingChatMessage): Promise<boolean> {
     if (timeline.status === "running" && activeSession.runId) {
       await handleSteer(modelText);
-      return;
+      return true;
     }
     if (hasPausedRun) {
       // Nothing to steer while paused (the model already produced this turn's output and is just
@@ -193,7 +208,7 @@ export function App() {
         ...session,
         pendingFollowUps: [...(session.pendingFollowUps ?? []), { modelText, displayText, images, textAttachments }],
       }));
-      return;
+      return true;
     }
     const sessionId = activeSessionId;
     const messageId = crypto.randomUUID();
@@ -211,13 +226,15 @@ export function App() {
         ),
       }));
       setError(undefined);
+      return true;
     } catch (err) {
       if (err instanceof ApiAuthError) {
         setHasApiKey(false);
         setAuthError("密钥无效或已被吊销，请重新输入");
-        return;
+        return false;
       }
       setError("发送失败，请重试");
+      return false;
     }
   }
 

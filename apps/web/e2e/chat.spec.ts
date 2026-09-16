@@ -201,6 +201,48 @@ test("multiple messages queued while paused drain strictly one at a time, in ord
   await expect(bubbleTwo).toBeVisible({ timeout: 10_000 });
 });
 
+test("a drained follow-up that fails to send doesn't permanently stick the queue", async ({ page }) => {
+  // Regression coverage: the drain effect's re-entrancy guard used to be released only once
+  // hasActiveRun transitioned true->false -- which never happens if a drained item's own startRun
+  // call fails (no run ever becomes active), leaving the guard stuck forever and freezing every
+  // later queued item. handleSend now reports success/failure so the drain effect can release the
+  // guard immediately on failure too.
+  await page.goto("/");
+
+  const chatInput = page.getByPlaceholder("给智能体发消息");
+  const sendButton = page.getByRole("button", { name: "发送" });
+  await chatInput.fill("今天美元兑人民币汇率是多少？");
+  await sendButton.click();
+
+  await page.getByRole("button", { name: /轨迹/ }).click();
+  const approveButton = page.getByRole("button", { name: "✓ 批准" });
+  await expect(approveButton).toBeVisible({ timeout: 10_000 });
+  await page.getByRole("button", { name: "对话", exact: true }).click();
+
+  await expect(chatInput).toBeEnabled();
+  await chatInput.fill("会发送失败的排队消息");
+  await sendButton.click();
+  await chatInput.fill("应该仍能送达的排队消息");
+  await sendButton.click();
+
+  // Fail only the NEXT POST /runs -- i.e. the first queued item's own startRun call once drained
+  // (the original message's startRun already completed before this route is registered).
+  let postCount = 0;
+  await page.route("**/runs?*", (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    postCount += 1;
+    if (postCount === 1) return route.fulfill({ status: 500, body: "{}" });
+    return route.continue();
+  });
+
+  await page.getByRole("button", { name: /轨迹/ }).click();
+  await approveButton.click();
+  await page.getByRole("button", { name: "对话", exact: true }).click();
+
+  const secondBubble = page.locator("li.message-user", { hasText: "应该仍能送达的排队消息" });
+  await expect(secondBubble).toBeVisible({ timeout: 10_000 });
+});
+
 test("attaching an image previews it, sends it with the message, and shows it in the sent bubble", async ({ page }) => {
   // A minimal valid 1x1 transparent PNG — small enough to stay well under every size cap this
   // feature enforces, real enough for the browser to actually decode and render as an <img>.
