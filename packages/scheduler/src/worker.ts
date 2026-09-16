@@ -6,6 +6,7 @@ import type { PostgresCheckpointStore } from "@opentalos/postgres-checkpoint";
 import { buildEngine } from "./build-engine.js";
 import type { GraphRegistry } from "./graph-registry.js";
 import { tasks } from "./schema.js";
+import { SteerChannelImpl } from "./steer-channel.js";
 
 type TaskRow = typeof tasks.$inferSelect;
 
@@ -188,6 +189,7 @@ export class Worker {
     // finally) indefinitely for a genuinely hung task, leaking the interval forever — and worse,
     // execute()'s retry would start a second runTask() call on top, leaking a second interval.
     const controller = new AbortController();
+    const steerChannel = new SteerChannelImpl();
     let checkingCancel = false;
     const cancelPoll = setInterval(() => {
       if (controller.signal.aborted) {
@@ -200,8 +202,12 @@ export class Worker {
       checkingCancel = true;
       this.checkpointStore
         .load(task.runId)
-        .then((latest) => {
+        .then(async (latest) => {
           if (latest?.cancelRequested) controller.abort();
+          if (latest?.steerMessage) {
+            steerChannel.deliver(latest.steerMessage);
+            await this.checkpointStore.clearSteerMessage(task.runId);
+          }
         })
         .catch(() => {
           // Best-effort: a transient DB error here just means this tick doesn't check; the next
@@ -226,14 +232,14 @@ export class Worker {
       }, task.timeoutMs);
     });
     try {
-      await Promise.race([this.runTask(task, controller), timeout]);
+      await Promise.race([this.runTask(task, controller, steerChannel), timeout]);
     } finally {
       if (timer) clearTimeout(timer);
       clearInterval(cancelPoll);
     }
   }
 
-  private async runTask(task: TaskRow, controller: AbortController): Promise<void> {
+  private async runTask(task: TaskRow, controller: AbortController, steer: SteerChannelImpl): Promise<void> {
     const engine = buildEngine(this.registry, this.checkpointStore, task.graphId);
 
     const checkpoint = await this.checkpointStore.load(task.runId);
@@ -252,10 +258,13 @@ export class Worker {
     // destroying the real error and getting the run permanently stuck. See Fix 1 in the
     // post-review notes for the full failure mode.
     if (task.kind === "resume" && checkpoint.status === "paused") {
-      await engine.resumeFromCheckpoint(checkpoint, task.resumeValue as NodeResumeValue, { signal: controller.signal });
+      await engine.resumeFromCheckpoint(checkpoint, task.resumeValue as NodeResumeValue, {
+        signal: controller.signal,
+        steer,
+      });
       return;
     }
-    await engine.run(checkpoint, { signal: controller.signal });
+    await engine.run(checkpoint, { signal: controller.signal, steer });
   }
 }
 

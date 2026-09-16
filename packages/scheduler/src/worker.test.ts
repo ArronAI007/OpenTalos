@@ -441,4 +441,41 @@ describe("Worker", () => {
     expect(checkpoint?.status).toBe("failed");
     expect(checkpoint?.error).toContain("timed out");
   });
+
+  it("delivers a pending steerMessage into the run's SteerChannel, then clears it, without ending the run", async () => {
+    // Uses a graph whose single node reads ctx.steer and returns once a message arrives, proving
+    // both that Worker actually threads a SteerChannel through to engine.run()/resumeFromCheckpoint()
+    // and that it polls+delivers+clears steerMessage the same way it already does for cancelRequested.
+    const steerRegistry = new GraphRegistry();
+    const waitForSteer: NodeFn<{ received?: string }> = async function* (_state, ctx) {
+      const message = await ctx.steer!.waitForNext();
+      return { received: message };
+    };
+    const steerableGraph: GraphDefinition<{ received?: string }> = {
+      id: "steerable",
+      entryNode: "a",
+      nodes: { a: waitForSteer },
+      edges: [],
+      reducer: shallowMergeReducer,
+    };
+    steerRegistry.register("steerable", { buildGraph: () => steerableGraph, buildDeps: makeDeps });
+
+    const steerScheduler = new Scheduler(testDb.pool, steerRegistry, checkpointStore);
+    const worker = new Worker(testDb.pool, steerRegistry, checkpointStore, { globalConcurrency: 5, tenantConcurrency: 5 });
+
+    await steerScheduler.enqueueStart("steerable", {}, { tenantId: "tenant-a", sessionId: "s1" }, "worker-steer-run-1");
+
+    // requestSteer BEFORE pollOnce() claims the task, so the Worker's very first poll tick (500ms
+    // into runWithTimeout) finds it already pending -- avoids a timing race in this test.
+    await checkpointStore.requestSteer("worker-steer-run-1", "turn left instead");
+
+    await worker.pollOnce();
+    // The poll interval is 500ms; give it two ticks' worth of margin.
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+
+    const checkpoint = await checkpointStore.load("worker-steer-run-1");
+    expect(checkpoint?.status).toBe("done");
+    expect((checkpoint?.state as { received?: string })?.received).toBe("turn left instead");
+    expect(checkpoint?.steerMessage).toBeUndefined();
+  }, 10_000);
 });
