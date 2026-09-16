@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ModelProvider, ModelResponseChunk, ToolDefinition } from "@opentalos/core-types";
-import type { NodeResumeValue, NodeYield } from "@opentalos/core-graph";
+import type { NodeResumeValue, NodeYield, SteerChannel } from "@opentalos/core-graph";
 import { runModelWithTools, type AgentTurnResult } from "./run-model-with-tools.js";
 
 function scriptedProvider(responses: ModelResponseChunk[][]): ModelProvider {
@@ -165,6 +165,78 @@ describe("runModelWithTools", () => {
     const gen = runModelWithTools(provider, tools, [{ role: "user", content: "hi" }]);
     const result = await drive(gen, {});
     expect(result.reasoningText).toBe("");
+  });
+
+  it("splices a steering instruction into the conversation and starts a fresh round, without ending the turn", async () => {
+    let callIndex = 0;
+    const provider: ModelProvider = {
+      async *complete() {
+        callIndex += 1;
+        if (callIndex === 1) {
+          // First round: stream some text, then hang forever (simulating an in-progress reply) —
+          // this round must never reach message_stop on its own; only the steer interrupt ends it.
+          yield { type: "text_delta", textDelta: "快速排序是一种" };
+          await new Promise(() => {}); // never resolves
+        } else {
+          yield { type: "text_delta", textDelta: "好的，用 Python 实现快速排序" };
+          yield { type: "message_stop" };
+        }
+      },
+    };
+    let deliverSteer: ((message: string) => void) | undefined;
+    const steer: SteerChannel = {
+      waitForNext: () => new Promise((resolve) => { deliverSteer = resolve; }),
+    };
+
+    const gen = runModelWithTools(provider, tools, [{ role: "user", content: "帮我写一个排序算法" }], undefined, undefined, steer);
+    // Drive past the first round's llm_call_start + first text_delta, then steer.
+    let next = await gen.next();
+    while (next.value?.type === "emit" && next.value.eventType !== "llm_text_delta") {
+      next = await gen.next(undefined);
+    }
+    // The first text_delta ("快速排序是一种") has now been emitted. Steer before round 1 ever ends.
+    expect(deliverSteer).toBeDefined();
+    deliverSteer!("用 Python 写");
+
+    while (!next.done) {
+      next = await gen.next(undefined);
+    }
+
+    expect(next.value.finalText).toBe("好的，用 Python 实现快速排序");
+    const roles = next.value.messages.map((m) => m.role);
+    expect(roles).toEqual(["user", "assistant", "user"]);
+    expect(next.value.messages[1]).toEqual({ role: "assistant", content: "快速排序是一种" });
+    expect(next.value.messages[2]).toEqual({
+      role: "user",
+      content: "（用户在你刚才的回答过程中补充了新的指示，请据此调整）：用 Python 写",
+    });
+  });
+
+  it("a real cancel (signal) still ends the turn exactly as before, even when a steer channel is also provided but never used", async () => {
+    const controller = new AbortController();
+    const provider: ModelProvider = {
+      async *complete(_request, options) {
+        yield { type: "text_delta", textDelta: "par" };
+        controller.abort();
+        if (options?.signal?.aborted) return;
+        yield { type: "text_delta", textDelta: "tial" };
+      },
+    };
+    const neverSteers: SteerChannel = { waitForNext: () => new Promise(() => {}) };
+    const gen = runModelWithTools(
+      provider,
+      tools,
+      [{ role: "user", content: "hi" }],
+      undefined,
+      controller.signal,
+      neverSteers,
+    );
+    let next = await gen.next();
+    while (!next.done) {
+      if (next.value.type !== "emit") throw new Error(`Unexpected yield type: ${next.value.type}`);
+      next = await gen.next(undefined);
+    }
+    expect(next.value.finalText).toBe("par");
   });
 
   it("throws once maxRounds is exceeded when the model never stops requesting tools", async () => {

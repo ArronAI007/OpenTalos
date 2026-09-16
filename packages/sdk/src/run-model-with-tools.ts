@@ -1,5 +1,5 @@
 import type { Message, ModelProvider, ToolCall, ToolDefinition } from "@opentalos/core-types";
-import type { NodeResumeValue, NodeYield } from "@opentalos/core-graph";
+import type { NodeResumeValue, NodeYield, SteerChannel } from "@opentalos/core-graph";
 
 export interface AgentTurnResult {
   messages: Message[];
@@ -12,6 +12,12 @@ export interface AgentTurnResult {
 
 const DEFAULT_MAX_ROUNDS = 10;
 
+/** Wraps a steering instruction the same way for every splice site, so the model can reliably
+ * tell "the user redirected me mid-reply" apart from an ordinary new conversational turn. */
+function frameSteerMessage(message: string): string {
+  return `（用户在你刚才的回答过程中补充了新的指示，请据此调整）：${message}`;
+}
+
 /**
  * Runs a model-completion + tool-call loop, delegatable via `yield*` from inside a graph node.
  * `GraphEngine` auto-resolves every `awaiting_tool` yield through the tool registry (no human
@@ -22,6 +28,12 @@ const DEFAULT_MAX_ROUNDS = 10;
  * exists because nothing else in this codebase currently caps a runaway tool-calling loop (a
  * real, not hypothetical, LLM failure mode): without it, a model stuck repeatedly requesting
  * tools would hold a worker's concurrency slot forever.
+ *
+ * `steer` (optional): when provided, a steering instruction delivered while THIS round's model
+ * call is still streaming interrupts only that call (never `signal`, the real-cancel path) and
+ * splices the partial reply + the instruction into `conversation` before starting a fresh round.
+ * A steer delivered between rounds (e.g. during tool execution) is picked up the next time this
+ * round loop starts waiting again, with no special-casing needed — see runModelWithTools.test.ts.
  */
 export async function* runModelWithTools(
   provider: ModelProvider,
@@ -29,6 +41,7 @@ export async function* runModelWithTools(
   messages: Message[],
   maxRounds: number = DEFAULT_MAX_ROUNDS,
   signal?: AbortSignal,
+  steer?: SteerChannel,
 ): AsyncGenerator<NodeYield, AgentTurnResult, NodeResumeValue> {
   let conversation = messages;
   // Accumulated across ALL rounds (never reset per-round, unlike assistantText below) — the
@@ -39,8 +52,55 @@ export async function* runModelWithTools(
     let assistantText = "";
     const pendingToolCalls: ToolCall[] = [];
     yield { type: "emit", eventType: "llm_call_start" };
+
+    // A steer controller scoped to THIS round only, never reused across rounds and never the same
+    // object as `signal` (real cancel). AbortSignals are one-shot: reusing one across rounds would
+    // permanently prevent every subsequent round's model call from ever starting again once
+    // steering fired once. Combined with `signal` (if present) so either one can interrupt the
+    // in-flight HTTP call; recomputed fresh every round so a steer-triggered abort this round has
+    // zero effect on next round's (brand new) combined signal.
+    const roundSteerController = steer ? new AbortController() : undefined;
+    const combinedSignal =
+      signal && roundSteerController
+        ? AbortSignal.any([signal, roundSteerController.signal])
+        : (roundSteerController?.signal ?? signal);
+
+    let steeredMessage: string | undefined;
     try {
-      for await (const chunk of provider.complete({ messages: conversation, tools }, { signal })) {
+      const providerIterator = provider
+        .complete({ messages: conversation, tools }, { signal: combinedSignal })
+        [Symbol.asyncIterator]();
+      // A promise that never settles, used as the "no steer channel provided" side of the race
+      // below so Promise.race always has exactly two real contenders when steer is undefined too.
+      const neverSteers = new Promise<never>(() => {});
+      // Subscribed exactly ONCE per round, then raced against every chunk that arrives during
+      // this round — NOT re-subscribed per chunk. `waitForNext()` hands back a single promise for
+      // "the next steer message, whenever it arrives"; calling it again before that promise
+      // settles would abandon the original subscription (any channel implementation that resolves
+      // a fresh promise per call, like the test double here, would silently drop a steer delivered
+      // in the gap between two chunks — see runModelWithTools.test.ts's steering test, which hangs
+      // if this is re-subscribed inside the loop below).
+      const steerPromise = (steer?.waitForNext() ?? neverSteers).then((message) => ({
+        kind: "steer" as const,
+        message,
+      }));
+      while (true) {
+        // Kept as a named reference (not inlined into Promise.race's array) so the LOSING one can
+        // be explicitly silenced below: Promise.race never cancels its losing input, so when steer
+        // wins, the still-pending chunk fetch eventually settles on its own — usually rejecting,
+        // since `roundSteerController.abort()` (below) is what makes it settle at all. Without a
+        // .catch() on that specific abandoned promise, that later rejection is unobserved by
+        // anything and surfaces as an unhandled promise rejection.
+        const chunkPromise = providerIterator.next().then((result) => ({ kind: "chunk" as const, result }));
+        const winner = await Promise.race([chunkPromise, steerPromise]);
+        if (winner.kind === "steer") {
+          steeredMessage = winner.message;
+          roundSteerController?.abort();
+          chunkPromise.catch(() => {});
+          break;
+        }
+        if (winner.result.done) break;
+        const chunk = winner.result.value;
         if (chunk.type === "text_delta") {
           assistantText += chunk.textDelta;
           yield { type: "emit", eventType: "llm_text_delta", payload: { delta: chunk.textDelta } };
@@ -56,8 +116,8 @@ export async function* runModelWithTools(
       // through the stream — not a real failure, so it's treated exactly like the model
       // finishing early with whatever text had already streamed in. A non-abort error (a real
       // network failure, a malformed response, etc.) must still propagate: only swallow the
-      // throw when it's actually the signal that fired, not merely correlated with one existing.
-      if (!signal?.aborted) throw error;
+      // throw when it's actually a signal that fired, not merely correlated with one existing.
+      if (!combinedSignal?.aborted) throw error;
     }
     yield {
       type: "emit",
@@ -67,6 +127,15 @@ export async function* runModelWithTools(
       // replying, how many) is exactly what someone reviewing the trace wants to see here.
       payload: { text: assistantText, toolCallCount: pendingToolCalls.length },
     };
+
+    if (steeredMessage !== undefined) {
+      conversation = [
+        ...conversation,
+        ...(assistantText ? [{ role: "assistant" as const, content: assistantText }] : []),
+        { role: "user" as const, content: frameSteerMessage(steeredMessage) },
+      ];
+      continue;
+    }
 
     // A cancelled turn is treated exactly like the model finishing early with no tool calls —
     // never proceeds to tool dispatch even if a tool_call chunk had already arrived, per the
