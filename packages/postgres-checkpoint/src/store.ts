@@ -33,14 +33,15 @@ export class PostgresCheckpointStore implements CheckpointStore {
       .values(values)
       .onConflictDoUpdate({
         target: checkpoints.runId,
-        // cancelRequested is deliberately NOT included here: the engine calls save() with
-        // whatever in-memory Checkpoint object it's holding, which was loaded/created once and
-        // never re-reads cancelRequested mid-run (it's opaque to the engine). If an UPDATE here
-        // wrote values.cancelRequested on every save, a concurrent requestCancel() (a targeted
-        // UPDATE, not routed through save() for exactly this reason) could be silently clobbered
-        // back to the save()'s stale value the moment the engine's next node-boundary save lands.
-        // requestCancel() must be the only writer of this column after the initial INSERT above
-        // (which correctly seeds it from whatever start() set, i.e. false).
+        // cancelRequested and steerMessage are deliberately NOT included here: the engine calls
+        // save() with whatever in-memory Checkpoint object it's holding, which was loaded/created
+        // once and never re-reads either field mid-run (both are opaque to the engine). If an
+        // UPDATE here wrote values.cancelRequested/values.steerMessage on every save, a concurrent
+        // requestCancel()/requestSteer() (each a targeted UPDATE, not routed through save() for
+        // exactly this reason) could be silently clobbered back to the save()'s stale value the
+        // moment the engine's next node-boundary save lands. requestCancel()/requestSteer() must
+        // be the only writers of these columns after the initial INSERT above (which correctly
+        // seeds cancelRequested from whatever start() set, i.e. false, and steerMessage as null).
         set: {
           graphId: values.graphId,
           tenantId: values.tenantId,
