@@ -160,6 +160,46 @@ describe("chat agent", () => {
     expect(eventTypes).toContain("llm_reasoning_delta");
   });
 
+  it("forwards ctx.steer through to the model provider, letting a mid-reply steer redirect the final answer", async () => {
+    const toolRegistry = createChatAgentToolRegistry();
+    const eventBus = new InMemoryEventBus();
+    const checkpointStore = new InMemoryCheckpointStore();
+    let callIndex = 0;
+    const modelProvider: ModelProvider = {
+      async *complete() {
+        callIndex += 1;
+        if (callIndex === 1) {
+          yield { type: "text_delta", textDelta: "快速排序是一种" };
+          await new Promise(() => {});
+        } else {
+          yield { type: "text_delta", textDelta: "好的，用 Python 实现" };
+          yield { type: "message_stop" };
+        }
+      },
+    };
+    const engine = new GraphEngine<ChatState>(buildChatAgentGraph(modelProvider, toolRegistry), {
+      toolRegistry,
+      eventBus,
+      checkpointStore,
+    });
+
+    let deliverSteer: ((message: string) => void) | undefined;
+    const steer = { waitForNext: () => new Promise<string>((resolve) => { deliverSteer = resolve; }) };
+
+    const initialState: ChatState = { message: "帮我写一个排序算法" };
+    const runPromise = engine.run(engine.start(initialState, { tenantId: "tenant-a", sessionId: "session-steer" }, "run-steer-1"), {
+      steer,
+    });
+    // Give the respond node a tick to start streaming and begin racing ctx.steer.waitForNext().
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(deliverSteer).toBeDefined();
+    deliverSteer!("用 Python 写");
+
+    const checkpoint = await runPromise;
+    expect(checkpoint.status).toBe("done");
+    expect(checkpoint.state.reply).toBe("好的，用 Python 实现");
+  });
+
   it("forwards the user's image attachments to the model provider on the initial user message", async () => {
     const toolRegistry = createChatAgentToolRegistry();
     const eventBus = new InMemoryEventBus();

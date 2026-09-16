@@ -22,6 +22,7 @@ function buildRespondNode(modelProvider: ModelProvider, toolRegistry: ToolRegist
       ],
       undefined,
       ctx.signal,
+      ctx.steer,
     );
     // Only turns that called a tool explicitly marked `dangerous` in its own ToolDefinition (see
     // core-types.ts) go through human approval before their result is sent — an ordinary read-only
