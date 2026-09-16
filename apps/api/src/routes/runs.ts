@@ -63,6 +63,10 @@ interface ResumeRunBody {
   approved?: boolean;
 }
 
+interface SteerRunBody {
+  message?: string;
+}
+
 interface SessionQuery {
   sessionId?: string;
 }
@@ -148,6 +152,34 @@ export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void 
         }
         throw error;
       }
+      return reply.code(204).send();
+    },
+  );
+
+  app.post<{ Params: { runId: string }; Body: SteerRunBody; Querystring: SessionQuery }>(
+    "/runs/:runId/steer",
+    async (request, reply) => {
+      const sessionId = request.query.sessionId;
+      if (!sessionId) {
+        return reply.code(400).send({ error: "sessionId query parameter is required" });
+      }
+      const message = request.body?.message;
+      if (typeof message !== "string" || message.trim().length === 0) {
+        return reply.code(400).send({ error: "message body field is required and must be a non-empty string" });
+      }
+      const checkpoint = await checkpointStore.load(request.params.runId);
+      if (!checkpoint) {
+        return reply.code(404).send({ error: `Run "${request.params.runId}" not found` });
+      }
+      if (checkpoint.tenantId !== requireTenantId(request) || checkpoint.sessionId !== sessionId) {
+        return reply.code(403).send({ error: "Run belongs to a different session" });
+      }
+      if (checkpoint.status !== "running") {
+        return reply
+          .code(409)
+          .send({ error: `Run "${request.params.runId}" is not running (status: ${checkpoint.status})` });
+      }
+      await checkpointStore.requestSteer(request.params.runId, message);
       return reply.code(204).send();
     },
   );

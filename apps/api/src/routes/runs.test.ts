@@ -371,6 +371,95 @@ describe("POST /runs/:runId/resume", () => {
   });
 });
 
+describe("POST /runs/:runId/steer", () => {
+  it("sets steerMessage on a running checkpoint and returns 204", async () => {
+    const startRes = await app.inject({
+      method: "POST",
+      url: "/runs?sessionId=s1",
+      headers: authHeaders(),
+      payload: { message: "hello" },
+    });
+    const { runId } = startRes.json();
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/runs/${runId}/steer?sessionId=s1`,
+      headers: authHeaders(),
+      payload: { message: "turn left instead" },
+    });
+    expect(res.statusCode).toBe(204);
+
+    const checkpoint = await checkpointStore.load(runId);
+    expect(checkpoint?.steerMessage).toBe("turn left instead");
+  });
+
+  it("returns 400 when the message body field is missing", async () => {
+    const startRes = await app.inject({
+      method: "POST",
+      url: "/runs?sessionId=s1",
+      headers: authHeaders(),
+      payload: { message: "hello" },
+    });
+    const { runId } = startRes.json();
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/runs/${runId}/steer?sessionId=s1`,
+      headers: authHeaders(),
+      payload: {},
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("returns 404 for an unknown runId", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/runs/does-not-exist/steer?sessionId=s1",
+      headers: authHeaders(),
+      payload: { message: "turn left instead" },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("returns 403 when sessionId does not match the run's session", async () => {
+    const startRes = await app.inject({
+      method: "POST",
+      url: "/runs?sessionId=s1",
+      headers: authHeaders(),
+      payload: { message: "hello" },
+    });
+    const { runId } = startRes.json();
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/runs/${runId}/steer?sessionId=different-session`,
+      headers: authHeaders(),
+      payload: { message: "turn left instead" },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("returns 409 when the run is not in the running state", async () => {
+    const startRes = await app.inject({
+      method: "POST",
+      url: "/runs?sessionId=s1",
+      headers: authHeaders(),
+      payload: { message: "hello" },
+    });
+    const { runId } = startRes.json();
+    const checkpoint = await checkpointStore.load(runId);
+    await checkpointStore.save({ ...checkpoint!, status: "done" });
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/runs/${runId}/steer?sessionId=s1`,
+      headers: authHeaders(),
+      payload: { message: "turn left instead" },
+    });
+    expect(res.statusCode).toBe(409);
+  });
+});
+
 describe("POST /runs/:runId/cancel", () => {
   it("sets cancelRequested and returns 204", async () => {
     const startRes = await app.inject({
