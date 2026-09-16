@@ -7,6 +7,24 @@ export interface NodeContext {
    * A node that makes an external call it wants to be interruptible (chat-agent's respond node,
    * calling the model) should forward this to whatever it calls. */
   signal?: AbortSignal;
+  /** A repeatable (not one-shot, unlike AbortSignal) channel for a steering instruction to be
+   * delivered into this node while it's running. Only meaningful to a node that chooses to race
+   * `waitForNext()` against an external call it's making (chat-agent's respond node, via
+   * @opentalos/sdk's runModelWithTools) — a node that ignores this field is simply never
+   * steerable. Distinct from `signal`: this never means "stop", it means "incorporate this new
+   * instruction and keep going". */
+  steer?: SteerChannel;
+}
+
+/** A repeatable channel for delivering a steering instruction into a currently-running node. A
+ * node that wants to be steerable calls `waitForNext()` and races it against whatever external
+ * call it's making; whoever owns the run (e.g. a Worker polling a Checkpoint's steerMessage field)
+ * calls a corresponding `deliver()` on the concrete implementation it holds — `deliver()` is
+ * deliberately not part of this interface, since a node only ever needs to wait, never deliver. */
+export interface SteerChannel {
+  /** Resolves the next time a steering instruction is delivered after this call (never before,
+   * never rejects). Call again to wait for a subsequent one. */
+  waitForNext(): Promise<string>;
 }
 
 export type NodeYield =

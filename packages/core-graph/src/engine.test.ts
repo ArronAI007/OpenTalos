@@ -5,7 +5,7 @@ import { InMemoryEventBus } from "@opentalos/tracing";
 import { InMemoryToolRegistry } from "@opentalos/tool-registry";
 import { GraphEngine } from "./engine.js";
 import { shallowMergeReducer } from "./reducer.js";
-import type { GraphDefinition, NodeFn } from "./types.js";
+import type { GraphDefinition, NodeFn, SteerChannel } from "./types.js";
 
 interface CounterState {
   count: number;
@@ -391,6 +391,28 @@ describe("GraphEngine — sequential execution", () => {
     await engine.run(engine.start({ count: 0 }, tenant, "run-signal"), { signal: controller.signal });
 
     expect(observedAborted).toBe(true);
+  });
+
+  it("passes a SteerChannel through to the node via ctx.steer, and it resolves on deliver()", async () => {
+    let observedMessage: string | undefined;
+    const readSteer: NodeFn<CounterState> = async function* (state, ctx) {
+      observedMessage = await ctx.steer?.waitForNext();
+      return { count: state.count + 1 };
+    };
+    const graph: GraphDefinition<CounterState> = {
+      id: "g-steer",
+      entryNode: "a",
+      nodes: { a: readSteer },
+      edges: [],
+      reducer: shallowMergeReducer,
+    };
+    const engine = new GraphEngine(graph, makeDeps());
+    const steerChannel: SteerChannel = {
+      waitForNext: () => Promise.resolve("turn left instead"),
+    };
+    await engine.run(engine.start({ count: 0 }, tenant, "run-steer"), { steer: steerChannel });
+
+    expect(observedMessage).toBe("turn left instead");
   });
 });
 

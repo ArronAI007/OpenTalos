@@ -1,5 +1,5 @@
 import type { Checkpoint, CheckpointStore, EventBus, Guardrail, TenantContext, ToolRegistry } from "@opentalos/core-types";
-import type { GraphDefinition, NodeCursor, NodeFn, NodeGenerator, NodeResumeValue } from "./types.js";
+import type { GraphDefinition, NodeCursor, NodeFn, NodeGenerator, NodeResumeValue, SteerChannel } from "./types.js";
 
 export interface EngineDeps {
   toolRegistry: ToolRegistry;
@@ -56,10 +56,13 @@ export class GraphEngine<TState> {
     };
   }
 
-  async run(checkpoint: Checkpoint<TState>, options?: { signal?: AbortSignal }): Promise<Checkpoint<TState>> {
+  async run(
+    checkpoint: Checkpoint<TState>,
+    options?: { signal?: AbortSignal; steer?: SteerChannel },
+  ): Promise<Checkpoint<TState>> {
     let current = checkpoint;
     while (current.status === "running") {
-      current = await this.step(current, options?.signal);
+      current = await this.step(current, options?.signal, options?.steer);
     }
     return current;
   }
@@ -140,7 +143,7 @@ export class GraphEngine<TState> {
   async resumeFromCheckpoint(
     checkpoint: Checkpoint<TState>,
     resumeValue: NodeResumeValue,
-    options?: { signal?: AbortSignal },
+    options?: { signal?: AbortSignal; steer?: SteerChannel },
   ): Promise<Checkpoint<TState>> {
     if (checkpoint.status !== "paused" || typeof checkpoint.nodeCursor !== "string") {
       throw new Error(`Run ${checkpoint.runId} is not in a resumable paused state`);
@@ -152,7 +155,12 @@ export class GraphEngine<TState> {
     }
     const tenant: TenantContext = { tenantId: checkpoint.tenantId, sessionId: checkpoint.sessionId };
     const guardedNodeFn = this.wrapWithGuardrails(nodeId, nodeFn);
-    const generator = guardedNodeFn(checkpoint.state, { tenant, eventBus: this.deps.eventBus, signal: options?.signal });
+    const generator = guardedNodeFn(checkpoint.state, {
+      tenant,
+      eventBus: this.deps.eventBus,
+      signal: options?.signal,
+      steer: options?.steer,
+    });
 
     // pendingYields is either length 1 (a "fresh" pause produced by step(), no replay history
     // yet — the common case) or length > 1 (a pause produced by an earlier resumeFromCheckpoint
@@ -193,7 +201,11 @@ export class GraphEngine<TState> {
     return advanced.status === "running" ? this.run(advanced, options) : advanced;
   }
 
-  private async step(checkpoint: Checkpoint<TState>, signal?: AbortSignal): Promise<Checkpoint<TState>> {
+  private async step(
+    checkpoint: Checkpoint<TState>,
+    signal?: AbortSignal,
+    steer?: SteerChannel,
+  ): Promise<Checkpoint<TState>> {
     const cursor = checkpoint.nodeCursor as NodeCursor;
     if (typeof cursor !== "string") {
       return this.stepParallel(checkpoint, cursor);
@@ -208,7 +220,7 @@ export class GraphEngine<TState> {
     this.emitTrace("node_enter", checkpoint.runId, tenant, { nodeId });
 
     const guardedNodeFn = this.wrapWithGuardrails(nodeId, nodeFn);
-    const generator = guardedNodeFn(checkpoint.state, { tenant, eventBus: this.deps.eventBus, signal });
+    const generator = guardedNodeFn(checkpoint.state, { tenant, eventBus: this.deps.eventBus, signal, steer });
     const outcome = await this.runNodeToCompletion(nodeId, generator, tenant, checkpoint.runId, undefined, (g) => {
       this.paused.set(checkpoint.runId, { tenant, generator: g });
     });
