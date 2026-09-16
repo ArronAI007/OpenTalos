@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { startRun, resumeRun, cancelRun, getApiKey, clearApiKey, ApiAuthError } from "./api.js";
+import { startRun, resumeRun, cancelRun, steerRun, getApiKey, clearApiKey, ApiAuthError } from "./api.js";
 import { useRunEvents } from "./hooks/useRunEvents.js";
 import { useRunHistory } from "./hooks/useRunHistory.js";
 import { ChatPanel } from "./components/ChatPanel.js";
@@ -24,6 +24,7 @@ export function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("chat");
   const [error, setError] = useState<string>();
+  const [steerConfirmation, setSteerConfirmation] = useState<string>();
   const [theme, setTheme] = useState<ThemePreference>(loadTheme);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -51,11 +52,14 @@ export function App() {
   // never send another message. Treating a confirmed-dead connection as "not in flight" lets the
   // user start a fresh conversation (implicitly abandoning the stuck run) instead of being
   // permanently locked out.
+  // "running" no longer force-disables the composer: sending while the model is actively
+  // streaming steers it (see handleSend/handleSteer) instead of being blocked. "paused" still
+  // does, until a later task adds real follow-up queueing for that phase.
   const isRunInFlight =
     !activeRunAlreadyCompletedLocally &&
     activeSession.runId !== undefined &&
     !timeline.connectionError &&
-    (timeline.status === "running" || timeline.status === "paused");
+    timeline.status === "paused";
 
   // Every past run's trace is durably persisted server-side, but ChatSession only ever tracks its
   // most recent runId (needed for resume/approve) — so without this, switching turns or reloading
@@ -89,6 +93,10 @@ export function App() {
       sessions: prev.sessions.map((session) => (session.id === sessionId ? update(session) : session)),
     }));
   }
+
+  useEffect(() => {
+    if (timeline.streamingText) setSteerConfirmation(undefined);
+  }, [timeline.streamingText]);
 
   useEffect(() => {
     const reply = timeline.finalState?.reply;
@@ -138,6 +146,10 @@ export function App() {
   }, [timeline.runError]);
 
   async function handleSend({ modelText, displayText, images, textAttachments }: OutgoingChatMessage) {
+    if (timeline.status === "running" && activeSession.runId) {
+      await handleSteer(modelText);
+      return;
+    }
     const sessionId = activeSessionId;
     const messageId = crypto.randomUUID();
     updateSession(sessionId, (session) => ({
@@ -176,6 +188,23 @@ export function App() {
         return;
       }
       setError("停止失败，请重试");
+    }
+  }
+
+  async function handleSteer(text: string) {
+    const runId = activeSession.runId;
+    if (!runId) return;
+    try {
+      await steerRun(activeSessionId, runId, text);
+      setSteerConfirmation("已发送修改意见，等待模型响应");
+      setError(undefined);
+    } catch (err) {
+      if (err instanceof ApiAuthError) {
+        setHasApiKey(false);
+        setAuthError("密钥无效或已被吊销，请重新输入");
+        return;
+      }
+      setError("发送失败，请重试");
     }
   }
 
@@ -298,6 +327,7 @@ export function App() {
               activeRunAlreadyCompletedLocally || timeline.finalState ? undefined : timeline.reasoningStreamingText
             }
             onApprove={handleApprove}
+            steerConfirmation={steerConfirmation}
           />
         ) : (
           <TracePanel

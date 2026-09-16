@@ -1020,6 +1020,11 @@ body {
   color: var(--color-text-muted);
 }
 
+.composer-status-steer {
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
 .trace-panel {
   flex: 1;
   min-height: 0;

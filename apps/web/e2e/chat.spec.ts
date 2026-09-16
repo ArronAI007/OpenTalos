@@ -94,6 +94,37 @@ test("pressing Enter to confirm an IME composition fills the textarea instead of
   await expect(sentMessage).toBeVisible();
 });
 
+test("sending a message while the model is actively streaming steers it instead of being blocked", async ({ page }) => {
+  // MODEL_PROVIDER=mock's complete() always calls lookup_exchange_rate on round 1 for any
+  // first-turn message when a tool is registered, then narrates the tool result on round 2 with a
+  // 120ms-per-chunk streamed reply (see mock.ts) -- round 2's streaming window is what this test
+  // steers during.
+  await page.goto("/");
+
+  const chatInput = page.getByPlaceholder("给智能体发消息");
+  const sendButton = page.getByRole("button", { name: "发送" });
+  await chatInput.fill("今天美元兑人民币汇率是多少？");
+  await sendButton.click();
+
+  // Wait for round 2's streaming to actually begin (composer no longer force-disabled the moment
+  // any reply text is visible), then send a second message -- this must steer, not queue/block.
+  await expect(page.locator(".message-streaming")).toBeVisible({ timeout: 10_000 });
+  await expect(chatInput).toBeEnabled();
+  await chatInput.fill("请用英文回复");
+  await sendButton.click();
+
+  await expect(page.getByText(/已发送/)).toBeVisible({ timeout: 5_000 });
+
+  // The run must still complete normally afterward (approve the HITL pause it already required
+  // before steering was ever involved) -- steering doesn't skip the existing approval gate.
+  await page.getByRole("button", { name: /轨迹/ }).click();
+  const approveButton = page.getByRole("button", { name: "✓ 批准" });
+  await expect(approveButton).toBeVisible({ timeout: 10_000 });
+  await approveButton.click();
+  await page.getByRole("button", { name: "对话", exact: true }).click();
+  await expect(page.locator("li.message-assistant").last()).not.toBeEmpty({ timeout: 10_000 });
+});
+
 test("attaching an image previews it, sends it with the message, and shows it in the sent bubble", async ({ page }) => {
   // A minimal valid 1x1 transparent PNG — small enough to stay well under every size cap this
   // feature enforces, real enough for the browser to actually decode and render as an <img>.

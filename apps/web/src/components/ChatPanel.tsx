@@ -104,6 +104,10 @@ interface ChatPanelProps {
   /** Resolves the pending HITL pause (see graph.ts's `confirm` node) when `status === "paused"`.
    * Mirrors TracePanel's onApprove — the same run can be approved/rejected from either place. */
   onApprove?: (approved: boolean) => void;
+  /** Set briefly after a steering message is accepted (see App.tsx's handleSteer) — cleared once
+   * the model actually starts streaming a fresh reply. Shown as a small confirmation near the
+   * composer status line so the user knows their mid-reply message was received. */
+  steerConfirmation?: string;
 }
 
 export function ChatPanel({
@@ -116,6 +120,7 @@ export function ChatPanel({
   streamingText,
   reasoningStreamingText,
   onApprove,
+  steerConfirmation,
 }: ChatPanelProps) {
   const [draft, setDraft] = useState("");
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
@@ -391,7 +396,10 @@ export function ChatPanel({
           )}
         </div>
       </form>
-      <p className="composer-status">{status === "paused" ? "等待你确认" : disabled ? "运行中…" : "准备就绪"}</p>
+      {steerConfirmation && <p className="composer-status composer-status-steer">{steerConfirmation}</p>}
+      <p className="composer-status">
+        {status === "paused" ? "等待你确认" : status === "running" ? "运行中…（可发送以调整方向）" : "准备就绪"}
+      </p>
     </section>
   );
 }
