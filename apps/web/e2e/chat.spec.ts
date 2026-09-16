@@ -125,6 +125,37 @@ test("sending a message while the model is actively streaming steers it instead 
   await expect(page.locator("li.message-assistant").last()).not.toBeEmpty({ timeout: 10_000 });
 });
 
+test("sending a message while paused for approval queues it as a follow-up, sent automatically once the run finishes", async ({ page }) => {
+  await page.goto("/");
+
+  const chatInput = page.getByPlaceholder("给智能体发消息");
+  const sendButton = page.getByRole("button", { name: "发送" });
+  await chatInput.fill("今天美元兑人民币汇率是多少？");
+  await sendButton.click();
+
+  await page.getByRole("button", { name: /轨迹/ }).click();
+  const approveButton = page.getByRole("button", { name: "✓ 批准" });
+  await expect(approveButton).toBeVisible({ timeout: 10_000 });
+  // Do NOT approve yet -- the run is "paused". Go back to 对话 and send a real follow-up while
+  // still paused, the way an actual user would (this only works once this task's App.tsx change
+  // stops disabling the composer during "paused", not just "running" as Task 8 left it).
+  await page.getByRole("button", { name: "对话", exact: true }).click();
+
+  await expect(chatInput).toBeEnabled();
+  await chatInput.fill("这是一条排队消息");
+  await sendButton.click();
+
+  const queuedBubble = page.locator("li.message-user", { hasText: "这是一条排队消息" });
+  // Queued, not yet sent to the server: no new user bubble yet, and the run is still paused.
+  await expect(queuedBubble).not.toBeVisible();
+
+  await page.getByRole("button", { name: /轨迹/ }).click();
+  await approveButton.click();
+  await page.getByRole("button", { name: "对话", exact: true }).click();
+
+  await expect(queuedBubble).toBeVisible({ timeout: 10_000 });
+});
+
 test("attaching an image previews it, sends it with the message, and shows it in the sent bubble", async ({ page }) => {
   // A minimal valid 1x1 transparent PNG — small enough to stay well under every size cap this
   // feature enforces, real enough for the browser to actually decode and render as an <img>.

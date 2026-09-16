@@ -51,4 +51,9 @@ export interface ChatSession {
   createdAt: number;
   messages: ChatMessage[];
   runId?: string;
+  /** Messages sent while a run was in flight but not steerable (status "paused" — the model has
+   * already produced this turn's output and is just waiting on a human approval click, so there's
+   * nothing to redirect; see App.tsx's handleSend). Drained in order, one at a time, once the run
+   * reaches a terminal state. */
+  pendingFollowUps?: string[];
 }

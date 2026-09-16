@@ -52,10 +52,12 @@ export function App() {
   // never send another message. Treating a confirmed-dead connection as "not in flight" lets the
   // user start a fresh conversation (implicitly abandoning the stuck run) instead of being
   // permanently locked out.
-  // "running" no longer force-disables the composer: sending while the model is actively
-  // streaming steers it (see handleSend/handleSteer) instead of being blocked. "paused" still
-  // does, until a later task adds real follow-up queueing for that phase.
-  const isRunInFlight =
+  // Neither "running" nor "paused" force-disables the composer anymore: sending during "running"
+  // steers (handleSteer), sending during "paused" queues as a follow-up (handleSend below) — every
+  // possible status now has a defined behavior for a new send, so there's nothing left to block.
+  // Kept (renamed from isRunInFlight) only to drive that queue-vs-start branch and the drain effect
+  // below, never to disable the composer.
+  const hasPausedRun =
     !activeRunAlreadyCompletedLocally &&
     activeSession.runId !== undefined &&
     !timeline.connectionError &&
@@ -131,13 +133,22 @@ export function App() {
     // The run this session was tracking genuinely no longer exists server-side (see useRunEvents'
     // onerror handler) — most likely a stale runId left over from before its checkpoint was
     // deleted. Recover silently by dropping the reference: the session's message history is
-    // untouched, the composer already isn't blocked (isRunInFlight excludes this case), and
+    // untouched, the composer was never blocked by run status in the first place, and
     // there's nothing productive for the user to do about a run that's gone for good — showing an
     // error here would just be alarming and, unlike a real connection failure, unfixable by the
     // "refresh and retry" a connectionError banner suggests.
     if (!timeline.runNotFound) return;
     updateSession(activeSessionId, (session) => ({ ...session, runId: undefined }));
   }, [timeline.runNotFound, activeSessionId]);
+
+  useEffect(() => {
+    if (hasPausedRun) return;
+    const pending = activeSession.pendingFollowUps;
+    if (!pending || pending.length === 0) return;
+    const [next, ...rest] = pending;
+    updateSession(activeSessionId, (session) => ({ ...session, pendingFollowUps: rest }));
+    void handleSend({ modelText: next, displayText: next });
+  }, [hasPausedRun, activeSessionId, activeSession.pendingFollowUps]);
 
   useEffect(() => {
     if (timeline.runError) {
@@ -148,6 +159,16 @@ export function App() {
   async function handleSend({ modelText, displayText, images, textAttachments }: OutgoingChatMessage) {
     if (timeline.status === "running" && activeSession.runId) {
       await handleSteer(modelText);
+      return;
+    }
+    if (hasPausedRun) {
+      // Nothing to steer while paused (the model already produced this turn's output and is just
+      // waiting on a human approval click) — queue this message and let the drain effect below
+      // send it once the run reaches a terminal state.
+      updateSession(activeSessionId, (session) => ({
+        ...session,
+        pendingFollowUps: [...(session.pendingFollowUps ?? []), modelText],
+      }));
       return;
     }
     const sessionId = activeSessionId;
@@ -322,7 +343,6 @@ export function App() {
             onSend={handleSend}
             onStop={handleStop}
             error={error}
-            disabled={isRunInFlight}
             status={timeline.status}
             streamingText={activeRunAlreadyCompletedLocally || timeline.finalState ? undefined : timeline.streamingText}
             reasoningStreamingText={
