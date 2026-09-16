@@ -227,7 +227,7 @@ describe("chat agent", () => {
     expect(checkpoint.state.reply).toBe("这是一只猫。");
     expect(capturedMessages).toContainEqual({
       role: "user",
-      content: "这张图里有什么？",
+      content: "这张图里有什么？\n\n（提醒：你接下来的思考过程和回复都必须全程使用中文。）",
       images: ["data:image/png;base64,AAA"],
     });
   });
