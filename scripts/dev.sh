@@ -49,9 +49,15 @@ is_running() {
 }
 
 build_service() {
+	# Silent on success — turbo's per-package "cache hit, replaying logs" / "$ tsc ..." output is
+	# noisy and, when nothing changed, uninformative (see the file header: this build is here to
+	# catch a stale/missing dist, not something you need to watch run). Captured to a log file
+	# instead, surfaced only on failure (see start_service's `build_service` caller) so a real
+	# compile error is still fully visible for debugging.
+	local log_file="$LOG_DIR/$1-build.log"
 	case "$1" in
-	worker) (cd "$ROOT_DIR" && pnpm exec turbo run build --filter=@opentalos/worker) ;;
-	api) (cd "$ROOT_DIR" && pnpm exec turbo run build --filter=@opentalos/api) ;;
+	worker) (cd "$ROOT_DIR" && pnpm exec turbo run build --filter=@opentalos/worker) >"$log_file" 2>&1 ;;
+	api) (cd "$ROOT_DIR" && pnpm exec turbo run build --filter=@opentalos/api) >"$log_file" 2>&1 ;;
 	esac
 }
 
@@ -68,7 +74,8 @@ start_service() {
 	worker | api)
 		echo "[$name] 构建中..."
 		if ! build_service "$name"; then
-			echo "[$name] 构建失败，未启动" >&2
+			echo "[$name] 构建失败，未启动 —— 详见 logs/$name-build.log:" >&2
+			cat "$LOG_DIR/$name-build.log" >&2
 			return 1
 		fi
 		echo "[$name] 启动中 (日志: logs/$name.log)"
