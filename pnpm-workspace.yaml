@@ -3,6 +3,7 @@ packages:
   - "examples/*"
   - "apps/*"
 allowBuilds:
+  bcrypt: true
   cpu-features: true
   esbuild: true
   protobufjs: true
