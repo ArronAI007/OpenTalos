@@ -287,3 +287,51 @@ test("the existing paste-an-API-key flow still works unchanged alongside the new
   await page.getByRole("button", { name: "进入" }).click();
   await expect(page.getByPlaceholder("给智能体发消息")).toBeVisible();
 });
+
+test("admin can see a registered user in the Users tab, ban them, unban them, then soft-delete them", async ({
+  page,
+  context,
+}) => {
+  const username = uniqueUsername("admin-manage");
+  const registerRes = await fetch("http://localhost:3001/auth/register", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password: "password123" }),
+  });
+  expect(registerRes.status).toBe(201);
+
+  const adminPage = await context.newPage();
+  await adminPage.goto("http://localhost:5174/");
+  await adminPage.getByPlaceholder("管理员密钥").fill(ADMIN_API_KEY);
+  await adminPage.getByRole("button", { name: "进入" }).click();
+  await adminPage.getByRole("button", { name: "用户" }).click();
+
+  const userRow = adminPage.locator("li", { hasText: username });
+  await expect(userRow).toBeVisible();
+  await expect(userRow.getByText("正常")).toBeVisible();
+
+  await userRow.getByRole("button", { name: "封号" }).click();
+  await expect(userRow.getByText("已封禁")).toBeVisible();
+
+  await page.goto("/");
+  await page.getByRole("tab", { name: "登录" }).click();
+  await page.getByPlaceholder("用户名").fill(username);
+  await page.getByPlaceholder("密码").fill("password123");
+  await page.getByRole("button", { name: "登录" }).click();
+  await expect(page.getByText("账号已被封禁")).toBeVisible();
+
+  await userRow.getByRole("button", { name: "解封" }).click();
+  await expect(userRow.getByText("正常")).toBeVisible();
+
+  await page.getByPlaceholder("用户名").fill(username);
+  await page.getByPlaceholder("密码").fill("password123");
+  await page.getByRole("button", { name: "登录" }).click();
+  await expect(page.getByPlaceholder("给智能体发消息")).toBeVisible();
+
+  await userRow.getByRole("button", { name: "删除" }).click();
+  await expect(userRow.getByText("已删除")).toBeVisible();
+  await expect(userRow.getByRole("button", { name: "封号" })).not.toBeVisible();
+  await expect(userRow.getByRole("button", { name: "删除" })).not.toBeVisible();
+
+  await adminPage.close();
+});

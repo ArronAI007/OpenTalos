@@ -24,6 +24,43 @@ body {
   font-weight: 700;
 }
 
+.admin-nav {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.admin-nav-tab {
+  background: none;
+  border: none;
+  padding: 6px 14px;
+  border-radius: var(--radius-pill);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.admin-nav-tab-active {
+  background: var(--color-surface-solid);
+  color: var(--color-text);
+  box-shadow: var(--shadow-soft);
+}
+
+.user-row-actions {
+  display: flex;
+  gap: var(--space-sm);
+  margin-top: var(--space-sm);
+}
+
+.user-status-active {
+  color: var(--color-text-muted);
+}
+
+.user-status-banned,
+.user-status-deleted {
+  color: var(--color-danger-text);
+}
+
 .gate-card {
   max-width: 360px;
   margin: 80px auto;

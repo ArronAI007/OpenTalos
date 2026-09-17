@@ -1,4 +1,4 @@
-import type { ApiKeyRecord, TenantRecord } from "./types.js";
+import type { ApiKeyRecord, TenantRecord, UserRecord } from "./types.js";
 
 const ADMIN_KEY_STORAGE_KEY = "opentalos-admin-key";
 
@@ -78,4 +78,28 @@ export async function createApiKey(tenantId: string): Promise<{ id: string; rawK
 export async function revokeApiKey(keyId: string): Promise<void> {
   const res = await adminFetch(`/api-keys/${keyId}`, { method: "DELETE" });
   if (!res.ok) throw new Error(`Failed to revoke API key: ${res.status}`);
+}
+
+export async function listUsers(): Promise<UserRecord[]> {
+  const res = await adminFetch("/users");
+  if (!res.ok) throw new Error(`Failed to list users: ${res.status}`);
+  return res.json();
+}
+
+export async function banUser(id: string): Promise<UserRecord> {
+  const res = await adminFetch(`/users/${id}/ban`, { method: "PATCH" });
+  if (!res.ok) throw new Error(`Failed to ban user: ${res.status}`);
+  return res.json();
+}
+
+export async function unbanUser(id: string): Promise<UserRecord> {
+  const res = await adminFetch(`/users/${id}/unban`, { method: "PATCH" });
+  if (!res.ok) throw new Error(`Failed to unban user: ${res.status}`);
+  return res.json();
+}
+
+export async function deleteUser(id: string): Promise<UserRecord> {
+  const res = await adminFetch(`/users/${id}/delete`, { method: "PATCH" });
+  if (!res.ok) throw new Error(`Failed to delete user: ${res.status}`);
+  return res.json();
 }

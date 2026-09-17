@@ -15,3 +15,12 @@ export interface ApiKeyRecord {
   createdAt: string;
   lastUsedAt: string | null;
 }
+
+export interface UserRecord {
+  id: string;
+  tenantId: string;
+  username: string;
+  status: "active" | "banned" | "deleted";
+  createdAt: string;
+  updatedAt: string;
+}
