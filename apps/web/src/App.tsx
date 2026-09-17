@@ -382,9 +382,11 @@ export function App() {
                   onClick={() => setRenamingSession(true)}
                   aria-label="重命名会话"
                 >
-                  <h1 className="app-session-title">{sessionTitle(activeSession)}</h1>
-                  <span className="app-session-title-edit-icon" aria-hidden="true">
-                    <EditIcon />
+                  <span className="app-session-title-inner">
+                    <h1 className="app-session-title">{sessionTitle(activeSession)}</h1>
+                    <span className="app-session-title-edit-icon" aria-hidden="true">
+                      <EditIcon />
+                    </span>
                   </span>
                 </button>
                 <p className="app-header-caption">AI 生成可能有误，注意核实</p>

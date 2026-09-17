@@ -81,6 +81,7 @@ body {
 
 .app-session-title {
   margin: 0;
+  min-width: 0;
   font-size: 18px;
   font-weight: 700;
   letter-spacing: -0.01em;
@@ -90,10 +91,16 @@ body {
 }
 
 .app-session-title-row {
+  /* justify-content: center here centers whatever's inside -- with the edit icon absolutely
+   * positioned out of flow (see .app-session-title-edit-icon below), that's the title alone, so
+   * adding the icon doesn't shift the title's own centered position at all. Width must be set
+   * explicitly to 100%: a <button> stays shrink-to-fit even with display:flex (it doesn't stretch
+   * to its containing block's width the way a plain block div would), so without this,
+   * justify-content: center had nothing to center within and the row just sat flush left. */
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  width: 100%;
   min-width: 0;
   max-width: 100%;
   background: none;
@@ -113,11 +120,26 @@ body {
   outline-offset: 2px;
 }
 
+.app-session-title-inner {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+}
+
 .app-session-title-edit-icon {
-  flex-shrink: 0;
+  /* Positioned relative to .app-session-title-inner (sized to the title text alone), not
+   * .app-session-title-row (which spans the full centered column) -- otherwise `left: 100%` would
+   * land at the row's own right edge, nowhere near the title. */
+  position: absolute;
+  left: 100%;
+  top: 50%;
+  transform: translateY(-50%);
+  margin-left: 4px;
   display: flex;
   align-items: center;
-  justify-content: center;
+  white-space: nowrap;
   color: var(--color-text-muted);
   /* Hidden until the row is hovered/focused — see App.tsx's comment on why hover reveals it
    * instead of it always being visible. */
