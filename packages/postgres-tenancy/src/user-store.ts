@@ -55,7 +55,14 @@ export class UserStore {
   /** 先创建 tenant + api_key，再插入 users 行——不是单个跨表 SQL 事务（TenantStore 的方法各自
    * 绑定同一个 Pool，没有暴露"传入外部事务"的接口，见本文件所在 plan 开头的说明）。
    * `users.username` 的唯一索引才是"是否重复"的权威判断：插入时捕获唯一约束冲突，
-   * 说明存在并发重复注册，把刚创建的 tenant 禁用（补偿操作）后返回 username_taken。 */
+   * 说明存在并发重复注册，把刚创建的 tenant 禁用（补偿操作）后返回 username_taken。
+   *
+   * 已知的、未处理的边界情况：如果进程在 createTenant/createApiKey 成功之后、users 插入执行之前
+   * 崩溃（而不是遇到用户名冲突），会留下一个孤儿的 active tenant + api_key，没有任何补偿逻辑会
+   * 清理它。这不构成安全风险——rawKey 只存在于已崩溃进程的内存里，从未返回给任何调用方，孤儿
+   * tenant 的名字也不参与用户名唯一性判断——代价仅是数据库里堆积几行不会被使用的记录。当前规模
+   * 下判定为可接受的已知限制，清理可以做成一个独立的"列出没有对应 user 行的 tenant"巡检查询，
+   * 不需要现在就引入事务/补偿机制解决。 */
   async register(username: string, password: string): Promise<RegisterResult> {
     const normalized = username.trim();
     const passwordHash = await hashPassword(password);
