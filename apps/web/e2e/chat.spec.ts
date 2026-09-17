@@ -139,6 +139,53 @@ test("the content area extends to app-main's true edge instead of stopping at a 
   expect(Math.abs(rects.contentRight - rects.appMainRight)).toBeLessThan(1);
 });
 
+test("dragging the sidebar's resize handle changes and persists its width, clamped, and ignored while collapsed", async ({
+  page,
+}) => {
+  await page.goto("/");
+
+  const sidebar = page.locator(".session-sidebar");
+  const handle = page.locator(".sidebar-resize-handle");
+
+  const before = await sidebar.evaluate((el) => el.getBoundingClientRect().width);
+  expect(Math.round(before)).toBe(240);
+
+  const box = await handle.boundingBox();
+  if (!box) throw new Error("resize handle not found");
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 100, box.y + box.height / 2, { steps: 5 });
+  await page.mouse.up();
+
+  const after = await sidebar.evaluate((el) => el.getBoundingClientRect().width);
+  expect(after).toBeGreaterThan(before + 50);
+
+  // Persisted (see lib/sidebar-width.ts) -- a reload restores the dragged width.
+  const stored = await page.evaluate(() => localStorage.getItem("opentalos-sidebar-width"));
+  expect(Number(stored)).toBeCloseTo(after, 0);
+  await page.reload();
+  const afterReload = await sidebar.evaluate((el) => el.getBoundingClientRect().width);
+  expect(Math.round(afterReload)).toBe(Math.round(after));
+
+  // Clamped to MAX_SIDEBAR_WIDTH even when dragged far past it.
+  const box2 = await handle.boundingBox();
+  if (!box2) throw new Error("resize handle not found");
+  await page.mouse.move(box2.x + box2.width / 2, box2.y + box2.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box2.x + 2000, box2.y + box2.height / 2, { steps: 5 });
+  await page.mouse.up();
+  const clamped = await sidebar.evaluate((el) => el.getBoundingClientRect().width);
+  expect(clamped).toBeLessThanOrEqual(420);
+
+  // Collapsing ignores the dragged width entirely -- fixed at 56px (see .session-sidebar-collapsed
+  // in app.css). Waits past the 300ms width transition (see .session-sidebar's own `transition`)
+  // so this reads the fully-settled value, not a mid-animation one.
+  await page.getByRole("button", { name: "收起侧栏" }).click();
+  await page.waitForTimeout(400);
+  const collapsedWidth = await sidebar.evaluate((el) => el.getBoundingClientRect().width);
+  expect(Math.round(collapsedWidth)).toBe(56);
+});
+
 test("sending a message while the model is actively streaming steers it instead of being blocked", async ({ page }) => {
   // MODEL_PROVIDER=mock's complete() always calls lookup_exchange_rate on round 1 for any
   // first-turn message when a tool is registered, then narrates the tool result on round 2 with a

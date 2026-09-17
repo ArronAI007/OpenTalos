@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import type { ChatSession } from "../types.js";
 import { relativeSessionAge, sessionTitle } from "../lib/sessions.js";
+import { clampSidebarWidth } from "../lib/sidebar-width.js";
 import { CollapseIcon, GearIcon, PlusIcon, SearchIcon, SortIcon } from "./icons.js";
 
 interface SessionSidebarProps {
@@ -8,6 +9,12 @@ interface SessionSidebarProps {
   activeSessionId: string;
   open: boolean;
   collapsed: boolean;
+  /** Current sidebar width in px (ignored while `collapsed` — the collapsed rail has its own
+   * fixed width, see .session-sidebar-collapsed). */
+  width: number;
+  /** Fired continuously while the user drags the resize handle, with the new (already-clamped)
+   * width — the caller owns persisting it (see App.tsx's loadSidebarWidth/saveSidebarWidth). */
+  onWidthChange: (width: number) => void;
   onSelect: (id: string) => void;
   onCreate: () => void;
   onDelete: (id: string) => void;
@@ -21,6 +28,8 @@ export function SessionSidebar({
   activeSessionId,
   open,
   collapsed,
+  width,
+  onWidthChange,
   onSelect,
   onCreate,
   onDelete,
@@ -31,6 +40,40 @@ export function SessionSidebar({
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [oldestFirst, setOldestFirst] = useState(false);
+
+  // Plain document-level pointermove/pointerup listeners (added/removed per drag) rather than
+  // React state + a render-driven effect: a resize needs to track the pointer at native event
+  // speed without waiting on React's render cycle, and the listeners' own lifetime is already
+  // exactly one drag gesture, so there's nothing for React to additionally own here.
+  function handleResizeStart(event: React.PointerEvent<HTMLDivElement>) {
+    // Only the primary button/touch starts a resize — ignore right-click, middle-click, etc.
+    if (event.button !== 0) return;
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = width;
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    // .session-sidebar's own `transition: width ...` (for the collapse/expand animation) would
+    // otherwise ease the width toward each new value instead of tracking the pointer 1:1, making
+    // the drag feel laggy — suspend it only for the duration of this drag gesture.
+    const sidebarEl = (event.currentTarget as HTMLElement).closest(".session-sidebar");
+    sidebarEl?.classList.add("session-sidebar-resizing");
+
+    function handlePointerMove(moveEvent: PointerEvent) {
+      onWidthChange(clampSidebarWidth(startWidth + (moveEvent.clientX - startX)));
+    }
+    function handlePointerUp() {
+      document.removeEventListener("pointermove", handlePointerMove);
+      document.removeEventListener("pointerup", handlePointerUp);
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+      sidebarEl?.classList.remove("session-sidebar-resizing");
+    }
+    document.addEventListener("pointermove", handlePointerMove);
+    document.addEventListener("pointerup", handlePointerUp);
+  }
 
   const filtered = sessions.filter((session) => sessionTitle(session).toLowerCase().includes(query.toLowerCase()));
   const visibleSessions = oldestFirst ? [...filtered].reverse() : filtered;
@@ -47,8 +90,22 @@ export function SessionSidebar({
           false. */}
       <nav
         className={`session-sidebar${open ? " session-sidebar-open" : ""}${collapsed ? " session-sidebar-collapsed" : ""}`}
+        // Set as a custom property, not the `width` property directly: .session-sidebar-collapsed
+        // and the narrow-viewport drawer media query both need to keep overriding the width via
+        // an ordinary CSS rule (see app.css) -- an inline `width` would out-rank both regardless
+        // of specificity, but an inline custom property doesn't touch `width`'s cascade at all.
+        style={collapsed ? undefined : ({ "--sidebar-width": `${width}px` } as CSSProperties)}
         aria-label="会话列表"
       >
+        {!collapsed && (
+          <div
+            className="sidebar-resize-handle"
+            onPointerDown={handleResizeStart}
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="调整会话列表宽度"
+          />
+        )}
         {collapsed ? (
           // Collapsing shrinks the sidebar to a slim rail rather than hiding it entirely, so the
           // control that re-expands it stays where a user would look for it — inside the sidebar's

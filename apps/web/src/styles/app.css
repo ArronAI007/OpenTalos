@@ -204,7 +204,12 @@ body {
 }
 
 .session-sidebar {
-  width: 240px;
+  /* --sidebar-width is set inline per-render (see SessionSidebar.tsx) from draggable, persisted
+   * state; a plain CSS custom property (not the `width` property itself) so
+   * .session-sidebar-collapsed below and the narrow-viewport drawer rule can keep overriding it
+   * via ordinary cascade instead of losing to inline-style specificity. */
+  width: var(--sidebar-width, 240px);
+  position: relative;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -220,10 +225,37 @@ body {
     opacity var(--duration-fast) ease;
 }
 
+.session-sidebar-resizing {
+  transition: none;
+}
+
 .session-sidebar-collapsed {
   width: 56px;
   padding: var(--space-lg) 8px;
   overflow: hidden;
+}
+
+.sidebar-resize-handle {
+  /* Fully inside .session-sidebar's own box (not straddling its right edge): that element sets
+   * overflow-y, which per spec forces its overflow-x to compute as `auto` (clipping) too, not
+   * `visible` -- a handle positioned half outside the box (e.g. `right: -3px`) would have that
+   * outer half silently clipped, shrinking its actual hit-testable area to a sliver sitting right
+   * at the clipped edge. */
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  background: transparent;
+  touch-action: none;
+  z-index: 5;
+}
+
+.sidebar-resize-handle:hover,
+.sidebar-resize-handle:active {
+  background: var(--color-accent);
+  opacity: 0.4;
 }
 
 .sidebar-rail {
@@ -497,6 +529,12 @@ body {
   }
 
   .sidebar-collapse-button {
+    display: none;
+  }
+
+  .sidebar-resize-handle {
+    /* The narrow-viewport sidebar is a slide-in drawer at a fixed width (see .session-sidebar
+     * below) -- dragging it to resize doesn't apply here. */
     display: none;
   }
 

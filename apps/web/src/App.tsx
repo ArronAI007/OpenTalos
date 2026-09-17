@@ -10,6 +10,7 @@ import { SessionLogMenu } from "./components/SessionLogMenu.js";
 import { SettingsPanel } from "./components/SettingsPanel.js";
 import { createEmptySession, loadSessions, saveSessions, sessionTitle } from "./lib/sessions.js";
 import { applyTheme, loadTheme, saveTheme, type ThemePreference } from "./lib/theme.js";
+import { loadSidebarWidth, saveSidebarWidth } from "./lib/sidebar-width.js";
 import type { ChatSession, OutgoingChatMessage } from "./types.js";
 import "./styles/tokens.css";
 import "./styles/app.css";
@@ -22,6 +23,7 @@ export function App() {
   const [{ sessions, activeSessionId }, setSessionState] = useState(loadSessions);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState<number>(loadSidebarWidth);
   const [activeTab, setActiveTab] = useState<Tab>("chat");
   const [error, setError] = useState<string>();
   const [steerConfirmation, setSteerConfirmation] = useState<string>();
@@ -32,6 +34,10 @@ export function App() {
     applyTheme(theme);
     saveTheme(theme);
   }, [theme]);
+
+  useEffect(() => {
+    saveSidebarWidth(sidebarWidth);
+  }, [sidebarWidth]);
 
   const activeSession = sessions.find((session) => session.id === activeSessionId) ?? sessions[0];
   const timeline = useRunEvents(activeSessionId, activeSession.runId);
@@ -342,6 +348,8 @@ export function App() {
         activeSessionId={activeSessionId}
         open={sidebarOpen}
         collapsed={sidebarCollapsed}
+        width={sidebarWidth}
+        onWidthChange={setSidebarWidth}
         onSelect={handleSelectSession}
         onCreate={handleCreateSession}
         onDelete={handleDeleteSession}
