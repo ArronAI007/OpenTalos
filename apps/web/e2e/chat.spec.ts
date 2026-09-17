@@ -186,7 +186,7 @@ test("dragging the sidebar's resize handle changes and persists its width, clamp
   expect(Math.round(collapsedWidth)).toBe(56);
 });
 
-test("clicking the edit icon next to the header title lets you rename the session", async ({ page }) => {
+test("clicking the header title opens a dialog to rename the session", async ({ page }) => {
   await page.goto("/");
 
   const chatInput = page.getByPlaceholder("给智能体发消息");
@@ -195,20 +195,38 @@ test("clicking the edit icon next to the header title lets you rename the sessio
   await sendButton.click();
   await expect(page.getByRole("heading", { name: "原始标题消息" })).toBeVisible();
 
-  await page.getByRole("button", { name: "重命名会话" }).click();
-  const input = page.getByRole("textbox", { name: "重命名会话" });
+  // The edit icon is hidden (opacity: 0, not display/visibility, so Playwright's own
+  // visibility check wouldn't catch this) until the title row is hovered -- clicking works
+  // regardless of hover state, since the whole row is the click target either way.
+  const titleRow = page.getByRole("button", { name: "重命名会话" });
+  const editIcon = titleRow.locator(".app-session-title-edit-icon");
+  await expect(editIcon).toHaveCSS("opacity", "0");
+  await titleRow.hover();
+  await expect(editIcon).toHaveCSS("opacity", "1");
+  await titleRow.click();
+
+  const dialog = page.getByRole("dialog", { name: "编辑对话名称" });
+  await expect(dialog).toBeVisible();
+  const input = dialog.getByRole("textbox", { name: "对话名称" });
   await expect(input).toHaveValue("原始标题消息");
   await input.fill("我的自定义标题");
-  await input.press("Enter");
+  await dialog.getByRole("button", { name: "确定" }).click();
+  await expect(dialog).not.toBeVisible();
 
   // The renamed title shows both in the header and in the sidebar's session list.
   await expect(page.getByRole("heading", { name: "我的自定义标题" })).toBeVisible();
   await expect(page.locator(".session-button-title")).toHaveText("我的自定义标题");
 
-  // Escape cancels without saving.
-  await page.getByRole("button", { name: "重命名会话" }).click();
-  await page.getByRole("textbox", { name: "重命名会话" }).fill("不应该被保存");
-  await page.getByRole("textbox", { name: "重命名会话" }).press("Escape");
+  // "取消" discards the draft without saving.
+  await titleRow.click();
+  await page.getByRole("dialog", { name: "编辑对话名称" }).getByRole("textbox", { name: "对话名称" }).fill("不应该被保存");
+  await page.getByRole("dialog", { name: "编辑对话名称" }).getByRole("button", { name: "取消" }).click();
+  await expect(page.getByRole("heading", { name: "我的自定义标题" })).toBeVisible();
+
+  // Escape also cancels without saving.
+  await titleRow.click();
+  await page.getByRole("dialog", { name: "编辑对话名称" }).getByRole("textbox", { name: "对话名称" }).fill("不应该被保存");
+  await page.keyboard.press("Escape");
   await expect(page.getByRole("heading", { name: "我的自定义标题" })).toBeVisible();
 
   // Persisted across a reload (see ChatSession.customTitle).
@@ -216,9 +234,9 @@ test("clicking the edit icon next to the header title lets you rename the sessio
   await expect(page.getByRole("heading", { name: "我的自定义标题" })).toBeVisible();
 
   // Renaming to blank reverts to the auto-generated title (see sessionTitle()).
-  await page.getByRole("button", { name: "重命名会话" }).click();
-  await page.getByRole("textbox", { name: "重命名会话" }).fill("   ");
-  await page.getByRole("textbox", { name: "重命名会话" }).press("Enter");
+  await titleRow.click();
+  await page.getByRole("dialog", { name: "编辑对话名称" }).getByRole("textbox", { name: "对话名称" }).fill("   ");
+  await page.getByRole("dialog", { name: "编辑对话名称" }).getByRole("button", { name: "确定" }).click();
   await expect(page.getByRole("heading", { name: "原始标题消息" })).toBeVisible();
 });
 

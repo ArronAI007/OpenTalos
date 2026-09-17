@@ -9,6 +9,7 @@ import { SessionSidebar } from "./components/SessionSidebar.js";
 import { SessionLogMenu } from "./components/SessionLogMenu.js";
 import { EditIcon } from "./components/icons.js";
 import { SettingsPanel } from "./components/SettingsPanel.js";
+import { RenameSessionDialog } from "./components/RenameSessionDialog.js";
 import { createEmptySession, loadSessions, saveSessions, sessionTitle } from "./lib/sessions.js";
 import { applyTheme, loadTheme, saveTheme, type ThemePreference } from "./lib/theme.js";
 import { loadSidebarWidth, saveSidebarWidth } from "./lib/sidebar-width.js";
@@ -26,8 +27,7 @@ export function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState<number>(loadSidebarWidth);
   const [activeTab, setActiveTab] = useState<Tab>("chat");
-  const [editingTitle, setEditingTitle] = useState(false);
-  const [titleDraft, setTitleDraft] = useState("");
+  const [renamingSession, setRenamingSession] = useState(false);
   const [error, setError] = useState<string>();
   const [steerConfirmation, setSteerConfirmation] = useState<string>();
   const [theme, setTheme] = useState<ThemePreference>(loadTheme);
@@ -302,7 +302,7 @@ export function App() {
     setActiveTab("chat");
     setError(undefined);
     setSteerConfirmation(undefined);
-    setEditingTitle(false);
+    setRenamingSession(false);
   }
 
   function handleSelectSession(sessionId: string) {
@@ -311,28 +311,13 @@ export function App() {
     setActiveTab("chat");
     setError(undefined);
     setSteerConfirmation(undefined);
-    setEditingTitle(false);
+    setRenamingSession(false);
   }
 
-  function handleStartEditTitle() {
-    setTitleDraft(sessionTitle(activeSession));
-    setEditingTitle(true);
-  }
-
-  function handleSaveTitle() {
-    const trimmed = titleDraft.trim();
+  function handleSaveTitle(value: string) {
+    const trimmed = value.trim();
     updateSession(activeSessionId, (session) => ({ ...session, customTitle: trimmed || undefined }));
-    setEditingTitle(false);
-  }
-
-  function handleTitleInputKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      handleSaveTitle();
-    } else if (event.key === "Escape") {
-      event.preventDefault();
-      setEditingTitle(false);
-    }
+    setRenamingSession(false);
   }
 
   function handleChangeApiKey() {
@@ -391,30 +376,17 @@ export function App() {
           <div className="app-header-main">
             <div className="app-header-top">
               <div className="app-header-titles">
-                {editingTitle ? (
-                  <input
-                    className="app-session-title-input"
-                    value={titleDraft}
-                    onChange={(event) => setTitleDraft(event.target.value)}
-                    onBlur={handleSaveTitle}
-                    onKeyDown={handleTitleInputKeyDown}
-                    aria-label="重命名会话"
-                    autoFocus
-                    onFocus={(event) => event.target.select()}
-                  />
-                ) : (
-                  <div className="app-session-title-row">
-                    <h1 className="app-session-title">{sessionTitle(activeSession)}</h1>
-                    <button
-                      type="button"
-                      className="app-session-title-edit"
-                      onClick={handleStartEditTitle}
-                      aria-label="重命名会话"
-                    >
-                      <EditIcon />
-                    </button>
-                  </div>
-                )}
+                <button
+                  type="button"
+                  className="app-session-title-row"
+                  onClick={() => setRenamingSession(true)}
+                  aria-label="重命名会话"
+                >
+                  <h1 className="app-session-title">{sessionTitle(activeSession)}</h1>
+                  <span className="app-session-title-edit-icon" aria-hidden="true">
+                    <EditIcon />
+                  </span>
+                </button>
                 <p className="app-header-caption">AI 生成可能有误，注意核实</p>
               </div>
               <div className="app-header-actions">
@@ -471,6 +443,13 @@ export function App() {
           onThemeChange={setTheme}
           onChangeApiKey={handleChangeApiKey}
           onClose={() => setSettingsOpen(false)}
+        />
+      )}
+      {renamingSession && (
+        <RenameSessionDialog
+          initialValue={sessionTitle(activeSession)}
+          onSave={handleSaveTitle}
+          onCancel={() => setRenamingSession(false)}
         />
       )}
     </div>
