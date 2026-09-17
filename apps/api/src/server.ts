@@ -3,9 +3,10 @@ import type { Pool } from "pg";
 import type { PostgresCheckpointStore } from "@opentalos/postgres-checkpoint";
 import type { StoredTraceEvent } from "@opentalos/postgres-tracing";
 import type { Scheduler } from "@opentalos/scheduler";
-import type { TenantStore } from "@opentalos/postgres-tenancy";
+import type { TenantStore, UserStore } from "@opentalos/postgres-tenancy";
 import { registerRunRoutes } from "./routes/runs.js";
 import { registerAdminRoutes } from "./routes/admin.js";
+import { registerAuthRoutes } from "./routes/auth.js";
 import { createAdminAuthHook, createTenantAuthHook } from "./auth.js";
 
 export interface ServerDeps {
@@ -14,6 +15,7 @@ export interface ServerDeps {
   scheduler: Scheduler;
   listEventsSince: (runId: string, afterId: number) => Promise<StoredTraceEvent[]>;
   tenantStore: TenantStore;
+  userStore: UserStore;
   adminApiKey: string;
 }
 
@@ -29,8 +31,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
 
   // Fastify's encapsulation model: a hook added with addHook() inside a register() callback
   // only applies to routes registered within that SAME encapsulated context, not the parent app
-  // or sibling registrations — this is what lets /runs* and /admin/* have two completely
-  // independent auth checks without either accidentally leaking into the other.
+  // or sibling registrations — this is what lets /runs*, /admin/* and /auth/* have independent
+  // (or in /auth/*'s case, absent) auth checks without any of them leaking into the others.
   app.register(async (tenantScope) => {
     tenantScope.addHook("preHandler", createTenantAuthHook(deps.tenantStore));
     registerRunRoutes(tenantScope, deps);
@@ -43,6 +45,12 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     },
     { prefix: "/admin" },
   );
+
+  // No preHandler here — registration/login are how a client obtains credentials in the first
+  // place, so requiring one would be a contradiction.
+  app.register(async (authScope) => {
+    registerAuthRoutes(authScope, { userStore: deps.userStore });
+  });
 
   return app;
 }

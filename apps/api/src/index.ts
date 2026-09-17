@@ -5,7 +5,7 @@ import { Pool } from "pg";
 import { PostgresCheckpointStore } from "@opentalos/postgres-checkpoint";
 import { PostgresEventBus, listEventsSince } from "@opentalos/postgres-tracing";
 import { GraphRegistry, Scheduler } from "@opentalos/scheduler";
-import { TenantStore } from "@opentalos/postgres-tenancy";
+import { TenantStore, UserStore } from "@opentalos/postgres-tenancy";
 import { buildChatAgentGraph, createChatAgentToolRegistry } from "@opentalos/chat-agent";
 import { createModelProviderFromEnv } from "@opentalos/model-providers";
 import { loadSkills, BUNDLED_SKILLS_DIR } from "@opentalos/skills";
@@ -46,6 +46,7 @@ pool.on("error", (error) => {
 const checkpointStore = new PostgresCheckpointStore(pool);
 const eventBus = new PostgresEventBus(pool);
 const tenantStore = new TenantStore(pool);
+const userStore = new UserStore(pool, tenantStore);
 const modelProvider = createModelProviderFromEnv();
 const skills = loadSkills(BUNDLED_SKILLS_DIR);
 const toolRegistryOptions = { modelProvider: process.env.MODEL_PROVIDER, skills };
@@ -62,6 +63,7 @@ const app = buildServer({
   scheduler,
   listEventsSince: (runId, afterId) => listEventsSince(pool, runId, afterId),
   tenantStore,
+  userStore,
   adminApiKey,
 });
 
