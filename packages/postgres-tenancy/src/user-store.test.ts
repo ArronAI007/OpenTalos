@@ -149,4 +149,15 @@ describe("UserStore admin operations", () => {
     const loaded = await userStore.getUser(registered.user.id);
     expect(loaded?.status).toBe("deleted");
   });
+
+  it("getUserByTenantId finds the user backing a given tenant, and returns undefined for an unrelated tenant", async () => {
+    const registered = await userStore.register("jack", "jack-password");
+    if (registered.outcome !== "created") throw new Error("setup failed");
+
+    const found = await userStore.getUserByTenantId(registered.user.tenantId);
+    expect(found?.id).toBe(registered.user.id);
+
+    const unrelatedTenant = await tenantStore.createTenant("not-a-user-tenant");
+    expect(await userStore.getUserByTenantId(unrelatedTenant.id)).toBeUndefined();
+  });
 });

@@ -198,6 +198,47 @@ describe("PATCH /admin/tenants/:id", () => {
     });
     expect(res.statusCode).toBe(400);
   });
+
+  it("refuses to change status on a tenant that backs a registered user, directing the admin to the Users tab instead", async () => {
+    const registerRes = await app.inject({
+      method: "POST",
+      url: "/auth/register",
+      payload: { username: "tenant-guard-test", password: "password123" },
+    });
+    const { apiKey } = registerRes.json();
+    const lookup = await tenantStore.lookupApiKey(apiKey);
+    if (lookup.outcome !== "valid") throw new Error("setup failed");
+
+    const res = await app.inject({
+      method: "PATCH",
+      url: `/admin/tenants/${lookup.tenant.id}`,
+      headers: adminHeaders(),
+      payload: { status: "disabled" },
+    });
+    expect(res.statusCode).toBe(409);
+    // Confirm the tenant's status is genuinely unchanged, not just that the response says 409.
+    expect((await tenantStore.getTenant(lookup.tenant.id))?.status).toBe("active");
+  });
+
+  it("still allows maxConcurrency updates on a user-backed tenant (only status is guarded)", async () => {
+    const registerRes = await app.inject({
+      method: "POST",
+      url: "/auth/register",
+      payload: { username: "tenant-guard-quota-test", password: "password123" },
+    });
+    const { apiKey } = registerRes.json();
+    const lookup = await tenantStore.lookupApiKey(apiKey);
+    if (lookup.outcome !== "valid") throw new Error("setup failed");
+
+    const res = await app.inject({
+      method: "PATCH",
+      url: `/admin/tenants/${lookup.tenant.id}`,
+      headers: adminHeaders(),
+      payload: { maxConcurrency: 3 },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().maxConcurrency).toBe(3);
+  });
 });
 
 describe("API key admin routes", () => {

@@ -115,6 +115,11 @@ export class UserStore {
     return rows[0] ? this.toUserRecord(rows[0]) : undefined;
   }
 
+  async getUserByTenantId(tenantId: string): Promise<UserRecord | undefined> {
+    const rows = await this.db.select().from(users).where(eq(users.tenantId, tenantId)).limit(1);
+    return rows[0] ? this.toUserRecord(rows[0]) : undefined;
+  }
+
   async setUserStatus(id: string, status: "active" | "banned" | "deleted"): Promise<void> {
     await this.db.update(users).set({ status, updatedAt: new Date() }).where(eq(users.id, id));
   }

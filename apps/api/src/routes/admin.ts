@@ -49,6 +49,12 @@ export function registerAdminRoutes(app: FastifyInstance, deps: AdminRouteDeps):
       if (request.body.status !== "active" && request.body.status !== "disabled") {
         return reply.code(400).send({ error: 'status must be "active" or "disabled"' });
       }
+      const owningUser = await userStore.getUserByTenantId(tenant.id);
+      if (owningUser) {
+        return reply.code(409).send({
+          error: `此租户属于用户 "${owningUser.username}"，请到"用户"页面进行封号/解封操作，不要直接修改租户状态`,
+        });
+      }
       await tenantStore.setTenantStatus(request.params.id, request.body.status);
     }
 
