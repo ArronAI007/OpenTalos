@@ -153,7 +153,7 @@ export function ChatPanel({
     bottomRef.current?.scrollIntoView({ block: "end" });
   }, [messages, streamingText, reasoningStreamingText]);
 
-  async function handleFilesSelected(event: ChangeEvent<HTMLInputElement>) {
+  function handleFilesSelected(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
     // Cleared immediately (not after processing) so selecting the exact same file again still
     // fires onChange next time — the browser otherwise treats an unchanged file list as a no-op.
@@ -163,7 +163,12 @@ export function ChatPanel({
     setAttachmentError(undefined);
     const currentImageCount = pendingAttachments.filter((a) => a.kind === "image").length;
     let imageCount = currentImageCount;
-    const accepted: PendingAttachment[] = [];
+    // Validation (type/count/size) happens synchronously so a rejected file never flashes a
+    // loading chip; only files that pass are added, immediately, as a "loading" placeholder —
+    // the actual (async) FileReader read is kicked off separately below, updating each
+    // placeholder in place once it resolves, so a large image visibly shows it's being read
+    // instead of the composer appearing to do nothing until the read finishes.
+    const toRead: { id: string; file: File; kind: "image" | "text" }[] = [];
 
     for (const file of files) {
       if (isImageFile(file)) {
@@ -175,13 +180,8 @@ export function ChatPanel({
           setAttachmentError(`"${file.name}" 超过 ${Math.floor(MAX_IMAGE_FILE_BYTES / (1024 * 1024))}MB 限制`);
           continue;
         }
-        try {
-          const dataUrl = await readFileAsDataUrl(file);
-          accepted.push({ id: crypto.randomUUID(), name: file.name, size: file.size, kind: "image", dataUrl });
-          imageCount += 1;
-        } catch {
-          setAttachmentError(`读取 "${file.name}" 失败，请重试`);
-        }
+        toRead.push({ id: crypto.randomUUID(), file, kind: "image" });
+        imageCount += 1;
         continue;
       }
       if (isTextFile(file)) {
@@ -189,19 +189,41 @@ export function ChatPanel({
           setAttachmentError(`"${file.name}" 超过 ${Math.floor(MAX_TEXT_FILE_BYTES / 1024)}KB 限制`);
           continue;
         }
-        try {
-          const textContent = await readFileAsText(file);
-          accepted.push({ id: crypto.randomUUID(), name: file.name, size: file.size, kind: "text", textContent });
-        } catch {
-          setAttachmentError(`读取 "${file.name}" 失败，请重试`);
-        }
+        toRead.push({ id: crypto.randomUUID(), file, kind: "text" });
         continue;
       }
       setAttachmentError(`不支持的文件类型："${file.name}"，仅支持图片和文本/代码文件`);
     }
 
-    if (accepted.length > 0) {
-      setPendingAttachments((prev) => [...prev, ...accepted]);
+    if (toRead.length === 0) return;
+    setPendingAttachments((prev) => [
+      ...prev,
+      ...toRead.map(({ id, file, kind }) => ({ id, name: file.name, size: file.size, kind, status: "loading" as const })),
+    ]);
+
+    for (const { id, file, kind } of toRead) {
+      const read = kind === "image" ? readFileAsDataUrl(file) : readFileAsText(file);
+      read.then(
+        (content) => {
+          setPendingAttachments((prev) =>
+            prev.map((attachment) =>
+              attachment.id === id
+                ? {
+                    ...attachment,
+                    status: "ready",
+                    ...(kind === "image" ? { dataUrl: content } : { textContent: content }),
+                  }
+                : attachment,
+            ),
+          );
+        },
+        () => {
+          // Still-loading placeholder never resolved (id may already be gone if the user removed
+          // it while it was loading — the filter below then correctly no-ops).
+          setPendingAttachments((prev) => prev.filter((attachment) => attachment.id !== id));
+          setAttachmentError(`读取 "${file.name}" 失败，请重试`);
+        },
+      );
     }
   }
 
@@ -218,6 +240,9 @@ export function ChatPanel({
 
   function submit() {
     if (disabled) return;
+    // dataUrl/textContent only exist once an attachment reaches "ready" (see handleFilesSelected)
+    // — sending while one is still "loading" would inline `undefined` into the outgoing message.
+    if (pendingAttachments.some((a) => a.status === "loading")) return;
     const trimmed = draft.trim();
     if (!trimmed && pendingAttachments.length === 0) return;
     const images = pendingAttachments.filter((a) => a.kind === "image").map((a) => a.dataUrl!);
@@ -260,6 +285,7 @@ export function ChatPanel({
   }
 
   const isStreaming = status === "running" && streamingText !== undefined && streamingText.length > 0;
+  const hasLoadingAttachment = pendingAttachments.some((a) => a.status === "loading");
 
   return (
     <section className="chat-panel" aria-label="对话">
@@ -318,31 +344,33 @@ export function ChatPanel({
       )}
       {error && <p className="chat-error">{error}</p>}
       {attachmentError && <p className="chat-error">{attachmentError}</p>}
-      {pendingAttachments.length > 0 && (
-        <ul className="attachment-preview-list">
-          {pendingAttachments.map((attachment) => (
-            <li key={attachment.id} className="attachment-chip">
-              {attachment.kind === "image" ? (
-                <img src={attachment.dataUrl} alt={attachment.name} className="attachment-chip-thumb" />
-              ) : (
-                <span className="attachment-chip-icon" aria-hidden="true">
-                  📄
-                </span>
-              )}
-              <span className="attachment-chip-name">{attachment.name}</span>
-              <button
-                type="button"
-                className="attachment-chip-remove"
-                onClick={() => removeAttachment(attachment.id)}
-                aria-label={`移除附件 ${attachment.name}`}
-              >
-                ×
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
       <form className="composer" onSubmit={handleSubmit}>
+        {pendingAttachments.length > 0 && (
+          <ul className="attachment-preview-list">
+            {pendingAttachments.map((attachment) => (
+              <li key={attachment.id} className="attachment-chip">
+                {attachment.status === "loading" ? (
+                  <span className="attachment-chip-spinner" aria-label="正在读取文件" />
+                ) : attachment.kind === "image" ? (
+                  <img src={attachment.dataUrl} alt={attachment.name} className="attachment-chip-thumb" />
+                ) : (
+                  <span className="attachment-chip-icon" aria-hidden="true">
+                    📄
+                  </span>
+                )}
+                <span className="attachment-chip-name">{attachment.name}</span>
+                <button
+                  type="button"
+                  className="attachment-chip-remove"
+                  onClick={() => removeAttachment(attachment.id)}
+                  aria-label={`移除附件 ${attachment.name}`}
+                >
+                  ×
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
         <textarea
           className="composer-input"
           placeholder="给智能体发消息"
@@ -386,7 +414,7 @@ export function ChatPanel({
             <button
               className="composer-send"
               type="submit"
-              disabled={disabled || (!draft.trim() && pendingAttachments.length === 0)}
+              disabled={disabled || hasLoadingAttachment || (!draft.trim() && pendingAttachments.length === 0)}
               aria-label="发送"
             >
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true">

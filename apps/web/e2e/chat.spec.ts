@@ -243,6 +243,57 @@ test("a drained follow-up that fails to send doesn't permanently stick the queue
   await expect(secondBubble).toBeVisible({ timeout: 10_000 });
 });
 
+test("shows a loading spinner while a file is being read, then the real preview, inside the composer box", async ({
+  page,
+}) => {
+  // Slows FileReader down so the intermediate "loading" state (see PendingAttachment.status in
+  // lib/attachments.ts) is reliably observable instead of racing past it — a real file this small
+  // would otherwise read near-instantly, making the loading chip flash too briefly to assert on.
+  await page.addInitScript(() => {
+    const OriginalFileReader = window.FileReader;
+    class SlowFileReader extends OriginalFileReader {
+      readAsDataURL(blob: Blob) {
+        setTimeout(() => super.readAsDataURL(blob), 500);
+      }
+      readAsText(blob: Blob) {
+        setTimeout(() => super.readAsText(blob), 500);
+      }
+    }
+    // @ts-expect-error test-only override to simulate a slow file read
+    window.FileReader = SlowFileReader;
+  });
+
+  await page.goto("/");
+
+  const onePixelPng = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+    "base64",
+  );
+  const fileInput = page.locator('input[type="file"]');
+  await fileInput.setInputFiles({ name: "cat.png", mimeType: "image/png", buffer: onePixelPng });
+
+  const spinner = page.locator(".attachment-chip-spinner");
+  await expect(spinner).toBeVisible();
+
+  // Sending while an attachment is still loading would inline `undefined` into the outgoing
+  // message (dataUrl/textContent only exist once it's ready) — the send button must stay disabled.
+  const sendButton = page.getByRole("button", { name: "发送" });
+  await expect(sendButton).toBeDisabled();
+
+  const chip = page.locator(".attachment-chip", { hasText: "cat.png" });
+  await expect(chip.locator("img.attachment-chip-thumb")).toBeVisible({ timeout: 3000 });
+  await expect(spinner).not.toBeVisible();
+  await expect(sendButton).toBeEnabled();
+
+  // The preview list must be nested INSIDE the bordered composer box, not floating above it.
+  const isInsideComposer = await page.evaluate(() => {
+    const list = document.querySelector(".attachment-preview-list");
+    const composer = document.querySelector(".composer");
+    return !!list && !!composer && composer.contains(list);
+  });
+  expect(isInsideComposer).toBe(true);
+});
+
 test("attaching an image previews it, sends it with the message, and shows it in the sent bubble", async ({ page }) => {
   // A minimal valid 1x1 transparent PNG — small enough to stay well under every size cap this
   // feature enforces, real enough for the browser to actually decode and render as an <img>.
@@ -256,7 +307,7 @@ test("attaching an image previews it, sends it with the message, and shows it in
   const fileInput = page.locator('input[type="file"]');
   await fileInput.setInputFiles({ name: "cat.png", mimeType: "image/png", buffer: onePixelPng });
 
-  // Preview chip appears above the composer before sending.
+  // Preview chip appears inside the composer box, above the textarea, before sending.
   const chip = page.locator(".attachment-chip", { hasText: "cat.png" });
   await expect(chip).toBeVisible();
 

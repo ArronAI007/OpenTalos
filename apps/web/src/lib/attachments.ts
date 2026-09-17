@@ -41,6 +41,12 @@ export interface PendingAttachment {
   name: string;
   size: number;
   kind: "image" | "text";
+  /** "loading" from the moment a file is accepted (passed type/count/size checks) until its
+   * FileReader read resolves — shown as a spinner chip in the composer so a large image doesn't
+   * appear to silently do nothing while it's being base64-encoded. Never sent while "loading": the
+   * composer's submit() blocks sending until every attachment reaches "ready" (dataUrl/textContent
+   * only exist once it does). */
+  status: "loading" | "ready";
   /** Set when kind === "image" — a "data:image/...;base64,..." URI, sent as-is to the backend. */
   dataUrl?: string;
   /** Set when kind === "text" — the file's raw text content, inlined into the message on send. */

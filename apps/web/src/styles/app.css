@@ -868,13 +868,15 @@ body {
 }
 
 .attachment-preview-list {
+  /* Lives inside .composer now (its first child, above the textarea) — no padding-inline of its
+   * own needed, since .composer already centers itself via margin-inline and its own padding
+   * provides the inset; this list just needs bottom spacing before the textarea below it. */
   list-style: none;
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-sm);
   margin: 0 0 var(--space-sm);
   padding: 0;
-  padding-inline: var(--content-inline-padding);
 }
 
 .attachment-chip {
@@ -899,6 +901,23 @@ body {
 .attachment-chip-icon {
   font-size: 14px;
   flex-shrink: 0;
+}
+
+.attachment-chip-spinner {
+  display: block;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-text-muted);
+  animation: attachment-spin 800ms linear infinite;
+}
+
+@keyframes attachment-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .attachment-chip-name {
