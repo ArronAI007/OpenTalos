@@ -252,12 +252,6 @@ body {
   z-index: 5;
 }
 
-.sidebar-resize-handle:hover,
-.sidebar-resize-handle:active {
-  background: var(--color-accent);
-  opacity: 0.4;
-}
-
 .sidebar-rail {
   display: flex;
   flex-direction: column;
