@@ -99,8 +99,8 @@ export function registerAdminRoutes(app: FastifyInstance, deps: AdminRouteDeps):
     if (user.status !== "active") {
       return reply.code(409).send({ error: `Cannot ban a user with status "${user.status}"` });
     }
-    await userStore.setUserStatus(user.id, "banned");
     await tenantStore.setTenantStatus(user.tenantId, "disabled");
+    await userStore.setUserStatus(user.id, "banned");
     return reply.send(await userStore.getUser(user.id));
   });
 
@@ -122,8 +122,8 @@ export function registerAdminRoutes(app: FastifyInstance, deps: AdminRouteDeps):
     if (!user) {
       return reply.code(404).send({ error: `User "${request.params.id}" not found` });
     }
-    await userStore.setUserStatus(user.id, "deleted");
     await tenantStore.setTenantStatus(user.tenantId, "disabled");
+    await userStore.setUserStatus(user.id, "deleted");
     return reply.send(await userStore.getUser(user.id));
   });
 }
