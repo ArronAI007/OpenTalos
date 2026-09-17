@@ -335,7 +335,7 @@ test("attaching an image previews it, sends it with the message, and shows it in
   await expect(page.getByText(/收到 1 张图片/)).toBeVisible({ timeout: 10_000 });
 });
 
-test("attaching a text file shows it as its own code block and inlines it into the message sent to the model", async ({
+test("attaching a text file shows only a filename chip in the sent bubble, but still inlines its content into the message sent to the model", async ({
   page,
 }) => {
   await page.goto("/");
@@ -356,13 +356,14 @@ test("attaching a text file shows it as its own code block and inlines it into t
   await sendButton.click();
 
   const sentBubble = page.locator("li.message-user");
-  // The typed text and the attachment's own labeled code block both render — but the raw
-  // "[附件: notes.py] ```...```" wrapping used for the model is never shown as literal text (see
-  // TextAttachmentBlock, kept deliberately separate from the plain-text user bubble).
+  // The typed text and a compact filename+type chip both render — but neither the raw
+  // "[附件: notes.py] ```...```" wrapping used for the model, nor the file's actual content, is
+  // ever shown in the sent bubble (see TextAttachmentChip: filename only, by design).
   await expect(sentBubble).toContainText("这个文件是干什么的？");
   await expect(sentBubble).not.toContainText("[附件: notes.py]");
-  await expect(sentBubble.locator(".text-attachment-name")).toContainText("notes.py");
-  await expect(sentBubble.locator(".text-attachment-content")).toContainText("print('hello from attachment')");
+  await expect(sentBubble.locator(".text-attachment-chip-name")).toContainText("notes.py");
+  await expect(sentBubble.locator(".text-attachment-chip-type")).toContainText("PY");
+  await expect(sentBubble).not.toContainText("print('hello from attachment')");
 
   // The mock model still sees the file content inlined into what was actually sent — approve the
   // HITL pause and confirm the reply references it (mock.ts echoes back the last tool result, not

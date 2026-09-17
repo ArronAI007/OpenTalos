@@ -962,29 +962,38 @@ body {
   object-fit: cover;
 }
 
-.text-attachment-block {
-  margin-top: var(--space-sm);
-  background: rgba(0, 0, 0, 0.06);
-  border-radius: 8px;
+.text-attachment-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: var(--space-sm);
   padding: 8px 10px;
-  overflow: hidden;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 10px;
 }
 
-.text-attachment-name {
-  margin: 0 0 4px;
-  font-size: 12px;
+.text-attachment-chip-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.text-attachment-chip-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.text-attachment-chip-name {
+  font-size: 13px;
   font-weight: 600;
-  opacity: 0.85;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.text-attachment-content {
-  margin: 0;
-  max-height: 240px;
-  overflow: auto;
-  font-family: ui-monospace, monospace;
-  font-size: 12px;
-  white-space: pre-wrap;
-  word-break: break-word;
+.text-attachment-chip-type {
+  font-size: 11px;
+  opacity: 0.8;
 }
 
 .composer-send {

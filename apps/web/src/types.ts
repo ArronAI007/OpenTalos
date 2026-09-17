@@ -29,8 +29,8 @@ export interface ChatMessage {
    * ChatPanel's attachment picker). Persisted alongside the message so it still renders after a
    * reload. */
   images?: string[];
-  /** Text/code files attached to this message — only ever set on a user message. Rendered as its
-   * own labeled code block (see TextAttachmentBlock), separate from `text`: the model still sees
+  /** Text/code files attached to this message — only ever set on a user message. Rendered as a
+   * compact filename-only badge (see TextAttachmentChip), never its content: the model still sees
    * this content inlined into the message actually sent (see api.ts's startRun call in App.tsx),
    * but the LOCAL display keeps it out of `text` so it doesn't show up as literal ``` characters
    * in the plain-text user bubble (user messages are intentionally never markdown-rendered). */

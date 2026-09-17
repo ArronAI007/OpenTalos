@@ -70,15 +70,23 @@ function MessageImages({ images }: { images: string[] }) {
   );
 }
 
-/** Read-only, labeled code block for a message's attached text/code files — kept separate from
- * `AssistantMarkdown`'s markdown rendering (user messages are intentionally never markdown-parsed,
- * see that component's own comment) and from plain `message.text`, so a file's raw content never
- * shows up as literal ``` characters in the middle of a plain-text bubble. */
-function TextAttachmentBlock({ name, content }: { name: string; content: string }) {
+/** Compact, read-only badge for a message's attached text/code file — deliberately shows only the
+ * filename, never its content (a large attached file's full text cluttering every sent bubble
+ * forever was worse than just not showing it — the model still sees the actual content, inlined
+ * into what's sent; see submit() below). Content stays fully out of `message.text` too, so it
+ * never shows up as literal ``` characters in the middle of a plain-text bubble. */
+function TextAttachmentChip({ name }: { name: string }) {
+  const dotIndex = name.lastIndexOf(".");
+  const extension = dotIndex > 0 ? name.slice(dotIndex + 1).toUpperCase() : "";
   return (
-    <div className="text-attachment-block">
-      <p className="text-attachment-name">📄 {name}</p>
-      <pre className="text-attachment-content">{content}</pre>
+    <div className="text-attachment-chip">
+      <span className="text-attachment-chip-icon" aria-hidden="true">
+        📄
+      </span>
+      <div className="text-attachment-chip-info">
+        <span className="text-attachment-chip-name">{name}</span>
+        {extension && <span className="text-attachment-chip-type">{extension}</span>}
+      </div>
     </div>
   );
 }
@@ -252,7 +260,7 @@ export function ChatPanel({
     const displayText = trimmed || attachmentPlaceholderText();
     // The model has no separate channel for attachment content — this project deliberately has no
     // attachment storage layer of its own — so it's inlined into the text actually sent, even
-    // though the LOCAL display keeps it out of displayText (see TextAttachmentBlock).
+    // though the LOCAL display keeps it out of displayText (see TextAttachmentChip).
     const modelText =
       displayText + textAttachments.map((a) => formatTextAttachment(a.name, a.content)).join("");
     onSend({
@@ -302,10 +310,10 @@ export function ChatPanel({
                 <ReasoningBlock text={message.reasoningText} isThinking={false} />
               )}
               {message.images && message.images.length > 0 && <MessageImages images={message.images} />}
-              {message.role === "assistant" ? <AssistantMarkdown text={message.text} /> : message.text}
               {message.textAttachments?.map((attachment) => (
-                <TextAttachmentBlock key={attachment.name} name={attachment.name} content={attachment.content} />
+                <TextAttachmentChip key={attachment.name} name={attachment.name} />
               ))}
+              {message.role === "assistant" ? <AssistantMarkdown text={message.text} /> : message.text}
             </li>
           ))}
           {(streamingText || reasoningStreamingText) && (
