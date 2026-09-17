@@ -89,3 +89,17 @@ export function ChevronDownIcon() {
     </svg>
   );
 }
+
+export function EditIcon() {
+  return (
+    <svg {...svgProps} width={14} height={14}>
+      <path
+        d="M15.5 4.5L19.5 8.5L8 20H4V16L15.5 4.5Z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}

@@ -186,6 +186,42 @@ test("dragging the sidebar's resize handle changes and persists its width, clamp
   expect(Math.round(collapsedWidth)).toBe(56);
 });
 
+test("clicking the edit icon next to the header title lets you rename the session", async ({ page }) => {
+  await page.goto("/");
+
+  const chatInput = page.getByPlaceholder("给智能体发消息");
+  const sendButton = page.getByRole("button", { name: "发送" });
+  await chatInput.fill("原始标题消息");
+  await sendButton.click();
+  await expect(page.getByRole("heading", { name: "原始标题消息" })).toBeVisible();
+
+  await page.getByRole("button", { name: "重命名会话" }).click();
+  const input = page.getByRole("textbox", { name: "重命名会话" });
+  await expect(input).toHaveValue("原始标题消息");
+  await input.fill("我的自定义标题");
+  await input.press("Enter");
+
+  // The renamed title shows both in the header and in the sidebar's session list.
+  await expect(page.getByRole("heading", { name: "我的自定义标题" })).toBeVisible();
+  await expect(page.locator(".session-button-title")).toHaveText("我的自定义标题");
+
+  // Escape cancels without saving.
+  await page.getByRole("button", { name: "重命名会话" }).click();
+  await page.getByRole("textbox", { name: "重命名会话" }).fill("不应该被保存");
+  await page.getByRole("textbox", { name: "重命名会话" }).press("Escape");
+  await expect(page.getByRole("heading", { name: "我的自定义标题" })).toBeVisible();
+
+  // Persisted across a reload (see ChatSession.customTitle).
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "我的自定义标题" })).toBeVisible();
+
+  // Renaming to blank reverts to the auto-generated title (see sessionTitle()).
+  await page.getByRole("button", { name: "重命名会话" }).click();
+  await page.getByRole("textbox", { name: "重命名会话" }).fill("   ");
+  await page.getByRole("textbox", { name: "重命名会话" }).press("Enter");
+  await expect(page.getByRole("heading", { name: "原始标题消息" })).toBeVisible();
+});
+
 test("sending a message while the model is actively streaming steers it instead of being blocked", async ({ page }) => {
   // MODEL_PROVIDER=mock's complete() always calls lookup_exchange_rate on round 1 for any
   // first-turn message when a tool is registered, then narrates the tool result on round 2 with a
@@ -554,7 +590,8 @@ test("chat input is reachable via keyboard navigation", async ({ page }) => {
   // and its "☰" mobile toggle is display:none (so not focusable) — meaning the sidebar's own
   // controls (collapse button, "+ 新会话", the workspace toolbar's search/sort/new icons, then the
   // one default session, then "设置") are the genuinely first focusable elements on the page,
-  // ahead of the header's Session log button, the 轨迹 toggle, and the chat input.
+  // ahead of the header's rename-title button, Session log button, the 轨迹 toggle, and the chat
+  // input.
   await page.keyboard.press("Tab");
   await expect(page.getByRole("button", { name: "收起侧栏" })).toBeFocused();
 
@@ -575,6 +612,9 @@ test("chat input is reachable via keyboard navigation", async ({ page }) => {
 
   await page.keyboard.press("Tab");
   await expect(page.getByRole("button", { name: "设置", exact: true })).toBeFocused();
+
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("button", { name: "重命名会话" })).toBeFocused();
 
   await page.keyboard.press("Tab");
   await expect(page.getByRole("button", { name: /Session log/ })).toBeFocused();

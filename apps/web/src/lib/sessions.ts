@@ -46,6 +46,7 @@ export function saveSessions(sessions: ChatSession[], activeSessionId: string): 
 }
 
 export function sessionTitle(session: ChatSession): string {
+  if (session.customTitle) return session.customTitle;
   const firstUserMessage = session.messages.find((message) => message.role === "user");
   if (!firstUserMessage) return "新会话";
   return firstUserMessage.text.length > 20 ? `${firstUserMessage.text.slice(0, 20)}…` : firstUserMessage.text;

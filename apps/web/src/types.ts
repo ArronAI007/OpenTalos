@@ -59,4 +59,8 @@ export interface ChatSession {
    * at a time: the drain effect (App.tsx) waits for each drained item's own run to reach a
    * terminal state (done/failed) before dequeuing the next one. */
   pendingFollowUps?: OutgoingChatMessage[];
+  /** Set once the user manually renames a session (see App.tsx's title-editing UI) — overrides
+   * sessionTitle()'s default of deriving a title from the first user message. Cleared back to
+   * undefined (reverting to that default) if the user renames it to an empty string. */
+  customTitle?: string;
 }
