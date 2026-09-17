@@ -140,6 +140,13 @@ body {
   color: var(--color-danger-text);
 }
 
+/* .tenant-row is shared with TenantList, where rows are real expand/collapse buttons -- UserList's
+ * rows are plain, non-interactive <li>s, so the shared class's cursor:pointer would falsely
+ * suggest they're clickable. */
+.user-list .tenant-row {
+  cursor: default;
+}
+
 .create-tenant-form {
   display: flex;
   gap: var(--space-sm);

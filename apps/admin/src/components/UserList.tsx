@@ -63,7 +63,7 @@ export function UserList({ onAuthError }: UserListProps) {
   return (
     <div>
       {error && <p className="error-banner">{error}</p>}
-      <ul className="tenant-list">
+      <ul className="tenant-list user-list">
         {users.map((user) => (
           <li key={user.id} className="tenant-row">
             <div className="tenant-row-header">
