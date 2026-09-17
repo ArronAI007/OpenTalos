@@ -1396,6 +1396,30 @@ body {
   }
 }
 
+.gate-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: var(--space-md);
+  border-bottom: 0.5px solid var(--color-border);
+}
+
+.gate-tab {
+  flex: 1;
+  background: none;
+  border: none;
+  padding: 8px 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+
+.gate-tab-active {
+  color: var(--color-text);
+  border-bottom-color: var(--color-accent);
+}
+
 .gate-card {
   max-width: 360px;
   margin: 120px auto;

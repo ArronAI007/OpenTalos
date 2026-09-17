@@ -13,6 +13,7 @@ export default async function globalSetup(): Promise<void> {
   const pool = new Pool({ connectionString: DATABASE_URL });
   try {
     await pool.query(`
+      DROP TABLE IF EXISTS users;
       DROP TABLE IF EXISTS api_keys;
       DROP TABLE IF EXISTS tenants;
       DROP TABLE IF EXISTS trace_events;
@@ -44,6 +45,11 @@ export default async function globalSetup(): Promise<void> {
         id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, key_hash TEXT NOT NULL, key_prefix TEXT NOT NULL,
         status TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), last_used_at TIMESTAMPTZ
       );
+      CREATE TABLE users (
+        id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL UNIQUE, username TEXT NOT NULL, password_hash TEXT NOT NULL,
+        status TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+      CREATE UNIQUE INDEX users_username_lower_idx ON users (lower(username));
     `);
 
     const tenantStore = new TenantStore(pool);

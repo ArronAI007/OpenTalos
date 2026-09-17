@@ -35,6 +35,32 @@ export function clearApiKey(): void {
   localStorage.removeItem(API_KEY_STORAGE_KEY);
 }
 
+async function parseAuthResponse(res: Response): Promise<string> {
+  const body = await res.json().catch(() => ({}) as { error?: string; apiKey?: string });
+  if (!res.ok) {
+    throw new Error(body.error ?? "请求失败，请重试");
+  }
+  return body.apiKey as string;
+}
+
+export async function registerUser(username: string, password: string): Promise<string> {
+  const res = await fetch("/auth/register", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+  return parseAuthResponse(res);
+}
+
+export async function loginUser(username: string, password: string): Promise<string> {
+  const res = await fetch("/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+  return parseAuthResponse(res);
+}
+
 function withSession(path: string, sessionId: string): string {
   const separator = path.includes("?") ? "&" : "?";
   return `${path}${separator}sessionId=${sessionId}`;
