@@ -59,7 +59,13 @@ export async function updateTenant(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(patch),
   });
-  if (!res.ok) throw new Error(`Failed to update tenant: ${res.status}`);
+  if (!res.ok) {
+    // Surfaces the backend's specific message when there is one (e.g. the 409 guidance to use
+    // the Users tab for a user-backed tenant) instead of a bare status code that leaves the admin
+    // guessing why the toggle was refused.
+    const body = await res.json().catch(() => ({}) as { error?: string });
+    throw new Error(body.error ?? `Failed to update tenant: ${res.status}`);
+  }
   return res.json();
 }
 
