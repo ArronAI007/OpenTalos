@@ -51,11 +51,32 @@ body {
 }
 
 .app-header-top {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
+  /* Three columns, the outer two an equal minmax(0, 1fr) each: this is what makes the title
+   * (column 2) sit genuinely centered regardless of how wide .app-header-actions (column 3) ends
+   * up being, rather than merely "pushed left" by a flex `justify-content: space-between` (which
+   * centers nothing -- it only spaces two items apart). Both outer tracks can shrink to 0, so a
+   * long title still gets to use extra space (see the 1fr:3fr:1fr split below) instead of forcing
+   * an overflow. */
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 3fr) minmax(0, 1fr);
+  align-items: start;
   gap: var(--space-sm);
   margin-bottom: var(--space-sm);
+}
+
+.app-header-titles {
+  grid-column: 2;
+  min-width: 0;
+  text-align: center;
+}
+
+.app-header-actions {
+  grid-column: 3;
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-shrink: 0;
 }
 
 .app-session-title {
@@ -66,6 +87,16 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.app-header-caption {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.app-trace-toggle {
+  position: relative;
 }
 
 .session-log-menu {
@@ -135,49 +166,14 @@ body {
   outline-offset: 2px;
 }
 
-.app-tabs {
-  display: flex;
-  gap: var(--space-md);
-  border-bottom: 0.5px solid var(--color-border);
-}
-
-.app-tab {
-  position: relative;
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  color: var(--color-text-muted);
-  padding: 0 0 8px 0;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition:
-    color var(--duration-fast) ease,
-    border-color var(--duration-fast) ease;
-}
-
-.app-tab:hover {
-  color: var(--color-text);
-}
-
-.app-tab:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-}
-
-.app-tab-active {
-  color: var(--color-accent);
-  border-bottom-color: var(--color-accent);
-}
-
 .app-tab-badge {
-  display: inline-block;
+  position: absolute;
+  top: 3px;
+  right: 3px;
   width: 6px;
   height: 6px;
-  margin-left: 4px;
   border-radius: 50%;
   background: var(--color-warn-text);
-  vertical-align: middle;
 }
 
 .sidebar-trigger {
@@ -1294,7 +1290,7 @@ body {
   .approve-button,
   .deny-button,
   .trace-card-header,
-  .app-tab,
+  .app-trace-toggle,
   .streaming-cursor {
     transition: none;
     animation: none;

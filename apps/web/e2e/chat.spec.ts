@@ -94,6 +94,51 @@ test("pressing Enter to confirm an IME composition fills the textarea instead of
   await expect(sentMessage).toBeVisible();
 });
 
+test("the header shows a centered title with a fixed caption, and 轨迹 is a toggle icon (no 对话 tab)", async ({
+  page,
+}) => {
+  await page.goto("/");
+
+  // No "对话" tab exists anymore -- 对话 is just the default view.
+  await expect(page.getByRole("button", { name: "对话", exact: true })).toHaveCount(0);
+
+  await expect(page.getByText("AI 生成可能有误，注意核实")).toBeVisible();
+
+  const chatInput = page.getByPlaceholder("给智能体发消息");
+  const sendButton = page.getByRole("button", { name: "发送" });
+  await chatInput.fill("今天美元兑人民币汇率是多少？");
+  await sendButton.click();
+
+  const traceToggle = page.getByRole("button", { name: "轨迹" });
+  await expect(traceToggle).toHaveAttribute("aria-pressed", "false");
+  await traceToggle.click();
+  await expect(traceToggle).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: /tool_call_start/ })).toBeVisible({ timeout: 10_000 });
+
+  // Click the SAME button again to toggle back -- there is no separate "对话" button anymore.
+  await traceToggle.click();
+  await expect(traceToggle).toHaveAttribute("aria-pressed", "false");
+  await expect(chatInput).toBeVisible();
+});
+
+test("the content area extends to app-main's true edge instead of stopping at a centered 960px column", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 800 });
+  await page.goto("/");
+
+  const rects = await page.evaluate(() => {
+    const main = document.querySelector(".app-main")!.getBoundingClientRect();
+    const list = document.querySelector(".chat-empty, .message-list")!.getBoundingClientRect();
+    return { appMainRight: main.right, contentRight: list.right };
+  });
+  // A 960px-column design would leave a large gap here on a 1440px-wide viewport (minus the 240px
+  // sidebar, that's ~1200px available -- a 960px cap leaves ~120px unused on each side). Full-bleed
+  // means the content element's own right edge should sit right at app-main's right edge, same as
+  // .message-list already does for scrollbar placement (see the 2026-09-16 scrollbar fix).
+  expect(Math.abs(rects.contentRight - rects.appMainRight)).toBeLessThan(1);
+});
+
 test("sending a message while the model is actively streaming steers it instead of being blocked", async ({ page }) => {
   // MODEL_PROVIDER=mock's complete() always calls lookup_exchange_rate on round 1 for any
   // first-turn message when a tool is registered, then narrates the tool result on round 2 with a
@@ -121,7 +166,6 @@ test("sending a message while the model is actively streaming steers it instead 
   const approveButton = page.getByRole("button", { name: "✓ 批准" });
   await expect(approveButton).toBeVisible({ timeout: 10_000 });
   await approveButton.click();
-  await page.getByRole("button", { name: "对话", exact: true }).click();
   await expect(page.locator("li.message-assistant").last()).not.toBeEmpty({ timeout: 10_000 });
 });
 
@@ -139,7 +183,7 @@ test("sending a message while paused for approval queues it as a follow-up, sent
   // Do NOT approve yet -- the run is "paused". Go back to 对话 and send a real follow-up while
   // still paused, the way an actual user would (this only works once this task's App.tsx change
   // stops disabling the composer during "paused", not just "running" as Task 8 left it).
-  await page.getByRole("button", { name: "对话", exact: true }).click();
+  await page.getByRole("button", { name: "轨迹" }).click();
 
   await expect(chatInput).toBeEnabled();
   await chatInput.fill("这是一条排队消息");
@@ -151,7 +195,6 @@ test("sending a message while paused for approval queues it as a follow-up, sent
 
   await page.getByRole("button", { name: /轨迹/ }).click();
   await approveButton.click();
-  await page.getByRole("button", { name: "对话", exact: true }).click();
 
   await expect(queuedBubble).toBeVisible({ timeout: 10_000 });
 });
@@ -170,7 +213,7 @@ test("multiple messages queued while paused drain strictly one at a time, in ord
   await page.getByRole("button", { name: /轨迹/ }).click();
   const approveButton = page.getByRole("button", { name: "✓ 批准" });
   await expect(approveButton).toBeVisible({ timeout: 10_000 });
-  await page.getByRole("button", { name: "对话", exact: true }).click();
+  await page.getByRole("button", { name: "轨迹" }).click();
 
   await expect(chatInput).toBeEnabled();
   await chatInput.fill("排队消息一");
@@ -187,7 +230,6 @@ test("multiple messages queued while paused drain strictly one at a time, in ord
   // tool call) pauses again itself. #2 must NOT be sent yet: it's still waiting behind #1.
   await page.getByRole("button", { name: /轨迹/ }).click();
   await approveButton.click();
-  await page.getByRole("button", { name: "对话", exact: true }).click();
 
   await expect(bubbleOne).toBeVisible({ timeout: 10_000 });
   await expect(bubbleTwo).not.toBeVisible();
@@ -196,7 +238,6 @@ test("multiple messages queued while paused drain strictly one at a time, in ord
   await page.getByRole("button", { name: /轨迹/ }).click();
   await expect(approveButton).toBeVisible({ timeout: 10_000 });
   await approveButton.click();
-  await page.getByRole("button", { name: "对话", exact: true }).click();
 
   await expect(bubbleTwo).toBeVisible({ timeout: 10_000 });
 });
@@ -217,7 +258,7 @@ test("a drained follow-up that fails to send doesn't permanently stick the queue
   await page.getByRole("button", { name: /轨迹/ }).click();
   const approveButton = page.getByRole("button", { name: "✓ 批准" });
   await expect(approveButton).toBeVisible({ timeout: 10_000 });
-  await page.getByRole("button", { name: "对话", exact: true }).click();
+  await page.getByRole("button", { name: "轨迹" }).click();
 
   await expect(chatInput).toBeEnabled();
   await chatInput.fill("会发送失败的排队消息");
@@ -237,7 +278,6 @@ test("a drained follow-up that fails to send doesn't permanently stick the queue
 
   await page.getByRole("button", { name: /轨迹/ }).click();
   await approveButton.click();
-  await page.getByRole("button", { name: "对话", exact: true }).click();
 
   const secondBubble = page.locator("li.message-user", { hasText: "应该仍能送达的排队消息" });
   await expect(secondBubble).toBeVisible({ timeout: 10_000 });
@@ -331,7 +371,6 @@ test("attaching an image previews it, sends it with the message, and shows it in
   const approveButton = page.getByRole("button", { name: "✓ 批准" });
   await expect(approveButton).toBeVisible({ timeout: 10_000 });
   await approveButton.click();
-  await page.getByRole("button", { name: "对话", exact: true }).click();
   await expect(page.getByText(/收到 1 张图片/)).toBeVisible({ timeout: 10_000 });
 });
 
@@ -372,7 +411,6 @@ test("attaching a text file shows only a filename chip in the sent bubble, but s
   const approveButton = page.getByRole("button", { name: "✓ 批准" });
   await expect(approveButton).toBeVisible({ timeout: 10_000 });
   await approveButton.click();
-  await page.getByRole("button", { name: "对话", exact: true }).click();
   await expect(page.locator("li.message-assistant").last()).not.toBeEmpty({ timeout: 10_000 });
 });
 
@@ -469,7 +507,7 @@ test("chat input is reachable via keyboard navigation", async ({ page }) => {
   // and its "☰" mobile toggle is display:none (so not focusable) — meaning the sidebar's own
   // controls (collapse button, "+ 新会话", the workspace toolbar's search/sort/new icons, then the
   // one default session, then "设置") are the genuinely first focusable elements on the page,
-  // ahead of the header's Session log button, 对话/轨迹 tabs, and the chat input.
+  // ahead of the header's Session log button, the 轨迹 toggle, and the chat input.
   await page.keyboard.press("Tab");
   await expect(page.getByRole("button", { name: "收起侧栏" })).toBeFocused();
 
@@ -495,10 +533,7 @@ test("chat input is reachable via keyboard navigation", async ({ page }) => {
   await expect(page.getByRole("button", { name: /Session log/ })).toBeFocused();
 
   await page.keyboard.press("Tab");
-  await expect(page.getByRole("button", { name: "对话", exact: true })).toBeFocused();
-
-  await page.keyboard.press("Tab");
-  await expect(page.getByRole("button", { name: /轨迹/ })).toBeFocused();
+  await expect(page.getByRole("button", { name: "轨迹" })).toBeFocused();
 
   await page.keyboard.press("Tab");
   await expect(page.getByPlaceholder("给智能体发消息")).toBeFocused();

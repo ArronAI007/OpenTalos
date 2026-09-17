@@ -356,26 +356,33 @@ export function App() {
           </button>
           <div className="app-header-main">
             <div className="app-header-top">
-              <h1 className="app-session-title">{sessionTitle(activeSession)}</h1>
-              <SessionLogMenu session={activeSession} />
+              <div className="app-header-titles">
+                <h1 className="app-session-title">{sessionTitle(activeSession)}</h1>
+                <p className="app-header-caption">AI 生成可能有误，注意核实</p>
+              </div>
+              <div className="app-header-actions">
+                <SessionLogMenu session={activeSession} />
+                <button
+                  type="button"
+                  className="sidebar-icon-button app-trace-toggle"
+                  aria-pressed={activeTab === "trace"}
+                  aria-label="轨迹"
+                  onClick={() => setActiveTab(activeTab === "trace" ? "chat" : "trace")}
+                >
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true">
+                    <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeWidth="1.6" />
+                    <path
+                      d="M12 7.5V12l3 2"
+                      stroke="currentColor"
+                      strokeWidth="1.6"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                  {timeline.status === "paused" && <span className="app-tab-badge" aria-label="有待确认的操作" />}
+                </button>
+              </div>
             </div>
-            <nav className="app-tabs" aria-label="视图切换">
-              <button
-                type="button"
-                className={`app-tab${activeTab === "chat" ? " app-tab-active" : ""}`}
-                onClick={() => setActiveTab("chat")}
-              >
-                对话
-              </button>
-              <button
-                type="button"
-                className={`app-tab${activeTab === "trace" ? " app-tab-active" : ""}`}
-                onClick={() => setActiveTab("trace")}
-              >
-                轨迹
-                {timeline.status === "paused" && <span className="app-tab-badge" aria-label="有待确认的操作" />}
-              </button>
-            </nav>
           </div>
         </header>
         {activeTab === "chat" ? (
