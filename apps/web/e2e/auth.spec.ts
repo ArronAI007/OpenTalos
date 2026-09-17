@@ -4,6 +4,15 @@ const ADMIN_API_KEY = "e2e-admin-key";
 const API_BASE = "http://localhost:3001";
 const ADMIN_BASE = "http://localhost:3001/admin";
 
+// Date.now() alone can collide (parallel workers, retries, or two tests firing within the same
+// millisecond); a random suffix makes username collisions practically impossible without needing
+// a shared counter across test files. Kept short (no Date.now() prefix) since usernames are
+// capped at 32 chars server-side (see apps/api/src/routes/auth.ts's MAX_USERNAME_LENGTH) and the
+// longest prefix used here ("web-register") plus a full timestamp would exceed that.
+function uniqueUsername(prefix: string): string {
+  return `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
+}
+
 async function createTenantAndKey(name: string, maxConcurrency?: number) {
   const createRes = await fetch(`${ADMIN_BASE}/tenants`, {
     method: "POST",
@@ -173,7 +182,7 @@ test("a revoked API key is rejected by the chat UI, which asks the user to re-en
 test("registering a new account via the web UI logs straight into a working chat session", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("tab", { name: "注册" }).click();
-  await page.getByPlaceholder("用户名").fill(`web-register-${Date.now()}`);
+  await page.getByPlaceholder("用户名").fill(uniqueUsername("web-register"));
   await page.getByPlaceholder("密码（至少 8 位）").fill("password123");
   await page.getByPlaceholder("确认密码").fill("password123");
   await page.getByRole("button", { name: "注册" }).click();
@@ -184,7 +193,7 @@ test("registering a new account via the web UI logs straight into a working chat
 });
 
 test("registering then logging out and back in with the same credentials works", async ({ page }) => {
-  const username = `web-login-${Date.now()}`;
+  const username = uniqueUsername("web-login");
   await page.goto("/");
   await page.getByRole("tab", { name: "注册" }).click();
   await page.getByPlaceholder("用户名").fill(username);
@@ -214,7 +223,7 @@ test("registering then logging out and back in with the same credentials works",
 test("registration rejects a mismatched confirm-password without hitting the server", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("tab", { name: "注册" }).click();
-  await page.getByPlaceholder("用户名").fill(`mismatch-${Date.now()}`);
+  await page.getByPlaceholder("用户名").fill(uniqueUsername("mismatch"));
   await page.getByPlaceholder("密码（至少 8 位）").fill("password123");
   await page.getByPlaceholder("确认密码").fill("different-password");
   await page.getByRole("button", { name: "注册" }).click();
@@ -225,7 +234,7 @@ test("registration rejects a mismatched confirm-password without hitting the ser
 });
 
 test("logging in with a wrong password shows an error and stays on the gate", async ({ page }) => {
-  const username = `wrongpw-${Date.now()}`;
+  const username = uniqueUsername("wrongpw");
   await page.goto("/");
   await page.getByRole("tab", { name: "注册" }).click();
   await page.getByPlaceholder("用户名").fill(username);
@@ -246,7 +255,7 @@ test("logging in with a wrong password shows an error and stays on the gate", as
 });
 
 test("a banned user cannot log in and sees a clear reason", async ({ page }) => {
-  const username = `banned-web-${Date.now()}`;
+  const username = uniqueUsername("banned-web");
   const registerRes = await fetch("http://localhost:3001/auth/register", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
