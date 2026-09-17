@@ -105,14 +105,8 @@ body {
   max-width: 100%;
   background: none;
   border: none;
-  border-radius: 6px;
-  padding: 2px 4px;
+  padding: 0;
   cursor: pointer;
-  transition: background var(--duration-fast) ease;
-}
-
-.app-session-title-row:hover {
-  background: var(--color-sidebar-hover);
 }
 
 .app-session-title-row:focus-visible {
@@ -121,11 +115,21 @@ body {
 }
 
 .app-session-title-inner {
+  /* The hover background lives here, not on the row (which stretches to the full centered
+   * column, see the row's own `width: 100%` comment) -- otherwise hovering anywhere across that
+   * whole width would grey out a bar far wider than the title text itself. */
   position: relative;
   display: inline-flex;
   align-items: center;
   min-width: 0;
   max-width: 100%;
+  border-radius: 6px;
+  padding: 2px 4px;
+  transition: background var(--duration-fast) ease;
+}
+
+.app-session-title-row:hover .app-session-title-inner {
+  background: var(--color-sidebar-hover);
 }
 
 .app-session-title-edit-icon {
