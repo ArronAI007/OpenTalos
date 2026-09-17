@@ -41,7 +41,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   app.register(
     async (adminScope) => {
       adminScope.addHook("preHandler", createAdminAuthHook(deps.adminApiKey));
-      registerAdminRoutes(adminScope, { tenantStore: deps.tenantStore });
+      registerAdminRoutes(adminScope, { tenantStore: deps.tenantStore, userStore: deps.userStore });
     },
     { prefix: "/admin" },
   );

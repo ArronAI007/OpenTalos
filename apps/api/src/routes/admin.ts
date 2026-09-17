@@ -1,8 +1,9 @@
 import type { FastifyInstance } from "fastify";
-import type { TenantStore } from "@opentalos/postgres-tenancy";
+import type { TenantStore, UserStore } from "@opentalos/postgres-tenancy";
 
 export interface AdminRouteDeps {
   tenantStore: TenantStore;
+  userStore: UserStore;
 }
 
 interface CreateTenantBody {
@@ -16,7 +17,7 @@ interface UpdateTenantBody {
 }
 
 export function registerAdminRoutes(app: FastifyInstance, deps: AdminRouteDeps): void {
-  const { tenantStore } = deps;
+  const { tenantStore, userStore } = deps;
 
   app.post<{ Body: CreateTenantBody }>("/tenants", async (request, reply) => {
     const name = request.body?.name;
@@ -84,5 +85,45 @@ export function registerAdminRoutes(app: FastifyInstance, deps: AdminRouteDeps):
   app.delete<{ Params: { id: string } }>("/api-keys/:id", async (request, reply) => {
     await tenantStore.revokeApiKey(request.params.id);
     return reply.code(204).send();
+  });
+
+  app.get("/users", async (_request, reply) => {
+    return reply.send(await userStore.listUsers());
+  });
+
+  app.patch<{ Params: { id: string } }>("/users/:id/ban", async (request, reply) => {
+    const user = await userStore.getUser(request.params.id);
+    if (!user) {
+      return reply.code(404).send({ error: `User "${request.params.id}" not found` });
+    }
+    if (user.status !== "active") {
+      return reply.code(409).send({ error: `Cannot ban a user with status "${user.status}"` });
+    }
+    await userStore.setUserStatus(user.id, "banned");
+    await tenantStore.setTenantStatus(user.tenantId, "disabled");
+    return reply.send(await userStore.getUser(user.id));
+  });
+
+  app.patch<{ Params: { id: string } }>("/users/:id/unban", async (request, reply) => {
+    const user = await userStore.getUser(request.params.id);
+    if (!user) {
+      return reply.code(404).send({ error: `User "${request.params.id}" not found` });
+    }
+    if (user.status !== "banned") {
+      return reply.code(409).send({ error: `Cannot unban a user with status "${user.status}"` });
+    }
+    await userStore.setUserStatus(user.id, "active");
+    await tenantStore.setTenantStatus(user.tenantId, "active");
+    return reply.send(await userStore.getUser(user.id));
+  });
+
+  app.patch<{ Params: { id: string } }>("/users/:id/delete", async (request, reply) => {
+    const user = await userStore.getUser(request.params.id);
+    if (!user) {
+      return reply.code(404).send({ error: `User "${request.params.id}" not found` });
+    }
+    await userStore.setUserStatus(user.id, "deleted");
+    await tenantStore.setTenantStatus(user.tenantId, "disabled");
+    return reply.send(await userStore.getUser(user.id));
   });
 }

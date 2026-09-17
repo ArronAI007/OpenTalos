@@ -5,7 +5,7 @@ import type { FastifyInstance } from "fastify";
 import { PostgresCheckpointStore } from "@opentalos/postgres-checkpoint";
 import { PostgresEventBus, listEventsSince } from "@opentalos/postgres-tracing";
 import { GraphRegistry, Scheduler } from "@opentalos/scheduler";
-import { TenantStore } from "@opentalos/postgres-tenancy";
+import { TenantStore, UserStore } from "@opentalos/postgres-tenancy";
 import { buildChatAgentGraph, createChatAgentToolRegistry } from "@opentalos/chat-agent";
 import { createMockProvider } from "@opentalos/model-providers";
 import { buildServer } from "../server.js";
@@ -16,6 +16,7 @@ let container: StartedPostgreSqlContainer;
 let pool: Pool;
 let app: FastifyInstance;
 let tenantStore: TenantStore;
+let userStore: UserStore;
 
 beforeAll(async () => {
   container = await new PostgreSqlContainer("postgres:16-alpine").start();
@@ -46,9 +47,15 @@ beforeAll(async () => {
       id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, key_hash TEXT NOT NULL, key_prefix TEXT NOT NULL,
       status TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), last_used_at TIMESTAMPTZ
     );
+    CREATE TABLE users (
+      id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL UNIQUE, username TEXT NOT NULL, password_hash TEXT NOT NULL,
+      status TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE UNIQUE INDEX users_username_lower_idx ON users (lower(username));
   `);
 
   tenantStore = new TenantStore(pool);
+  userStore = new UserStore(pool, tenantStore);
   const checkpointStore = new PostgresCheckpointStore(pool);
   const eventBus = new PostgresEventBus(pool);
   const registry = new GraphRegistry();
@@ -64,6 +71,7 @@ beforeAll(async () => {
     scheduler,
     listEventsSince: (runId, afterId) => listEventsSince(pool, runId, afterId),
     tenantStore,
+    userStore,
     adminApiKey: ADMIN_API_KEY,
   });
 }, 120_000);
@@ -228,5 +236,87 @@ describe("API key admin routes", () => {
 
     const lookupResult = await tenantStore.lookupApiKey(rawKey);
     expect(lookupResult.outcome).toBe("invalid_key");
+  });
+});
+
+describe("GET /admin/users", () => {
+  it("lists registered users", async () => {
+    const registerRes = await app.inject({ method: "POST", url: "/auth/register", payload: { username: "list-me-admin", password: "password123" } });
+    expect(registerRes.statusCode).toBe(201);
+
+    const res = await app.inject({ method: "GET", url: "/admin/users", headers: adminHeaders() });
+    expect(res.statusCode).toBe(200);
+    const usernames = res.json().map((u: { username: string }) => u.username);
+    expect(usernames).toContain("list-me-admin");
+  });
+
+  it("requires the admin key", async () => {
+    const res = await app.inject({ method: "GET", url: "/admin/users" });
+    expect(res.statusCode).toBe(401);
+  });
+});
+
+describe("PATCH /admin/users/:id/ban and /unban", () => {
+  it("bans an active user, which also disables their tenant, then unbans them", async () => {
+    const registerRes = await app.inject({ method: "POST", url: "/auth/register", payload: { username: "ban-me-admin", password: "password123" } });
+    const { apiKey } = registerRes.json();
+    const lookup = await tenantStore.lookupApiKey(apiKey);
+    if (lookup.outcome !== "valid") throw new Error("setup failed");
+    const user = (await userStore.listUsers()).find((u) => u.username === "ban-me-admin")!;
+
+    const banRes = await app.inject({ method: "PATCH", url: `/admin/users/${user.id}/ban`, headers: adminHeaders() });
+    expect(banRes.statusCode).toBe(200);
+    expect(banRes.json().status).toBe("banned");
+    expect((await tenantStore.getTenant(lookup.tenant.id))?.status).toBe("disabled");
+
+    const loginAfterBan = await app.inject({ method: "POST", url: "/auth/login", payload: { username: "ban-me-admin", password: "password123" } });
+    expect(loginAfterBan.statusCode).toBe(403);
+
+    const unbanRes = await app.inject({ method: "PATCH", url: `/admin/users/${user.id}/unban`, headers: adminHeaders() });
+    expect(unbanRes.statusCode).toBe(200);
+    expect(unbanRes.json().status).toBe("active");
+    expect((await tenantStore.getTenant(lookup.tenant.id))?.status).toBe("active");
+
+    const loginAfterUnban = await app.inject({ method: "POST", url: "/auth/login", payload: { username: "ban-me-admin", password: "password123" } });
+    expect(loginAfterUnban.statusCode).toBe(200);
+  });
+
+  it("returns 409 when banning an already-banned user", async () => {
+    const registerRes = await app.inject({ method: "POST", url: "/auth/register", payload: { username: "double-ban-admin", password: "password123" } });
+    registerRes.json();
+    const user = (await userStore.listUsers()).find((u) => u.username === "double-ban-admin")!;
+    await app.inject({ method: "PATCH", url: `/admin/users/${user.id}/ban`, headers: adminHeaders() });
+
+    const res = await app.inject({ method: "PATCH", url: `/admin/users/${user.id}/ban`, headers: adminHeaders() });
+    expect(res.statusCode).toBe(409);
+  });
+
+  it("returns 404 for an unknown user id", async () => {
+    const res = await app.inject({ method: "PATCH", url: "/admin/users/does-not-exist/ban", headers: adminHeaders() });
+    expect(res.statusCode).toBe(404);
+  });
+});
+
+describe("PATCH /admin/users/:id/delete", () => {
+  it("soft-deletes a user: disables their tenant and blocks future login, but keeps the row", async () => {
+    const registerRes = await app.inject({ method: "POST", url: "/auth/register", payload: { username: "delete-me-admin", password: "password123" } });
+    const { apiKey } = registerRes.json();
+    const lookup = await tenantStore.lookupApiKey(apiKey);
+    if (lookup.outcome !== "valid") throw new Error("setup failed");
+    const user = (await userStore.listUsers()).find((u) => u.username === "delete-me-admin")!;
+
+    const deleteRes = await app.inject({ method: "PATCH", url: `/admin/users/${user.id}/delete`, headers: adminHeaders() });
+    expect(deleteRes.statusCode).toBe(200);
+    expect(deleteRes.json().status).toBe("deleted");
+    expect((await tenantStore.getTenant(lookup.tenant.id))?.status).toBe("disabled");
+
+    const loginAfterDelete = await app.inject({ method: "POST", url: "/auth/login", payload: { username: "delete-me-admin", password: "password123" } });
+    expect(loginAfterDelete.statusCode).toBe(403);
+
+    // Still listed (soft delete, not a hard delete) — the admin can see it happened.
+    const listRes = await app.inject({ method: "GET", url: "/admin/users", headers: adminHeaders() });
+    const stillListed = listRes.json().find((u: { id: string }) => u.id === user.id);
+    expect(stillListed).toBeDefined();
+    expect(stillListed.status).toBe("deleted");
   });
 });
