@@ -5,8 +5,13 @@
 -- This is defense-in-depth ON TOP OF the application-layer tenant_id filtering already added to
 -- PostgresCheckpointStore's *ForTenant methods and listEventsSince() — RLS only visibly differs
 -- from that application-layer filtering if a future query forgets to add its own tenant_id
--- condition. A brand-new instance bootstrapped via apps/web/e2e/global-setup.ts already creates
--- these objects and does not need this file.
+-- condition. apps/web/e2e/global-setup.ts does NOT yet create these objects as of this commit —
+-- that wiring lands in a later task of the same plan (see
+-- docs/superpowers/plans/2026-09-18-checkpoint-tracing-rls.md, Task 9). Until that task lands,
+-- this migration has only been applied to the local dev Postgres (manually, see that task's
+-- Step 2) — apps/api/apps/worker still connect as the plain `postgres` superuser everywhere
+-- (including local dev) until DATABASE_URL is switched over, a deliberately manual step (see the
+-- same plan's Task 10).
 --
 -- SECURITY NOTE: the password below ('opentalos_app') is a placeholder suitable ONLY for a local,
 -- not-network-exposed dev Postgres (the same threat model as this repo's existing dev-compose,
