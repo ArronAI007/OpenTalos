@@ -13,7 +13,7 @@ export interface ServerDeps {
   pool: Pool;
   checkpointStore: PostgresCheckpointStore;
   scheduler: Scheduler;
-  listEventsSince: (runId: string, afterId: number) => Promise<StoredTraceEvent[]>;
+  listEventsSince: (runId: string, afterId: number, tenantId: string) => Promise<StoredTraceEvent[]>;
   tenantStore: TenantStore;
   userStore: UserStore;
   adminApiKey: string;

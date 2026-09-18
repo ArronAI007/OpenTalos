@@ -107,11 +107,12 @@ export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void 
     if (!sessionId) {
       return reply.code(400).send({ error: "sessionId query parameter is required" });
     }
-    const checkpoint = await checkpointStore.load(request.params.runId);
+    const tenantId = requireTenantId(request);
+    const checkpoint = await checkpointStore.loadForTenant(request.params.runId, tenantId);
     if (!checkpoint) {
       return reply.code(404).send({ error: `Run "${request.params.runId}" not found` });
     }
-    if (checkpoint.tenantId !== requireTenantId(request) || checkpoint.sessionId !== sessionId) {
+    if (checkpoint.tenantId !== tenantId || checkpoint.sessionId !== sessionId) {
       return reply.code(403).send({ error: "Run belongs to a different session" });
     }
     return reply.send({
@@ -170,11 +171,12 @@ export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void 
       if (message.length > MAX_MESSAGE_LENGTH) {
         return reply.code(400).send({ error: `message must be at most ${MAX_MESSAGE_LENGTH} characters` });
       }
-      const checkpoint = await checkpointStore.load(request.params.runId);
+      const tenantId = requireTenantId(request);
+      const checkpoint = await checkpointStore.loadForTenant(request.params.runId, tenantId);
       if (!checkpoint) {
         return reply.code(404).send({ error: `Run "${request.params.runId}" not found` });
       }
-      if (checkpoint.tenantId !== requireTenantId(request) || checkpoint.sessionId !== sessionId) {
+      if (checkpoint.tenantId !== tenantId || checkpoint.sessionId !== sessionId) {
         return reply.code(403).send({ error: "Run belongs to a different session" });
       }
       if (checkpoint.status !== "running") {
@@ -182,7 +184,7 @@ export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void 
           .code(409)
           .send({ error: `Run "${request.params.runId}" is not running (status: ${checkpoint.status})` });
       }
-      await checkpointStore.requestSteer(request.params.runId, message);
+      await checkpointStore.requestSteerForTenant(request.params.runId, message, tenantId);
       return reply.code(204).send();
     },
   );
@@ -194,14 +196,15 @@ export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void 
       if (!sessionId) {
         return reply.code(400).send({ error: "sessionId query parameter is required" });
       }
-      const checkpoint = await checkpointStore.load(request.params.runId);
+      const tenantId = requireTenantId(request);
+      const checkpoint = await checkpointStore.loadForTenant(request.params.runId, tenantId);
       if (!checkpoint) {
         return reply.code(404).send({ error: `Run "${request.params.runId}" not found` });
       }
-      if (checkpoint.tenantId !== requireTenantId(request) || checkpoint.sessionId !== sessionId) {
+      if (checkpoint.tenantId !== tenantId || checkpoint.sessionId !== sessionId) {
         return reply.code(403).send({ error: "Run belongs to a different session" });
       }
-      await checkpointStore.requestCancel(request.params.runId);
+      await checkpointStore.requestCancelForTenant(request.params.runId, tenantId);
       return reply.code(204).send();
     },
   );
@@ -212,11 +215,12 @@ export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void 
       return reply.code(400).send({ error: "sessionId query parameter is required" });
     }
     const runId = request.params.runId;
-    const checkpoint = await checkpointStore.load(runId);
+    const tenantId = requireTenantId(request);
+    const checkpoint = await checkpointStore.loadForTenant(runId, tenantId);
     if (!checkpoint) {
       return reply.code(404).send({ error: `Run "${runId}" not found` });
     }
-    if (checkpoint.tenantId !== requireTenantId(request) || checkpoint.sessionId !== sessionId) {
+    if (checkpoint.tenantId !== tenantId || checkpoint.sessionId !== sessionId) {
       return reply.code(403).send({ error: "Run belongs to a different session" });
     }
 
@@ -255,14 +259,14 @@ export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void 
       if (stopped || isPolling) return;
       isPolling = true;
       try {
-        const events = await deps.listEventsSince(runId, cursor);
+        const events = await deps.listEventsSince(runId, cursor, tenantId);
         for (const event of events) {
           if (stopped) return;
           cursor = event.id;
           reply.raw.write(`id: ${event.id}\nevent: trace\ndata: ${JSON.stringify(event)}\n\n`);
         }
         if (stopped) return;
-        const current = await checkpointStore.load(runId);
+        const current = await checkpointStore.loadForTenant(runId, tenantId);
         if (stopped) return;
         if (current && current.status !== lastStatus) {
           lastStatus = current.status;
@@ -272,7 +276,7 @@ export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void 
             // exact moment the checkpoint flips to "done" (PostgresEventBus.emit() is
             // fire-and-forget, so a node's final trace events can still be in flight when its
             // completeNode() save resolves).
-            const trailingEvents = await deps.listEventsSince(runId, cursor);
+            const trailingEvents = await deps.listEventsSince(runId, cursor, tenantId);
             for (const event of trailingEvents) {
               if (stopped) return;
               cursor = event.id;
@@ -288,7 +292,7 @@ export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void 
             // the moment the checkpoint flips to "failed", then tell the client the run failed
             // (with the underlying error message) and close the stream — otherwise the client
             // would poll forever, since status only ever leaves "running" via "done" or "failed".
-            const trailingEvents = await deps.listEventsSince(runId, cursor);
+            const trailingEvents = await deps.listEventsSince(runId, cursor, tenantId);
             for (const event of trailingEvents) {
               if (stopped) return;
               cursor = event.id;

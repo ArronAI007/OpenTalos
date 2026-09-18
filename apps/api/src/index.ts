@@ -61,7 +61,7 @@ const app = buildServer({
   pool,
   checkpointStore,
   scheduler,
-  listEventsSince: (runId, afterId) => listEventsSince(pool, runId, afterId),
+  listEventsSince: (runId, afterId, tenantId) => listEventsSince(pool, runId, afterId, tenantId),
   tenantStore,
   userStore,
   adminApiKey,

@@ -74,7 +74,7 @@ beforeAll(async () => {
     pool,
     checkpointStore,
     scheduler,
-    listEventsSince: (runId, afterId) => listEventsSince(pool, runId, afterId),
+    listEventsSince: (runId, afterId, tenantId) => listEventsSince(pool, runId, afterId, tenantId),
     tenantStore,
     adminApiKey: "unused-in-this-file",
   });
@@ -658,7 +658,7 @@ describe("GET /runs/:runId/events (real SSE connection lifecycle)", () => {
     const sessionId = "trail-1";
 
     const mockCheckpointStore = {
-      load: async () => ({
+      loadForTenant: async () => ({
         runId,
         graphId: "chat-agent",
         tenantId: tenant.id,
@@ -682,7 +682,7 @@ describe("GET /runs/:runId/events (real SSE connection lifecycle)", () => {
     };
 
     let listEventsSinceCallCount = 0;
-    const mockListEventsSince = async (_runId: string, afterId: number) => {
+    const mockListEventsSince = async (_runId: string, afterId: number, _tenantId: string) => {
       listEventsSinceCallCount += 1;
       if (listEventsSinceCallCount === 1) return [];
       if (afterId === 0) return [trailingEvent];
@@ -740,7 +740,7 @@ describe("GET /runs/:runId/events (real SSE connection lifecycle)", () => {
     const errorMessage = "model provider error: invalid api key";
 
     const mockCheckpointStore = {
-      load: async () => ({
+      loadForTenant: async () => ({
         runId,
         graphId: "chat-agent",
         tenantId: tenant.id,
@@ -754,7 +754,7 @@ describe("GET /runs/:runId/events (real SSE connection lifecycle)", () => {
       }),
     } as unknown as PostgresCheckpointStore;
 
-    const mockListEventsSince = async () => [];
+    const mockListEventsSince = async (_runId: string, _afterId: number, _tenantId: string) => [];
 
     const testApp = buildServer({
       pool,
