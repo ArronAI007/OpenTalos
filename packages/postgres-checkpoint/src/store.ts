@@ -121,4 +121,51 @@ export class PostgresCheckpointStore implements CheckpointStore {
   async clearSteerMessage(runId: string): Promise<void> {
     await this.db.update(checkpoints).set({ steerMessage: null }).where(eq(checkpoints.runId, runId));
   }
+
+  /** 两层过滤：SQL 里显式 `AND tenant_id = $2`（任何数据库角色下都生效，包括本地/CI 常见的超级
+   * 用户连接），同一个事务里再设置 `app.tenant_id` 会话变量，给数据库层的 RLS 策略（一旦 Task 5
+   * 建好）做第二层背书——只有当未来某次新查询忘了写显式的 tenant_id 条件时，这一层才会真正体现
+   * 出跟第一层不一样的效果。`set_config` 的第三个参数必须是 `true`（`is_local`），让这个设置只在
+   * 当前事务内生效，事务提交后自动失效，避免连接池复用把这个值残留给下一个租户的请求。 */
+  async loadForTenant(runId: string, tenantId: string): Promise<Checkpoint | undefined> {
+    return this.db.transaction(async (tx) => {
+      await tx.execute(sql`select set_config('app.tenant_id', ${tenantId}, true)`);
+      const rows = await tx
+        .select()
+        .from(checkpoints)
+        .where(and(eq(checkpoints.runId, runId), eq(checkpoints.tenantId, tenantId)))
+        .limit(1);
+      return rows[0] ? this.toCheckpoint(rows[0]) : undefined;
+    });
+  }
+
+  async requestCancelForTenant(runId: string, tenantId: string): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      await tx.execute(sql`select set_config('app.tenant_id', ${tenantId}, true)`);
+      await tx
+        .update(checkpoints)
+        .set({ cancelRequested: true })
+        .where(and(eq(checkpoints.runId, runId), eq(checkpoints.tenantId, tenantId)));
+    });
+  }
+
+  async requestSteerForTenant(runId: string, message: string, tenantId: string): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      await tx.execute(sql`select set_config('app.tenant_id', ${tenantId}, true)`);
+      await tx
+        .update(checkpoints)
+        .set({ steerMessage: message })
+        .where(and(eq(checkpoints.runId, runId), eq(checkpoints.tenantId, tenantId)));
+    });
+  }
+
+  async clearSteerMessageForTenant(runId: string, tenantId: string): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      await tx.execute(sql`select set_config('app.tenant_id', ${tenantId}, true)`);
+      await tx
+        .update(checkpoints)
+        .set({ steerMessage: null })
+        .where(and(eq(checkpoints.runId, runId), eq(checkpoints.tenantId, tenantId)));
+    });
+  }
 }

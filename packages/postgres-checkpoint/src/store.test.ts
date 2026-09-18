@@ -187,4 +187,52 @@ describe("PostgresCheckpointStore", () => {
     expect(loaded?.status).toBe("failed");
     expect(loaded?.error).toBe("second error");
   });
+
+  it("loadForTenant returns the checkpoint when tenantId matches", async () => {
+    await store.save(makeCheckpoint({ runId: "run-tenant-match-pg", tenantId: "tenant-a" }));
+    const loaded = await store.loadForTenant("run-tenant-match-pg", "tenant-a");
+    expect(loaded?.runId).toBe("run-tenant-match-pg");
+  });
+
+  it("loadForTenant returns undefined when tenantId does not match, even though the row exists", async () => {
+    await store.save(makeCheckpoint({ runId: "run-tenant-mismatch-pg", tenantId: "tenant-a" }));
+    await expect(store.loadForTenant("run-tenant-mismatch-pg", "tenant-b")).resolves.toBeUndefined();
+    // Sanity check: the row genuinely exists (proves this is tenant filtering, not a save bug).
+    await expect(store.load("run-tenant-mismatch-pg")).resolves.toBeDefined();
+  });
+
+  it("loadForTenant returns undefined for an unknown runId regardless of tenantId", async () => {
+    await expect(store.loadForTenant("does-not-exist-tenant-pg", "tenant-a")).resolves.toBeUndefined();
+  });
+
+  it("requestCancelForTenant only affects a checkpoint belonging to the given tenant", async () => {
+    await store.save(makeCheckpoint({ runId: "run-cancel-tenant-pg", tenantId: "tenant-a" }));
+
+    await store.requestCancelForTenant("run-cancel-tenant-pg", "tenant-b");
+    expect((await store.load("run-cancel-tenant-pg"))?.cancelRequested).toBe(false);
+
+    await store.requestCancelForTenant("run-cancel-tenant-pg", "tenant-a");
+    expect((await store.load("run-cancel-tenant-pg"))?.cancelRequested).toBe(true);
+  });
+
+  it("requestSteerForTenant only affects a checkpoint belonging to the given tenant", async () => {
+    await store.save(makeCheckpoint({ runId: "run-steer-tenant-pg", tenantId: "tenant-a" }));
+
+    await store.requestSteerForTenant("run-steer-tenant-pg", "turn left", "tenant-b");
+    expect((await store.load("run-steer-tenant-pg"))?.steerMessage).toBeUndefined();
+
+    await store.requestSteerForTenant("run-steer-tenant-pg", "turn left", "tenant-a");
+    expect((await store.load("run-steer-tenant-pg"))?.steerMessage).toBe("turn left");
+  });
+
+  it("clearSteerMessageForTenant only affects a checkpoint belonging to the given tenant", async () => {
+    await store.save(makeCheckpoint({ runId: "run-clear-tenant-pg", tenantId: "tenant-a" }));
+    await store.requestSteer("run-clear-tenant-pg", "turn left");
+
+    await store.clearSteerMessageForTenant("run-clear-tenant-pg", "tenant-b");
+    expect((await store.load("run-clear-tenant-pg"))?.steerMessage).toBe("turn left");
+
+    await store.clearSteerMessageForTenant("run-clear-tenant-pg", "tenant-a");
+    expect((await store.load("run-clear-tenant-pg"))?.steerMessage).toBeUndefined();
+  });
 });
