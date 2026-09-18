@@ -140,16 +140,45 @@ describe("Scheduler.enqueueResume", () => {
       createdAt: new Date().toISOString(),
     });
 
+    // Since Task 7, loadForTenant() (not the load()+manual-tenant-check pattern) is what enforces
+    // this, so a wrong-tenant attempt now surfaces as "no checkpoint found" — indistinguishable
+    // from a genuinely nonexistent runId, by design (see RLS spec).
     await expect(
       scheduler.enqueueResume(
         "tenant-mismatch-run",
         { type: "approval", approved: true },
         { tenantId: "tenant-imposter", sessionId: "s1" },
       ),
-    ).rejects.toThrow(/belongs to a different tenant/);
+    ).rejects.toThrow(/no checkpoint found/);
 
     // No task should have been queued for the rejected attempt.
     const rows = await db.select().from(tasks).where(eq(tasks.runId, "tenant-mismatch-run"));
+    expect(rows).toHaveLength(0);
+  });
+
+  it("rejects resuming a run that belongs to a different tenant, and does not enqueue a task for it (security-relevant: enqueueResume is directly reachable from POST /runs/:runId/resume)", async () => {
+    await checkpointStore.save({
+      graphId: "counter",
+      runId: "cross-tenant-resume-run",
+      tenantId: "tenant-owner",
+      sessionId: "s1",
+      nodeCursor: "increment",
+      state: { count: 0 },
+      pendingYields: [{ type: "awaiting_approval", reason: "confirm" }],
+      status: "paused",
+      createdAt: new Date().toISOString(),
+    });
+
+    await expect(
+      scheduler.enqueueResume(
+        "cross-tenant-resume-run",
+        { type: "approval", approved: true },
+        { tenantId: "tenant-intruder", sessionId: "s1" },
+      ),
+    ).rejects.toThrow(/no checkpoint found/);
+
+    // Confirm no task was queued for the intruder's attempt.
+    const rows = await db.select().from(tasks).where(eq(tasks.runId, "cross-tenant-resume-run"));
     expect(rows).toHaveLength(0);
   });
 });

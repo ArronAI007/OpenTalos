@@ -36,7 +36,7 @@ export class Scheduler {
     // second enqueueStart() call with the same runId would silently overwrite a live checkpoint
     // with a fresh initial state (losing an awaiting-approval run with no error) and queue a
     // duplicate task row.
-    const existing = await this.checkpointStore.load(runId);
+    const existing = await this.checkpointStore.loadForTenant(runId, tenant.tenantId);
     if (existing) {
       throw new Error(`Cannot enqueue start: run "${runId}" already exists (status: "${existing.status}")`);
     }
@@ -68,7 +68,7 @@ export class Scheduler {
     tenant: TenantContext,
     options: EnqueueOptions = {},
   ): Promise<void> {
-    const checkpoint = await this.checkpointStore.load(runId);
+    const checkpoint = await this.checkpointStore.loadForTenant(runId, tenant.tenantId);
     if (!checkpoint) {
       throw new Error(`Cannot enqueue resume: no checkpoint found for run "${runId}"`);
     }

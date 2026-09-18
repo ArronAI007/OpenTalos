@@ -154,7 +154,7 @@ export class Worker {
         // status stays "running" forever (GraphEngine only ever transitions it to "done"/"paused"
         // on success, and rethrows on error without touching the checkpoint at all), so
         // GET /runs/:runId and the SSE stream would otherwise never learn the run failed.
-        const checkpoint = await this.checkpointStore.load(task.runId);
+        const checkpoint = await this.checkpointStore.loadForTenant(task.runId, task.tenantId);
         if (checkpoint) {
           await this.checkpointStore.save({ ...checkpoint, status: "failed", error: errorMessage(error) });
         }
@@ -201,12 +201,12 @@ export class Worker {
       if (checkingCancel) return;
       checkingCancel = true;
       this.checkpointStore
-        .load(task.runId)
+        .loadForTenant(task.runId, task.tenantId)
         .then(async (latest) => {
           if (latest?.cancelRequested) controller.abort();
           if (latest?.steerMessage) {
             steerChannel.deliver(latest.steerMessage);
-            await this.checkpointStore.clearSteerMessage(task.runId);
+            await this.checkpointStore.clearSteerMessageForTenant(task.runId, task.tenantId);
           }
         })
         .catch(() => {
@@ -242,7 +242,7 @@ export class Worker {
   private async runTask(task: TaskRow, controller: AbortController, steer: SteerChannelImpl): Promise<void> {
     const engine = buildEngine(this.registry, this.checkpointStore, task.graphId);
 
-    const checkpoint = await this.checkpointStore.load(task.runId);
+    const checkpoint = await this.checkpointStore.loadForTenant(task.runId, task.tenantId);
     if (!checkpoint) {
       throw new Error(`No checkpoint found for run "${task.runId}"`);
     }
