@@ -5,13 +5,13 @@
 -- This is defense-in-depth ON TOP OF the application-layer tenant_id filtering already added to
 -- PostgresCheckpointStore's *ForTenant methods and listEventsSince() — RLS only visibly differs
 -- from that application-layer filtering if a future query forgets to add its own tenant_id
--- condition. apps/web/e2e/global-setup.ts does NOT yet create these objects as of this commit —
--- that wiring lands in a later task of the same plan (see
--- docs/superpowers/plans/2026-09-18-checkpoint-tracing-rls.md, Task 9). Until that task lands,
--- this migration has only been applied to the local dev Postgres (manually — see THIS task's own
--- Step 2, Task 5, not Task 9's) — apps/api/apps/worker still connect as the plain `postgres`
--- superuser everywhere (including local dev) until DATABASE_URL is switched over, a deliberately
--- manual step (see the same plan's Task 10).
+-- condition. apps/web/e2e/global-setup.ts now creates the equivalent of everything in this file
+-- (role + RLS policies + the plain grants below) fresh on every e2e run — see
+-- docs/superpowers/plans/2026-09-18-checkpoint-tracing-rls.md, Task 9. This migration file is what
+-- brings an EXISTING Postgres instance (local dev, or any other already-running deployment) up to
+-- the same state; it has been applied to the local dev Postgres manually (see this same plan's
+-- Task 5 Step 2). apps/api/apps/worker still connect as the plain `postgres` superuser in local
+-- dev until DATABASE_URL is switched over, a deliberately manual step (see the same plan's Task 10).
 --
 -- SECURITY NOTE: the password below ('opentalos_app') is a placeholder suitable ONLY for a local,
 -- not-network-exposed dev Postgres (the same threat model as this repo's existing dev-compose,
@@ -31,6 +31,17 @@ $$;
 
 GRANT CONNECT ON DATABASE postgres TO opentalos_app;
 GRANT USAGE ON SCHEMA public TO opentalos_app;
+
+-- apps/api and apps/worker use a single Postgres pool for everything (see their DATABASE_URL
+-- usage), not just checkpoints/trace_events -- once DATABASE_URL is switched over (Task 10),
+-- this connection also needs plain (non-RLS) access to the tenant/auth/task-queue tables it
+-- queries directly. Mirrored in apps/web/e2e/global-setup.ts, which grants the same access on
+-- its own e2e Postgres instance.
+GRANT SELECT, INSERT, UPDATE, DELETE ON tenants TO opentalos_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON api_keys TO opentalos_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON users TO opentalos_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON tasks TO opentalos_app;
+GRANT USAGE, SELECT ON SEQUENCE tasks_id_seq TO opentalos_app;
 
 -- FORCE matters even though opentalos_app is neither superuser nor table owner (for whom ENABLE
 -- alone already applies RLS): it protects against a DIFFERENT, realistic scenario — many managed
