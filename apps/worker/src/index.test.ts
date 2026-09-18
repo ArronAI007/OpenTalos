@@ -94,7 +94,7 @@ describe("apps/worker registry wiring", () => {
     const checkpoint = await checkpointStore.load("worker-app-run-1");
     expect(checkpoint?.status).toBe("paused");
 
-    const events = await listEventsSince(pool, "worker-app-run-1", 0);
+    const events = await listEventsSince(pool, "worker-app-run-1", 0, "tenant-a");
     // Mirrors the expected event-type sequence already established in
     // packages/chat-agent/src/index.test.ts for this same graph reaching its HITL pause.
     const eventTypes = events.map((event) => event.type);
