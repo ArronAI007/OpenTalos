@@ -384,7 +384,12 @@ describe("Worker", () => {
       { maxAttempts: 1, timeoutMs: 50 },
     );
     const worker = new Worker(testDb.pool, registry, checkpointStore, { globalConcurrency: 10, tenantConcurrency: 10 });
-    const loadSpy = vi.spyOn(checkpointStore, "load");
+    // Spies on loadForTenant, not load: the RLS migration (see
+    // docs/superpowers/plans/2026-09-18-checkpoint-tracing-rls.md, Task 7) switched the
+    // cancel-poll interval below to call loadForTenant instead — spying on the now-unused load()
+    // would make this assertion trivially 0 === 0 regardless of whether the interval actually
+    // leaks, silently defeating the whole point of this test.
+    const loadSpy = vi.spyOn(checkpointStore, "loadForTenant");
 
     await worker.pollOnce();
 
@@ -397,12 +402,12 @@ describe("Worker", () => {
     const callsAfterSettle = callsForThisRun();
 
     // The cancel-poll interval ticks every 500ms and, on each tick, calls
-    // checkpointStore.load(task.runId). If runWithTimeout's finally didn't clear it on the
-    // timeout path (the leak this test guards against), the interval would still be alive here —
-    // since the underlying "hangs-forever" node never resolves, runTask's own promise is orphaned
-    // forever and its finally never runs — and it would call load() again well within this
-    // 700ms window, even though the task has already been marked "failed" and nothing is polling
-    // it anymore.
+    // checkpointStore.loadForTenant(task.runId, task.tenantId). If runWithTimeout's finally
+    // didn't clear it on the timeout path (the leak this test guards against), the interval would
+    // still be alive here — since the underlying "hangs-forever" node never resolves, runTask's
+    // own promise is orphaned forever and its finally never runs — and it would call
+    // loadForTenant() again well within this 700ms window, even though the task has already been
+    // marked "failed" and nothing is polling it anymore.
     await new Promise((resolve) => setTimeout(resolve, 700));
 
     expect(callsForThisRun()).toBe(callsAfterSettle);
