@@ -137,8 +137,12 @@ test("a revoked API key is rejected by the chat UI, which asks the user to re-en
   await registerDialog.getByPlaceholder("确认密码").fill("password123");
   await registerDialog.getByRole("button", { name: "注册" }).click();
 
-  // Confirms the session's API key genuinely works before it gets revoked.
-  await expect(page.getByPlaceholder("给智能体发消息")).toBeVisible();
+  // Confirms the session's API key genuinely works before it gets revoked — sends a real
+  // message and waits for the server to echo it back, not just that the composer renders
+  // (rendering only depends on localStorage having a string, not on any server round-trip).
+  await page.getByPlaceholder("给智能体发消息").fill("hello before revoke");
+  await page.getByRole("button", { name: "发送" }).click();
+  await expect(page.getByText("hello before revoke").first()).toBeVisible();
 
   const usersRes = await fetch(`${ADMIN_BASE}/users`, { headers: { Authorization: `Bearer ${ADMIN_API_KEY}` } });
   const user = (await usersRes.json()).find((u: { username: string; tenantId: string }) => u.username === username);
