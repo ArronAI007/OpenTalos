@@ -1589,6 +1589,67 @@ body {
   outline-offset: 2px;
 }
 
+.register-dialog-input {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 var(--space-md);
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 0.5px solid var(--color-border);
+  border-radius: 8px;
+  outline: none;
+}
+
+.register-dialog-input:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.register-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+}
+
+.register-dialog-cancel,
+.register-dialog-confirm {
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition: background var(--duration-fast) ease;
+}
+
+.register-dialog-cancel {
+  background: var(--color-surface);
+  border: 0.5px solid var(--color-border);
+  color: var(--color-text);
+}
+
+.register-dialog-cancel:hover {
+  background: var(--color-sidebar-hover);
+}
+
+.register-dialog-confirm {
+  background: var(--color-accent);
+  border: none;
+  color: var(--color-on-accent);
+}
+
+.register-dialog-confirm:hover {
+  background: var(--color-accent-hover);
+}
+
+.register-dialog-cancel:focus-visible,
+.register-dialog-confirm:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
 .settings-section + .settings-section {
   margin-top: var(--space-lg);
 }
