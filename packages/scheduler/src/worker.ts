@@ -179,7 +179,7 @@ export class Worker {
     // ~500ms: once a POST /runs/:runId/cancel request has flipped `cancelRequested` to true
     // (Task 6), this is what actually stops the in-flight engine.run()/resumeFromCheckpoint()
     // call — the signal is forwarded all the way down into the model provider's HTTP call
-    // (Tasks 2-5). `checkingCancel` is a reentrancy guard: if a single checkpointStore.load()
+    // (Tasks 2-5). `checkingCancel` is a reentrancy guard: if a single checkpointStore.loadForTenant()
     // takes longer than 500ms, we skip overlapping ticks rather than piling up concurrent loads.
     //
     // This lives here (not inside runTask()) so that the `finally` below — which always runs,
