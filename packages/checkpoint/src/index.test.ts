@@ -146,4 +146,56 @@ describe("InMemoryCheckpointStore", () => {
     expect(loaded?.status).toBe("failed");
     expect(loaded?.error).toBe("second error");
   });
+
+  it("loadForTenant returns the checkpoint when tenantId matches", async () => {
+    const store = new InMemoryCheckpointStore();
+    await store.save(makeCheckpoint({ runId: "run-tenant-match", tenantId: "tenant-a" }));
+    const loaded = await store.loadForTenant("run-tenant-match", "tenant-a");
+    expect(loaded?.runId).toBe("run-tenant-match");
+  });
+
+  it("loadForTenant returns undefined when tenantId does not match", async () => {
+    const store = new InMemoryCheckpointStore();
+    await store.save(makeCheckpoint({ runId: "run-tenant-mismatch", tenantId: "tenant-a" }));
+    await expect(store.loadForTenant("run-tenant-mismatch", "tenant-b")).resolves.toBeUndefined();
+  });
+
+  it("loadForTenant returns undefined for an unknown runId regardless of tenantId", async () => {
+    const store = new InMemoryCheckpointStore();
+    await expect(store.loadForTenant("missing", "tenant-a")).resolves.toBeUndefined();
+  });
+
+  it("requestCancelForTenant sets cancelRequested only when tenantId matches", async () => {
+    const store = new InMemoryCheckpointStore();
+    await store.save(makeCheckpoint({ runId: "run-cancel-tenant", tenantId: "tenant-a" }));
+
+    await store.requestCancelForTenant("run-cancel-tenant", "tenant-b");
+    expect((await store.load("run-cancel-tenant"))?.cancelRequested).toBe(false);
+
+    await store.requestCancelForTenant("run-cancel-tenant", "tenant-a");
+    expect((await store.load("run-cancel-tenant"))?.cancelRequested).toBe(true);
+  });
+
+  it("requestSteerForTenant sets steerMessage only when tenantId matches", async () => {
+    const store = new InMemoryCheckpointStore();
+    await store.save(makeCheckpoint({ runId: "run-steer-tenant", tenantId: "tenant-a" }));
+
+    await store.requestSteerForTenant("run-steer-tenant", "turn left", "tenant-b");
+    expect((await store.load("run-steer-tenant"))?.steerMessage).toBeUndefined();
+
+    await store.requestSteerForTenant("run-steer-tenant", "turn left", "tenant-a");
+    expect((await store.load("run-steer-tenant"))?.steerMessage).toBe("turn left");
+  });
+
+  it("clearSteerMessageForTenant clears steerMessage only when tenantId matches", async () => {
+    const store = new InMemoryCheckpointStore();
+    await store.save(makeCheckpoint({ runId: "run-clear-tenant", tenantId: "tenant-a" }));
+    await store.requestSteer("run-clear-tenant", "turn left");
+
+    await store.clearSteerMessageForTenant("run-clear-tenant", "tenant-b");
+    expect((await store.load("run-clear-tenant"))?.steerMessage).toBe("turn left");
+
+    await store.clearSteerMessageForTenant("run-clear-tenant", "tenant-a");
+    expect((await store.load("run-clear-tenant"))?.steerMessage).toBeUndefined();
+  });
 });

@@ -63,4 +63,30 @@ export class InMemoryCheckpointStore implements CheckpointStore {
     const checkpoint = this.checkpoints.get(runId);
     if (checkpoint) this.checkpoints.set(runId, { ...checkpoint, steerMessage: undefined });
   }
+
+  async loadForTenant(runId: string, tenantId: string): Promise<Checkpoint | undefined> {
+    const checkpoint = this.checkpoints.get(runId);
+    return checkpoint?.tenantId === tenantId ? checkpoint : undefined;
+  }
+
+  async requestCancelForTenant(runId: string, tenantId: string): Promise<void> {
+    const checkpoint = this.checkpoints.get(runId);
+    if (checkpoint?.tenantId === tenantId) {
+      this.checkpoints.set(runId, { ...checkpoint, cancelRequested: true });
+    }
+  }
+
+  async requestSteerForTenant(runId: string, message: string, tenantId: string): Promise<void> {
+    const checkpoint = this.checkpoints.get(runId);
+    if (checkpoint?.tenantId === tenantId) {
+      this.checkpoints.set(runId, { ...checkpoint, steerMessage: message });
+    }
+  }
+
+  async clearSteerMessageForTenant(runId: string, tenantId: string): Promise<void> {
+    const checkpoint = this.checkpoints.get(runId);
+    if (checkpoint?.tenantId === tenantId) {
+      this.checkpoints.set(runId, { ...checkpoint, steerMessage: undefined });
+    }
+  }
 }
