@@ -235,6 +235,15 @@ export class Worker {
       await Promise.race([this.runTask(task, controller, steerChannel), timeout]);
     } finally {
       if (timer) clearTimeout(timer);
+      // Not redundant with the `if (controller.signal.aborted)` self-clear inside cancelPoll
+      // above, even though on the timeout/cancel paths that self-clear fires first (abort() is
+      // always called before this finally runs, on both of those paths) and makes this line look
+      // like dead weight there. controller.abort() is ONLY ever called on those two paths — a
+      // task that completes normally, or fails with a plain (non-timeout) error, never sets
+      // controller.signal.aborted at all, so cancelPoll's self-clear branch never fires for them.
+      // This clearInterval() is the ONLY thing that stops the 500ms DB-polling timer on those two
+      // (by far the most common) paths — removing it would leak a live, forever-polling interval
+      // per completed/failed task.
       clearInterval(cancelPoll);
     }
   }
