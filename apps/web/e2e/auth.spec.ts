@@ -28,44 +28,6 @@ async function createTenantAndKey(name: string, maxConcurrency?: number) {
   return { tenant, rawKey };
 }
 
-test("admin creates a tenant and key via the browser, and the chat UI authenticates with it end-to-end", async ({
-  page,
-  context,
-}) => {
-  const adminPage = await context.newPage();
-  await adminPage.goto("http://localhost:5174/");
-  await adminPage.getByPlaceholder("管理员密钥").fill(ADMIN_API_KEY);
-  await adminPage.getByRole("button", { name: "进入" }).click();
-
-  await adminPage.getByPlaceholder("租户名称").fill("browser-created-tenant");
-  await adminPage.getByRole("button", { name: "创建租户" }).click();
-  await adminPage.getByText("browser-created-tenant").click();
-  await adminPage.getByRole("button", { name: "+ 新建 API Key" }).click();
-
-  const revealText = await adminPage.locator(".new-key-reveal div").last().textContent();
-  const rawKey = revealText?.trim();
-  expect(rawKey).toBeTruthy();
-  await adminPage.close();
-
-  await page.goto("/");
-  // NOTE (deviation from the plan text): this test predates Task 6's ApiKeyGate tabs, which made
-  // "login" the default view and moved the raw-API-Key form behind its own "API Key" tab. Without
-  // this click the "API Key" placeholder below no longer exists on first render.
-  await page.getByRole("tab", { name: "API Key" }).click();
-  await page.getByPlaceholder("API Key").fill(rawKey!);
-  await page.getByRole("button", { name: "进入" }).click();
-
-  await page.getByPlaceholder("给智能体发消息").fill("今天美元兑人民币汇率是多少？");
-  await page.getByRole("button", { name: "发送" }).click();
-  await expect(page.getByText("今天美元兑人民币汇率是多少？")).toBeVisible();
-
-  await page.getByRole("button", { name: /轨迹/ }).click();
-  const approveButton = page.getByRole("button", { name: "✓ 批准" });
-  await expect(approveButton).toBeVisible({ timeout: 10_000 });
-  await approveButton.click();
-  await expect(page.getByText(/根据查询结果/)).toBeVisible({ timeout: 10_000 });
-});
-
 test("two tenants with different quotas get differentiated concurrency in the same poll cycle", async () => {
   const { rawKey: rawKeyLow } = await createTenantAndKey("quota-e2e-low", 1);
   const { rawKey: rawKeyHigh } = await createTenantAndKey("quota-e2e-high", 5);
@@ -151,41 +113,14 @@ test("two tenants with different quotas get differentiated concurrency in the sa
   expect(highClaimed).toBeGreaterThan(lowClaimed);
 });
 
-test("a revoked API key is rejected by the chat UI, which asks the user to re-enter one", async ({ page }) => {
-  const { tenant, rawKey } = await createTenantAndKey("revoke-e2e-tenant");
-  const keysRes = await fetch(`${ADMIN_BASE}/tenants/${tenant.id}/api-keys`, {
-    headers: { Authorization: `Bearer ${ADMIN_API_KEY}` },
-  });
-  const keys = await keysRes.json();
-  await fetch(`${ADMIN_BASE}/api-keys/${keys[0].id}`, {
-    method: "DELETE",
-    headers: { Authorization: `Bearer ${ADMIN_API_KEY}` },
-  });
-
-  await page.goto("/");
-  // NOTE (deviation from the plan text): see the identical note in the first test above — this
-  // test predates Task 6's ApiKeyGate tabs, so the raw-API-Key form now lives behind its own tab.
-  await page.getByRole("tab", { name: "API Key" }).click();
-  await page.getByPlaceholder("API Key").fill(rawKey);
-  await page.getByRole("button", { name: "进入" }).click();
-  await page.getByPlaceholder("给智能体发消息").fill("hello");
-  await page.getByRole("button", { name: "发送" }).click();
-
-  await expect(page.getByText("密钥无效或已被吊销，请重新输入")).toBeVisible({ timeout: 5000 });
-  // ApiKeyGate remounts fresh on rejection (App.tsx unmounts it while hasApiKey is true and
-  // remounts it once hasApiKey flips back to false), so it resets to the default "登录" tab —
-  // re-select "API Key" to check the same form is reachable again for re-entry.
-  await page.getByRole("tab", { name: "API Key" }).click();
-  await expect(page.getByPlaceholder("API Key")).toBeVisible();
-});
-
 test("registering a new account via the web UI logs straight into a working chat session", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("tab", { name: "注册" }).click();
-  await page.getByPlaceholder("用户名").fill(uniqueUsername("web-register"));
+  const registerDialog = page.getByRole("dialog", { name: "注册账号" });
+  await page.getByRole("button", { name: "注册" }).click();
+  await registerDialog.getByPlaceholder("用户名").fill(uniqueUsername("web-register"));
   await page.getByPlaceholder("密码（至少 8 位）").fill("password123");
   await page.getByPlaceholder("确认密码").fill("password123");
-  await page.getByRole("button", { name: "注册" }).click();
+  await registerDialog.getByRole("button", { name: "注册" }).click();
 
   await page.getByPlaceholder("给智能体发消息").fill("你好");
   await page.getByRole("button", { name: "发送" }).click();
@@ -195,18 +130,18 @@ test("registering a new account via the web UI logs straight into a working chat
 test("registering then logging out and back in with the same credentials works", async ({ page }) => {
   const username = uniqueUsername("web-login");
   await page.goto("/");
-  await page.getByRole("tab", { name: "注册" }).click();
-  await page.getByPlaceholder("用户名").fill(username);
+  const registerDialog = page.getByRole("dialog", { name: "注册账号" });
+  await page.getByRole("button", { name: "注册" }).click();
+  await registerDialog.getByPlaceholder("用户名").fill(username);
   await page.getByPlaceholder("密码（至少 8 位）").fill("password123");
   await page.getByPlaceholder("确认密码").fill("password123");
-  await page.getByRole("button", { name: "注册" }).click();
+  await registerDialog.getByRole("button", { name: "注册" }).click();
   await expect(page.getByPlaceholder("给智能体发消息")).toBeVisible();
 
   // Simulate "logging out" by clearing the stored key and reloading into the gate.
   await page.evaluate(() => localStorage.removeItem("opentalos-api-key"));
   await page.reload();
 
-  await page.getByRole("tab", { name: "登录" }).click();
   await page.getByPlaceholder("用户名").fill(username);
   await page.getByPlaceholder("密码").fill("password123");
   await page.getByRole("button", { name: "登录" }).click();
@@ -222,13 +157,14 @@ test("registering then logging out and back in with the same credentials works",
 
 test("registration rejects a mismatched confirm-password without hitting the server", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("tab", { name: "注册" }).click();
-  await page.getByPlaceholder("用户名").fill(uniqueUsername("mismatch"));
+  const registerDialog = page.getByRole("dialog", { name: "注册账号" });
+  await page.getByRole("button", { name: "注册" }).click();
+  await registerDialog.getByPlaceholder("用户名").fill(uniqueUsername("mismatch"));
   await page.getByPlaceholder("密码（至少 8 位）").fill("password123");
   await page.getByPlaceholder("确认密码").fill("different-password");
-  await page.getByRole("button", { name: "注册" }).click();
+  await registerDialog.getByRole("button", { name: "注册" }).click();
 
-  await expect(page.getByText("两次输入的密码不一致")).toBeVisible();
+  await expect(registerDialog.getByText("两次输入的密码不一致")).toBeVisible();
   // Still on the gate, not logged in.
   await expect(page.getByPlaceholder("给智能体发消息")).not.toBeVisible();
 });
@@ -236,16 +172,16 @@ test("registration rejects a mismatched confirm-password without hitting the ser
 test("logging in with a wrong password shows an error and stays on the gate", async ({ page }) => {
   const username = uniqueUsername("wrongpw");
   await page.goto("/");
-  await page.getByRole("tab", { name: "注册" }).click();
-  await page.getByPlaceholder("用户名").fill(username);
+  const registerDialog = page.getByRole("dialog", { name: "注册账号" });
+  await page.getByRole("button", { name: "注册" }).click();
+  await registerDialog.getByPlaceholder("用户名").fill(username);
   await page.getByPlaceholder("密码（至少 8 位）").fill("password123");
   await page.getByPlaceholder("确认密码").fill("password123");
-  await page.getByRole("button", { name: "注册" }).click();
+  await registerDialog.getByRole("button", { name: "注册" }).click();
   await expect(page.getByPlaceholder("给智能体发消息")).toBeVisible();
 
   await page.evaluate(() => localStorage.removeItem("opentalos-api-key"));
   await page.reload();
-  await page.getByRole("tab", { name: "登录" }).click();
   await page.getByPlaceholder("用户名").fill(username);
   await page.getByPlaceholder("密码").fill("totally-wrong-password");
   await page.getByRole("button", { name: "登录" }).click();
@@ -271,21 +207,11 @@ test("a banned user cannot log in and sees a clear reason", async ({ page }) => 
   });
 
   await page.goto("/");
-  await page.getByRole("tab", { name: "登录" }).click();
   await page.getByPlaceholder("用户名").fill(username);
   await page.getByPlaceholder("密码").fill("password123");
   await page.getByRole("button", { name: "登录" }).click();
 
   await expect(page.getByText("账号已被封禁")).toBeVisible();
-});
-
-test("the existing paste-an-API-key flow still works unchanged alongside the new tabs", async ({ page }) => {
-  const { rawKey } = await createTenantAndKey("still-works-tenant");
-  await page.goto("/");
-  await page.getByRole("tab", { name: "API Key" }).click();
-  await page.getByPlaceholder("API Key").fill(rawKey);
-  await page.getByRole("button", { name: "进入" }).click();
-  await expect(page.getByPlaceholder("给智能体发消息")).toBeVisible();
 });
 
 test("admin can see a registered user in the Users tab, ban them, unban them, then soft-delete them", async ({
@@ -314,7 +240,6 @@ test("admin can see a registered user in the Users tab, ban them, unban them, th
   await expect(userRow.getByText("已封禁")).toBeVisible();
 
   await page.goto("/");
-  await page.getByRole("tab", { name: "登录" }).click();
   await page.getByPlaceholder("用户名").fill(username);
   await page.getByPlaceholder("密码").fill("password123");
   await page.getByRole("button", { name: "登录" }).click();
