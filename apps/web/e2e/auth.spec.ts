@@ -118,13 +118,48 @@ test("registering a new account via the web UI logs straight into a working chat
   const registerDialog = page.getByRole("dialog", { name: "注册账号" });
   await page.getByRole("button", { name: "注册" }).click();
   await registerDialog.getByPlaceholder("用户名").fill(uniqueUsername("web-register"));
-  await page.getByPlaceholder("密码（至少 8 位）").fill("password123");
-  await page.getByPlaceholder("确认密码").fill("password123");
+  await registerDialog.getByPlaceholder("密码（至少 8 位）").fill("password123");
+  await registerDialog.getByPlaceholder("确认密码").fill("password123");
   await registerDialog.getByRole("button", { name: "注册" }).click();
 
   await page.getByPlaceholder("给智能体发消息").fill("你好");
   await page.getByRole("button", { name: "发送" }).click();
   await expect(page.getByText("你好").first()).toBeVisible();
+});
+
+test("a revoked API key is rejected by the chat UI, which asks the user to re-enter one", async ({ page }) => {
+  const username = uniqueUsername("revoke-web");
+  await page.goto("/");
+  const registerDialog = page.getByRole("dialog", { name: "注册账号" });
+  await page.getByRole("button", { name: "注册" }).click();
+  await registerDialog.getByPlaceholder("用户名").fill(username);
+  await registerDialog.getByPlaceholder("密码（至少 8 位）").fill("password123");
+  await registerDialog.getByPlaceholder("确认密码").fill("password123");
+  await registerDialog.getByRole("button", { name: "注册" }).click();
+
+  // Confirms the session's API key genuinely works before it gets revoked.
+  await expect(page.getByPlaceholder("给智能体发消息")).toBeVisible();
+
+  const usersRes = await fetch(`${ADMIN_BASE}/users`, { headers: { Authorization: `Bearer ${ADMIN_API_KEY}` } });
+  const user = (await usersRes.json()).find((u: { username: string; tenantId: string }) => u.username === username);
+  const keysRes = await fetch(`${ADMIN_BASE}/tenants/${user.tenantId}/api-keys`, {
+    headers: { Authorization: `Bearer ${ADMIN_API_KEY}` },
+  });
+  const keys = await keysRes.json();
+  await fetch(`${ADMIN_BASE}/api-keys/${keys[0].id}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${ADMIN_API_KEY}` },
+  });
+
+  // The revoked key is still in localStorage; sending now hits the server and gets a 401.
+  await page.getByPlaceholder("给智能体发消息").fill("hello");
+  await page.getByRole("button", { name: "发送" }).click();
+
+  await expect(page.getByText("密钥无效或已被吊销，请重新输入")).toBeVisible({ timeout: 5000 });
+  // App.tsx unmounts the session and remounts a fresh ApiKeyGate once hasApiKey flips back to
+  // false, so the gate's login form (not the register dialog) is what re-appears for re-entry.
+  await expect(page.getByPlaceholder("用户名")).toBeVisible();
+  await expect(page.getByPlaceholder("密码")).toBeVisible();
 });
 
 test("registering then logging out and back in with the same credentials works", async ({ page }) => {
@@ -133,8 +168,8 @@ test("registering then logging out and back in with the same credentials works",
   const registerDialog = page.getByRole("dialog", { name: "注册账号" });
   await page.getByRole("button", { name: "注册" }).click();
   await registerDialog.getByPlaceholder("用户名").fill(username);
-  await page.getByPlaceholder("密码（至少 8 位）").fill("password123");
-  await page.getByPlaceholder("确认密码").fill("password123");
+  await registerDialog.getByPlaceholder("密码（至少 8 位）").fill("password123");
+  await registerDialog.getByPlaceholder("确认密码").fill("password123");
   await registerDialog.getByRole("button", { name: "注册" }).click();
   await expect(page.getByPlaceholder("给智能体发消息")).toBeVisible();
 
@@ -160,8 +195,8 @@ test("registration rejects a mismatched confirm-password without hitting the ser
   const registerDialog = page.getByRole("dialog", { name: "注册账号" });
   await page.getByRole("button", { name: "注册" }).click();
   await registerDialog.getByPlaceholder("用户名").fill(uniqueUsername("mismatch"));
-  await page.getByPlaceholder("密码（至少 8 位）").fill("password123");
-  await page.getByPlaceholder("确认密码").fill("different-password");
+  await registerDialog.getByPlaceholder("密码（至少 8 位）").fill("password123");
+  await registerDialog.getByPlaceholder("确认密码").fill("different-password");
   await registerDialog.getByRole("button", { name: "注册" }).click();
 
   await expect(registerDialog.getByText("两次输入的密码不一致")).toBeVisible();
@@ -175,8 +210,8 @@ test("logging in with a wrong password shows an error and stays on the gate", as
   const registerDialog = page.getByRole("dialog", { name: "注册账号" });
   await page.getByRole("button", { name: "注册" }).click();
   await registerDialog.getByPlaceholder("用户名").fill(username);
-  await page.getByPlaceholder("密码（至少 8 位）").fill("password123");
-  await page.getByPlaceholder("确认密码").fill("password123");
+  await registerDialog.getByPlaceholder("密码（至少 8 位）").fill("password123");
+  await registerDialog.getByPlaceholder("确认密码").fill("password123");
   await registerDialog.getByRole("button", { name: "注册" }).click();
   await expect(page.getByPlaceholder("给智能体发消息")).toBeVisible();
 
