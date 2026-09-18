@@ -50,6 +50,33 @@ export default async function globalSetup(): Promise<void> {
         status TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
       );
       CREATE UNIQUE INDEX users_username_lower_idx ON users (lower(username));
+
+      -- apps/api and apps/worker use a single Postgres pool for everything (see their DATABASE_URL
+      -- usage), not just checkpoints/trace_events -- now that playwright.config.ts points that pool
+      -- at opentalos_app instead of postgres, this connection also needs plain (non-RLS) access to
+      -- the tenant/auth/task-queue tables it queries directly.
+      GRANT SELECT, INSERT, UPDATE, DELETE ON tenants TO opentalos_app;
+      GRANT SELECT, INSERT, UPDATE, DELETE ON api_keys TO opentalos_app;
+      GRANT SELECT, INSERT, UPDATE, DELETE ON users TO opentalos_app;
+      GRANT SELECT, INSERT, UPDATE, DELETE ON tasks TO opentalos_app;
+      GRANT USAGE, SELECT ON SEQUENCE tasks_id_seq TO opentalos_app;
+
+      ALTER TABLE checkpoints ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE checkpoints FORCE ROW LEVEL SECURITY;
+      DROP POLICY IF EXISTS tenant_isolation ON checkpoints;
+      CREATE POLICY tenant_isolation ON checkpoints
+        USING (tenant_id = current_setting('app.tenant_id', true))
+        WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+      GRANT SELECT, INSERT, UPDATE, DELETE ON checkpoints TO opentalos_app;
+
+      ALTER TABLE trace_events ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE trace_events FORCE ROW LEVEL SECURITY;
+      DROP POLICY IF EXISTS tenant_isolation ON trace_events;
+      CREATE POLICY tenant_isolation ON trace_events
+        USING (tenant_id = current_setting('app.tenant_id', true))
+        WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+      GRANT SELECT, INSERT, UPDATE, DELETE ON trace_events TO opentalos_app;
+      GRANT USAGE, SELECT ON SEQUENCE trace_events_id_seq TO opentalos_app;
     `);
 
     const tenantStore = new TenantStore(pool);

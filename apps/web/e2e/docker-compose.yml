@@ -16,3 +16,5 @@ services:
       - "5434:5432"
     environment:
       POSTGRES_PASSWORD: postgres
+    volumes:
+      - ../../../scripts/init-opentalos-app-role.sql:/docker-entrypoint-initdb.d/init-opentalos-app-role.sql:ro

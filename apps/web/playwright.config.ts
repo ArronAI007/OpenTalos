@@ -11,7 +11,7 @@ import { defineConfig } from "@playwright/test";
 // of starting fresh ones against this isolated 5434 database — the DROP/reseed here then has no
 // effect on what the tests actually exercise. Stop the real dev stack first
 // (`scripts/dev.sh stop worker api web admin`) for a truly clean, isolated E2E run.
-const DATABASE_URL = "postgres://postgres:postgres@localhost:5434/postgres";
+const DATABASE_URL = "postgres://opentalos_app:opentalos_app@localhost:5434/postgres";
 const ADMIN_API_KEY = "e2e-admin-key";
 
 export default defineConfig({
