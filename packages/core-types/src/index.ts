@@ -145,6 +145,22 @@ export interface CheckpointStore {
    * pending message into the run's SteerChannel, so it isn't redelivered on the next poll tick.
    * A no-op if runId doesn't exist. */
   clearSteerMessage(runId: string): Promise<void>;
+
+  /** Tenant-scoped variants of the four methods above, used by every call site that's driven by
+   * an authenticated request/task rather than trusted internal system code (see
+   * docs/superpowers/specs/2026-09-17-checkpoint-tracing-rls-design.md). These exist ALONGSIDE
+   * the unscoped methods above rather than replacing their signatures, specifically so the 65+
+   * existing call sites against InMemoryCheckpointStore (used pervasively in fast unit tests
+   * across packages/core-graph, packages/chat-agent, packages/multi-agent, and this package's own
+   * scheduler tests) never need to change. Each implementation filters by tenantId in the query
+   * itself (works under any DB role) AND — for the Postgres implementation — sets an RLS session
+   * variable as a database-level backstop; see PostgresCheckpointStore. Return/no-op the same way
+   * as the unscoped method when runId doesn't exist OR belongs to a different tenant — the two
+   * cases are indistinguishable by design, matching how RLS itself would behave. */
+  loadForTenant(runId: string, tenantId: string): Promise<Checkpoint | undefined>;
+  requestCancelForTenant(runId: string, tenantId: string): Promise<void>;
+  requestSteerForTenant(runId: string, message: string, tenantId: string): Promise<void>;
+  clearSteerMessageForTenant(runId: string, tenantId: string): Promise<void>;
 }
 
 export type TraceEventType =
