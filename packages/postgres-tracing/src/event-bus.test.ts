@@ -45,7 +45,7 @@ describe("PostgresEventBus", () => {
     bus.emit(makeEvent({ runId: "run-emit-1", payload: { nodeId: "plan" } }));
     await bus.flush();
 
-    const events = await listEventsSince(pool, "run-emit-1", 0);
+    const events = await listEventsSince(pool, "run-emit-1", 0, "tenant-a");
     expect(events).toHaveLength(1);
     expect(events[0].type).toBe("node_enter");
     expect(events[0].payload).toEqual({ nodeId: "plan" });
@@ -58,7 +58,7 @@ describe("PostgresEventBus", () => {
     bus.emit(makeEvent({ runId: "run-order-1", type: "tool_call_end" }));
     await bus.flush();
 
-    const events = await listEventsSince(pool, "run-order-1", 0);
+    const events = await listEventsSince(pool, "run-order-1", 0, "tenant-a");
     expect(events.map((e) => e.type)).toEqual(["node_enter", "tool_call_start", "tool_call_end"]);
   });
 
@@ -66,14 +66,14 @@ describe("PostgresEventBus", () => {
     const bus = new PostgresEventBus(pool);
     bus.emit(makeEvent({ runId: "run-cursor-1", type: "node_enter" }));
     await bus.flush();
-    const first = await listEventsSince(pool, "run-cursor-1", 0);
+    const first = await listEventsSince(pool, "run-cursor-1", 0, "tenant-a");
     expect(first).toHaveLength(1);
     const cursor = first[0].id;
 
     bus.emit(makeEvent({ runId: "run-cursor-1", type: "node_exit" }));
     await bus.flush();
 
-    const onlyNew = await listEventsSince(pool, "run-cursor-1", cursor);
+    const onlyNew = await listEventsSince(pool, "run-cursor-1", cursor, "tenant-a");
     expect(onlyNew).toHaveLength(1);
     expect(onlyNew[0].type).toBe("node_exit");
   });
@@ -84,7 +84,7 @@ describe("PostgresEventBus", () => {
     bus.emit(makeEvent({ runId: "run-scope-b", type: "node_enter" }));
     await bus.flush();
 
-    const eventsA = await listEventsSince(pool, "run-scope-a", 0);
+    const eventsA = await listEventsSince(pool, "run-scope-a", 0, "tenant-a");
     expect(eventsA).toHaveLength(1);
     expect(eventsA[0].runId).toBe("run-scope-a");
   });
@@ -93,5 +93,17 @@ describe("PostgresEventBus", () => {
     const bus = new PostgresEventBus(pool);
     const unsubscribe = bus.subscribe(() => {});
     expect(() => unsubscribe()).not.toThrow();
+  });
+
+  it("listEventsSince only returns events for the requested tenantId, even for the same runId", async () => {
+    const bus = new PostgresEventBus(pool);
+    bus.emit(makeEvent({ runId: "run-tenant-scope", tenantId: "tenant-a", type: "node_enter" }));
+    await bus.flush();
+
+    const asTenantA = await listEventsSince(pool, "run-tenant-scope", 0, "tenant-a");
+    expect(asTenantA).toHaveLength(1);
+
+    const asTenantB = await listEventsSince(pool, "run-tenant-scope", 0, "tenant-b");
+    expect(asTenantB).toHaveLength(0);
   });
 });

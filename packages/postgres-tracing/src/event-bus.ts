@@ -1,4 +1,4 @@
-import { and, asc, eq, gt } from "drizzle-orm";
+import { and, asc, eq, gt, sql } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import type { Pool } from "pg";
 import type { EventBus, EventHandler, TraceEvent, TraceEventType } from "@opentalos/core-types";
@@ -24,12 +24,15 @@ export class PostgresEventBus implements EventBus {
   emit(event: TraceEvent): void {
     this.writeChain = this.writeChain
       .then(() =>
-        this.db.insert(traceEvents).values({
-          runId: event.runId,
-          tenantId: event.tenantId,
-          sessionId: event.sessionId,
-          type: event.type,
-          payload: event.payload ?? null,
+        this.db.transaction(async (tx) => {
+          await tx.execute(sql`select set_config('app.tenant_id', ${event.tenantId}, true)`);
+          await tx.insert(traceEvents).values({
+            runId: event.runId,
+            tenantId: event.tenantId,
+            sessionId: event.sessionId,
+            type: event.type,
+            payload: event.payload ?? null,
+          });
         }),
       )
       .then(() => undefined)
@@ -52,20 +55,28 @@ export class PostgresEventBus implements EventBus {
   }
 }
 
-export async function listEventsSince(pool: Pool, runId: string, afterId: number): Promise<StoredTraceEvent[]> {
+export async function listEventsSince(
+  pool: Pool,
+  runId: string,
+  afterId: number,
+  tenantId: string,
+): Promise<StoredTraceEvent[]> {
   const db = drizzle(pool);
-  const rows = await db
-    .select()
-    .from(traceEvents)
-    .where(and(eq(traceEvents.runId, runId), gt(traceEvents.id, afterId)))
-    .orderBy(asc(traceEvents.id));
-  return rows.map((row) => ({
-    id: row.id,
-    type: row.type as TraceEventType,
-    runId: row.runId,
-    tenantId: row.tenantId,
-    sessionId: row.sessionId,
-    timestamp: row.createdAt.toISOString(),
-    payload: (row.payload ?? undefined) as Record<string, unknown> | undefined,
-  }));
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select set_config('app.tenant_id', ${tenantId}, true)`);
+    const rows = await tx
+      .select()
+      .from(traceEvents)
+      .where(and(eq(traceEvents.runId, runId), eq(traceEvents.tenantId, tenantId), gt(traceEvents.id, afterId)))
+      .orderBy(asc(traceEvents.id));
+    return rows.map((row) => ({
+      id: row.id,
+      type: row.type as TraceEventType,
+      runId: row.runId,
+      tenantId: row.tenantId,
+      sessionId: row.sessionId,
+      timestamp: row.createdAt.toISOString(),
+      payload: (row.payload ?? undefined) as Record<string, unknown> | undefined,
+    }));
+  });
 }
