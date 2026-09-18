@@ -108,6 +108,10 @@ export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void 
       return reply.code(400).send({ error: "sessionId query parameter is required" });
     }
     const tenantId = requireTenantId(request);
+    // checkpoint.tenantId !== tenantId is unreachable given loadForTenant's own WHERE-clause
+    // filtering (it can only ever return a checkpoint whose tenantId matches) — kept anyway as
+    // defense-in-depth against a future refactor that swaps in a differently-scoped load call,
+    // per the RLS design doc (docs/superpowers/specs/2026-09-17-checkpoint-tracing-rls-design.md).
     const checkpoint = await checkpointStore.loadForTenant(request.params.runId, tenantId);
     if (!checkpoint) {
       return reply.code(404).send({ error: `Run "${request.params.runId}" not found` });

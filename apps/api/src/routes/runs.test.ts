@@ -553,6 +553,103 @@ describe("GET /runs/:runId/events", () => {
   });
 });
 
+describe("cross-tenant isolation across GET/POST /runs/:runId routes", () => {
+  // Task 6 (see docs/superpowers/plans/2026-09-18-checkpoint-tracing-rls.md) switched every
+  // route below from checkpointStore.load/requestSteer/requestCancel to the RLS-backed
+  // loadForTenant/requestSteerForTenant/requestCancelForTenant variants. Every OTHER test in this
+  // file exercises 403/404 only via a same-tenant, wrong-sessionId mismatch -- none of them prove
+  // that a genuinely DIFFERENT tenant (a different API key entirely) is actually blocked from
+  // reading or mutating another tenant's run. This is the one thing that would catch a regression
+  // like a route accidentally calling the *ForTenant method with a hardcoded or stale tenantId
+  // instead of the current request's own.
+  async function createSecondTenantApiKey(): Promise<string> {
+    const otherTenant = await tenantStore.createTenant("cross-tenant-isolation-tenant");
+    const { rawKey } = await tenantStore.createApiKey(otherTenant.id);
+    return rawKey;
+  }
+
+  it("GET /runs/:runId: a different tenant's key gets 404, not the owning tenant's data", async () => {
+    const start = await app.inject({
+      method: "POST",
+      url: "/runs?sessionId=cross-tenant-get",
+      headers: authHeaders(),
+      payload: { message: "hi" },
+    });
+    const { runId } = start.json();
+    const otherKey = await createSecondTenantApiKey();
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/runs/${runId}?sessionId=cross-tenant-get`,
+      headers: { authorization: `Bearer ${otherKey}` },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("POST /runs/:runId/steer: a different tenant's key gets 404, cannot steer another tenant's run", async () => {
+    const start = await app.inject({
+      method: "POST",
+      url: "/runs?sessionId=cross-tenant-steer",
+      headers: authHeaders(),
+      payload: { message: "hi" },
+    });
+    const { runId } = start.json();
+    const otherKey = await createSecondTenantApiKey();
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/runs/${runId}/steer?sessionId=cross-tenant-steer`,
+      headers: { authorization: `Bearer ${otherKey}` },
+      payload: { message: "injected by another tenant" },
+    });
+    expect(res.statusCode).toBe(404);
+
+    // The steer must not have actually landed on the real owner's checkpoint.
+    const owned = await checkpointStore.load(runId);
+    expect(owned?.steerMessage).toBeUndefined();
+  });
+
+  it("POST /runs/:runId/cancel: a different tenant's key gets 404, cannot cancel another tenant's run", async () => {
+    const start = await app.inject({
+      method: "POST",
+      url: "/runs?sessionId=cross-tenant-cancel",
+      headers: authHeaders(),
+      payload: { message: "hi" },
+    });
+    const { runId } = start.json();
+    const otherKey = await createSecondTenantApiKey();
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/runs/${runId}/cancel?sessionId=cross-tenant-cancel`,
+      headers: { authorization: `Bearer ${otherKey}` },
+    });
+    expect(res.statusCode).toBe(404);
+
+    // The cancel must not have actually landed on the real owner's checkpoint.
+    const owned = await checkpointStore.load(runId);
+    expect(owned?.cancelRequested).toBe(false);
+  });
+
+  it("GET /runs/:runId/events: a different tenant's key gets 404 before ever upgrading to SSE", async () => {
+    const start = await app.inject({
+      method: "POST",
+      url: "/runs?sessionId=cross-tenant-events",
+      headers: authHeaders(),
+      payload: { message: "hi" },
+    });
+    const { runId } = start.json();
+    const otherKey = await createSecondTenantApiKey();
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/runs/${runId}/events?sessionId=cross-tenant-events`,
+      headers: { authorization: `Bearer ${otherKey}` },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+});
+
 describe("GET /runs/:runId/events (real SSE connection lifecycle)", () => {
   // `.inject()` never opens a real socket, so `reply.hijack()` can't be exercised faithfully
   // through it — a hijacked SSE response only behaves like a real long-lived connection over an
