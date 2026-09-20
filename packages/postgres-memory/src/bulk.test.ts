@@ -91,4 +91,25 @@ describe("memories bulk helpers", () => {
     const forA = await listMemoriesForTenant(pool, "tenant-iso-a");
     expect(forA.map((m) => m.title)).toEqual(["a-fact"]);
   });
+
+  it("deleteMemories cannot delete another tenant's row even when passed its real id", async () => {
+    await upsertMemories(pool, "tenant-cross-delete-owner", { newEntries: [{ type: "profile", title: "owner-fact", content: "mine" }], updates: [] });
+    const [owned] = await listMemoriesForTenant(pool, "tenant-cross-delete-owner");
+
+    await deleteMemories(pool, "tenant-cross-delete-attacker", [owned.id]);
+
+    const stillThere = await listMemoriesForTenant(pool, "tenant-cross-delete-owner");
+    expect(stillThere).toHaveLength(1);
+    expect(stillThere[0].id).toBe(owned.id);
+  });
+
+  it("upsertMemories updates cannot overwrite another tenant's row even when passed its real id", async () => {
+    await upsertMemories(pool, "tenant-cross-update-owner", { newEntries: [{ type: "profile", title: "owner-fact", content: "original" }], updates: [] });
+    const [owned] = await listMemoriesForTenant(pool, "tenant-cross-update-owner");
+
+    await upsertMemories(pool, "tenant-cross-update-attacker", { newEntries: [], updates: [{ id: owned.id, content: "hijacked" }] });
+
+    const stillOriginal = await listMemoriesForTenant(pool, "tenant-cross-update-owner");
+    expect(stillOriginal[0].content).toBe("original");
+  });
 });
