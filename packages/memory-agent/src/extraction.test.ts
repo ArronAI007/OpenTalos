@@ -76,4 +76,28 @@ describe("extractMemory", () => {
     ).resolves.toBeUndefined();
     expect(await listRawMemoriesForTenant(pool, "tenant-malformed")).toEqual([]);
   });
+
+  it("treats shouldSave:true with a missing content field as a no-op", async () => {
+    const provider = fakeProvider('{"shouldSave": true}');
+    await extractMemory(pool, provider, {
+      tenantId: "tenant-missing-content",
+      sessionId: "s1",
+      runId: "run-4",
+      userMessage: "hi",
+      assistantReply: "hello",
+    });
+    expect(await listRawMemoriesForTenant(pool, "tenant-missing-content")).toEqual([]);
+  });
+
+  it("treats a non-boolean shouldSave value as a no-op", async () => {
+    const provider = fakeProvider('{"shouldSave": "yes", "content": "should not be saved"}');
+    await extractMemory(pool, provider, {
+      tenantId: "tenant-wrong-type",
+      sessionId: "s1",
+      runId: "run-5",
+      userMessage: "hi",
+      assistantReply: "hello",
+    });
+    expect(await listRawMemoriesForTenant(pool, "tenant-wrong-type")).toEqual([]);
+  });
 });

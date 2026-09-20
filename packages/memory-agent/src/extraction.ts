@@ -25,22 +25,35 @@ export interface ConversationTurn {
 }
 
 /** 任何解析失败都当成"不需要保存"处理，而不是抛出异常——一次偶发的格式错误不应该让整个提取
- * 流程报错（这条路径本来就是 fire-and-forget，见 apps/worker 的接入点，Task 6）。 */
+ * 流程报错（这条路径本来就是 fire-and-forget，见 apps/worker 的接入点，Task 6）。 但语法错误和
+ * "解析成功但形状不对"这两种情况都会 console.error 记录一下（截断到 200 字符）——多数轮次本来就
+ * 合法地判断为不需要保存，如果不区分记录，模型输出持续跑偏成垃圾也会跟正常情况看起来一模一样，
+ * 没人会发现。 */
 function parseExtractionResult(raw: string): { shouldSave: boolean; content?: string } {
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === "object" && parsed.shouldSave === true && typeof parsed.content === "string") {
-      return { shouldSave: true, content: parsed.content };
-    }
-    return { shouldSave: false };
+    parsed = JSON.parse(raw);
   } catch {
+    console.error(`memory-agent: extraction model returned non-JSON output: ${raw.slice(0, 200)}`);
     return { shouldSave: false };
   }
+  if (parsed && typeof parsed === "object" && (parsed as Record<string, unknown>).shouldSave === true) {
+    const content = (parsed as Record<string, unknown>).content;
+    if (typeof content === "string") return { shouldSave: true, content };
+    console.error(`memory-agent: extraction model returned shouldSave:true with an invalid content field: ${raw.slice(0, 200)}`);
+    return { shouldSave: false };
+  }
+  return { shouldSave: false };
 }
 
-export async function extractMemory(pool: Pool, provider: ModelProvider, turn: ConversationTurn): Promise<void> {
+export async function extractMemory(
+  pool: Pool,
+  provider: ModelProvider,
+  turn: ConversationTurn,
+  options?: { signal?: AbortSignal },
+): Promise<void> {
   const userPrompt = `用户：${turn.userMessage}\n助手：${turn.assistantReply}`;
-  const raw = await completeText(provider, EXTRACTION_SYSTEM_PROMPT, userPrompt);
+  const raw = await completeText(provider, EXTRACTION_SYSTEM_PROMPT, userPrompt, options);
   const result = parseExtractionResult(raw);
   if (!result.shouldSave || !result.content) return;
   await insertRawMemory(pool, {
