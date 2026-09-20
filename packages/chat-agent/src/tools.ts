@@ -78,7 +78,10 @@ export function createSearchMemoryTool(memoryStore: MemoryStore): Tool {
     async execute(input, ctx: TenantContext) {
       const { query } = input as { query: string };
       const results = await memoryStore.search(query, ctx);
-      return { id: "", output: results };
+      // packages/sdk's runModelWithTools does `String(result.output)` before splicing this back
+      // into the conversation — an array of objects would stringify to "[object Object],..."
+      // garbage, so this must be a string, matching lookupExchangeRateTool/webSearchTool above.
+      return { id: "", output: JSON.stringify(results) };
     },
   };
 }

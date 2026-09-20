@@ -10,16 +10,23 @@ const MAX_MEMORY_SUMMARY_CHARS = 3000;
  * 总长度超过 MAX_MEMORY_SUMMARY_CHARS 时从末尾截断——参考 Claude Code 的 MEMORY.md 200 行/25KB
  * 上限思路，按本仓库单租户记忆量小得多的实际情况按比例缩小。没有任何记忆时返回空字符串，不往
  * system prompt 里加空标题。 */
+const MEMORY_DISCLAIMER = "\n（以上是历史对话中总结的信息，可能已过时；如与用户当前说法冲突，以当前对话为准）";
+
 function buildMemorySummary(entries: { type: string; title: string }[]): string {
   if (entries.length === 0) return "";
   const lines = entries
     .slice(0, MAX_MEMORY_ENTRIES)
     .map((entry) => `- [${entry.type}] ${entry.title}`);
-  let summary = "\n\n[已知用户信息]\n" + lines.join("\n") + "\n（以上是历史对话中总结的信息，可能已过时；如与用户当前说法冲突，以当前对话为准）";
-  if (summary.length > MAX_MEMORY_SUMMARY_CHARS) {
-    summary = summary.slice(0, MAX_MEMORY_SUMMARY_CHARS);
+  // Truncate only the entry-list portion to a budget that reserves room for the disclaimer, then
+  // always append the disclaimer afterward — so a run of long titles can never silently cut off
+  // the "this may be stale" warning, which matters more than a bit of extra entry-list content.
+  const header = "\n\n[已知用户信息]\n";
+  const entryBudget = MAX_MEMORY_SUMMARY_CHARS - header.length - MEMORY_DISCLAIMER.length;
+  let entryList = lines.join("\n");
+  if (entryList.length > entryBudget) {
+    entryList = entryList.slice(0, Math.max(0, entryBudget));
   }
-  return summary;
+  return header + entryList + MEMORY_DISCLAIMER;
 }
 
 // Deliberately tool-agnostic: which tool (if any) fits a given message is decided by the model
@@ -50,7 +57,20 @@ function buildRespondNode(
   listMemories?: ListMemoriesForSummary,
 ): NodeFn<ChatState> {
   return async function* respond(state: ChatState, ctx: NodeContext) {
-    const memoryEntries = listMemories ? await listMemories(ctx.tenant.tenantId) : [];
+    // Memory is a nice-to-have layered on top of core chat functionality, not load-bearing (same
+    // posture as apps/worker's onRunDone extraction and consolidation sweep, both of which also
+    // swallow their own errors) — a transient failure loading the summary must never fail the
+    // whole conversation turn, so this falls back to an empty summary rather than propagating.
+    let memoryEntries: { type: string; title: string }[] = [];
+    if (listMemories) {
+      try {
+        memoryEntries = await listMemories(ctx.tenant.tenantId);
+      } catch (error) {
+        console.error(
+          `chat-agent: failed to load memory summary for tenant "${ctx.tenant.tenantId}": ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
     const systemPrompt = SYSTEM_PROMPT + buildMemorySummary(memoryEntries);
     const { finalText, messages, reasoningText } = yield* runModelWithTools(
       modelProvider,

@@ -19,6 +19,7 @@
   },
   "devDependencies": {
     "@opentalos/checkpoint": "workspace:*",
-    "@opentalos/tracing": "workspace:*"
+    "@opentalos/tracing": "workspace:*",
+    "@types/node": "^22.20.1"
   }
 }

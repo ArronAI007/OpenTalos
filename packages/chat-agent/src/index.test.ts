@@ -319,4 +319,29 @@ describe("chat agent", () => {
 
     expect(capturedSystemPrompt).not.toContain("[已知用户信息]");
   });
+
+  it("does not fail the run when listMemories rejects — falls back to a normal reply", async () => {
+    const toolRegistry = createChatAgentToolRegistry();
+    const eventBus = new InMemoryEventBus();
+    const checkpointStore = new InMemoryCheckpointStore();
+    const modelProvider = scriptedProvider([
+      [{ type: "text_delta", textDelta: "你好！有什么我可以帮你的吗？" }, { type: "message_stop" }],
+    ]);
+    const listMemories = async (): Promise<{ type: string; title: string }[]> => {
+      throw new Error("simulated Postgres failure");
+    };
+    const engine = new GraphEngine<ChatState>(buildChatAgentGraph(modelProvider, toolRegistry, listMemories), {
+      toolRegistry,
+      eventBus,
+      checkpointStore,
+    });
+
+    const initialState: ChatState = { message: "你好" };
+    const checkpoint = await engine.run(
+      engine.start(initialState, { tenantId: "tenant-memory-fail", sessionId: "session-memory-fail" }, "run-memory-fail-1"),
+    );
+
+    expect(checkpoint.status).toBe("done");
+    expect(checkpoint.state.reply).toBe("你好！有什么我可以帮你的吗？");
+  });
 });
