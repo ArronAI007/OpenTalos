@@ -4,6 +4,7 @@ import { Pool } from "pg";
 import { PostgresCheckpointStore } from "@opentalos/postgres-checkpoint";
 import { PostgresEventBus, listEventsSince } from "@opentalos/postgres-tracing";
 import { Scheduler, Worker } from "@opentalos/scheduler";
+import { createModelProviderFromEnv } from "@opentalos/model-providers";
 import { buildWorkerRegistry } from "./index.js";
 
 let container: StartedPostgreSqlContainer;
@@ -72,7 +73,7 @@ describe("apps/worker registry wiring", () => {
   it("registers chat-agent and can run it to the HITL pause via a real Worker", async () => {
     const checkpointStore = new PostgresCheckpointStore(pool);
     const eventBus = new PostgresEventBus(pool);
-    const registry = buildWorkerRegistry(eventBus);
+    const registry = buildWorkerRegistry(eventBus, createModelProviderFromEnv());
     const scheduler = new Scheduler(pool, registry, checkpointStore);
     const worker = new Worker(pool, registry, checkpointStore, { globalConcurrency: 5, tenantConcurrency: 5 });
 

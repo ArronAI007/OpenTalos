@@ -138,6 +138,19 @@ beforeAll(async () => {
   };
   registry.register("resume-then-flaky", { buildGraph: () => resumeThenFlakyGraph, buildDeps: makeDeps });
 
+  const pauseForever: NodeFn<CounterState> = async function* () {
+    yield { type: "awaiting_approval", reason: "test pause, never resumed in this test" };
+    return { count: 1 };
+  };
+  const pauseGraph: GraphDefinition<CounterState> = {
+    id: "pause-forever",
+    entryNode: "pause",
+    nodes: { pause: pauseForever },
+    edges: [],
+    reducer: shallowMergeReducer,
+  };
+  registry.register("pause-forever", { buildGraph: () => pauseGraph, buildDeps: makeDeps });
+
   scheduler = new Scheduler(testDb.pool, registry, checkpointStore);
 }, 120_000);
 
@@ -483,4 +496,41 @@ describe("Worker", () => {
     expect((checkpoint?.state as { received?: string })?.received).toBe("turn left instead");
     expect(checkpoint?.steerMessage).toBeUndefined();
   }, 10_000);
+
+  it("calls onRunDone with the checkpoint once a task's checkpoint reaches status \"done\"", async () => {
+    const onRunDone = vi.fn();
+    await scheduler.enqueueStart(
+      "trivial",
+      { count: 0 },
+      { tenantId: "tenant-done-hook", sessionId: "s1" },
+      "worker-run-done-hook",
+    );
+    const worker = new Worker(testDb.pool, registry, checkpointStore, {
+      globalConcurrency: 10,
+      tenantConcurrency: 10,
+      onRunDone,
+    });
+    await worker.pollOnce();
+
+    expect(onRunDone).toHaveBeenCalledTimes(1);
+    expect(onRunDone.mock.calls[0][0]).toMatchObject({ runId: "worker-run-done-hook", status: "done" });
+  });
+
+  it("does not call onRunDone when the checkpoint only reaches \"paused\" (mid-HITL), not truly done", async () => {
+    const onRunDone = vi.fn();
+    await scheduler.enqueueStart(
+      "pause-forever",
+      { count: 0 },
+      { tenantId: "tenant-paused-hook", sessionId: "s1" },
+      "worker-run-paused-hook",
+    );
+    const worker = new Worker(testDb.pool, registry, checkpointStore, {
+      globalConcurrency: 10,
+      tenantConcurrency: 10,
+      onRunDone,
+    });
+    await worker.pollOnce();
+
+    expect(onRunDone).not.toHaveBeenCalled();
+  });
 });

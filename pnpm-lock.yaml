@@ -232,12 +232,18 @@ importers:
       '@opentalos/core-types':
         specifier: workspace:*
         version: link:../../packages/core-types
+      '@opentalos/memory-agent':
+        specifier: workspace:*
+        version: link:../../packages/memory-agent
       '@opentalos/model-providers':
         specifier: workspace:*
         version: link:../../packages/model-providers
       '@opentalos/postgres-checkpoint':
         specifier: workspace:*
         version: link:../../packages/postgres-checkpoint
+      '@opentalos/postgres-memory':
+        specifier: workspace:*
+        version: link:../../packages/postgres-memory
       '@opentalos/postgres-tenancy':
         specifier: workspace:*
         version: link:../../packages/postgres-tenancy

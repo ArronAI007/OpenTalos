@@ -2,6 +2,7 @@ import { and, asc, desc, eq, lte, sql } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import type { Pool } from "pg";
 import type { NodeResumeValue } from "@opentalos/core-graph";
+import type { Checkpoint } from "@opentalos/core-types";
 import type { PostgresCheckpointStore } from "@opentalos/postgres-checkpoint";
 import { buildEngine } from "./build-engine.js";
 import type { GraphRegistry } from "./graph-registry.js";
@@ -20,6 +21,11 @@ export interface WorkerOptions {
   resolveTenantConcurrency?: (tenantId: string) => Promise<number>;
   pollIntervalMs?: number;
   batchSize?: number;
+  /** 可选：每当一个任务的 checkpoint 真正到达终态 "done"（不是 "paused"）时调用一次，用于挂载
+   * 跟调度本身无关的后续处理（apps/worker 用它触发记忆提取，见 packages/memory-agent）——保持
+   * packages/scheduler 对任何具体业务逻辑（chat-agent、memory-agent 等）零依赖，只通过这个回调
+   * 解耦。不 await 这个回调：调用方自己决定是否异步处理，慢/失败的钩子不应该拖慢或搞挂调度本身。 */
+  onRunDone?: (checkpoint: Checkpoint) => void;
 }
 
 export class Worker {
@@ -142,6 +148,17 @@ export class Worker {
         .update(tasks)
         .set({ status: "done", error: null, updatedAt: new Date() })
         .where(eq(tasks.id, task.id));
+
+      // A "start" task whose checkpoint is merely "paused" (mid-HITL) also finishes this task
+      // row as "done" from the scheduler's own point of view — only fire onRunDone when the
+      // underlying checkpoint itself reached a true terminal "done", i.e. a genuinely completed
+      // conversation turn.
+      if (this.options.onRunDone) {
+        const checkpoint = await this.checkpointStore.loadForTenant(task.runId, task.tenantId);
+        if (checkpoint?.status === "done") {
+          this.options.onRunDone(checkpoint);
+        }
+      }
     } catch (error) {
       const attempts = task.attempts + 1;
       if (attempts >= task.maxAttempts) {

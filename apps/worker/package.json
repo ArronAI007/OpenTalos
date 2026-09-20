@@ -19,6 +19,8 @@
     "@opentalos/chat-agent": "workspace:*",
     "@opentalos/model-providers": "workspace:*",
     "@opentalos/skills": "workspace:*",
+    "@opentalos/memory-agent": "workspace:*",
+    "@opentalos/postgres-memory": "workspace:*",
     "dotenv": "^17.4.2",
     "pg": "^8.23.0"
   },
