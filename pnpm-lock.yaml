@@ -378,6 +378,28 @@ importers:
         specifier: workspace:*
         version: link:../core-types
 
+  packages/memory-agent:
+    dependencies:
+      '@opentalos/core-types':
+        specifier: workspace:*
+        version: link:../core-types
+      '@opentalos/postgres-memory':
+        specifier: workspace:*
+        version: link:../postgres-memory
+      pg:
+        specifier: ^8.23.0
+        version: 8.23.0
+    devDependencies:
+      '@testcontainers/postgresql':
+        specifier: ^12.1.0
+        version: 12.1.0
+      '@types/pg':
+        specifier: ^8.23.1
+        version: 8.23.1
+      testcontainers:
+        specifier: ^12.1.0
+        version: 12.1.0
+
   packages/model-providers:
     dependencies:
       '@anthropic-ai/sdk':
