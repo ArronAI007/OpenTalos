@@ -29,6 +29,24 @@ export function buildWorkerRegistry(eventBus: EventBus, modelProvider: ModelProv
   return registry;
 }
 
+/** One consolidation pass across every tenant with pending raw memories. Exported (like
+ * buildWorkerRegistry above) so it can be tested directly without needing a running timer. */
+export async function runMemoryConsolidationSweep(
+  pool: Pool,
+  modelProvider: ModelProvider,
+  tenantStore: TenantStore,
+): Promise<void> {
+  const allTenants = await tenantStore.listTenants();
+  const tenantIds = await listTenantsWithUnconsolidatedRawMemories(pool, allTenants.map((t) => t.id));
+  for (const tenantId of tenantIds) {
+    try {
+      await consolidateMemoriesForTenant(pool, modelProvider, tenantId);
+    } catch (error) {
+      console.error(`apps/worker: memory consolidation failed for tenant "${tenantId}": ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+}
+
 function isMain(): boolean {
   return import.meta.url === pathToFileURL(process.argv[1]).href;
 }
@@ -98,23 +116,24 @@ if (isMain()) {
 
   // 仓库里目前唯一的另一类"循环"是 Worker 自己那个基于 tasks 表的轮询——这是全新引入的一类
   // 定时任务，专门给记忆整合用，跟任务调度完全独立。周期由 MEMORY_CONSOLIDATION_INTERVAL_MS
-  // 控制，默认 1 小时。失败只打日志，不影响下一次循环。
+  // 控制，默认 1 小时。失败只打日志，不影响下一次循环。跟 Worker.scheduleNextPoll 用的是同一种
+  // setTimeout 自重排模式（而不是 setInterval）：只有上一轮 sweep 真正 settle 之后才会重新排下
+  // 一轮，保证任意时刻最多只有一轮 sweep 在跑——sweep 可能要对多个租户各发一次 LLM 调用，耗时不
+  // 可控，setInterval 没有这个保证，可能在上一轮还没跑完时就叠加发起下一轮。
   const consolidationIntervalMs = parsePositiveInt("MEMORY_CONSOLIDATION_INTERVAL_MS", 3_600_000);
-  const consolidationTimer = setInterval(() => {
-    void (async () => {
-      const allTenants = await tenantStore.listTenants();
-      const tenantIds = await listTenantsWithUnconsolidatedRawMemories(pool, allTenants.map((t) => t.id));
-      for (const tenantId of tenantIds) {
-        try {
-          await consolidateMemoriesForTenant(pool, modelProvider, tenantId);
-        } catch (error) {
-          console.error(`apps/worker: memory consolidation failed for tenant "${tenantId}": ${error instanceof Error ? error.message : String(error)}`);
-        }
-      }
-    })().catch((error) => {
-      console.error(`apps/worker: memory consolidation sweep failed: ${error instanceof Error ? error.message : String(error)}`);
-    });
-  }, consolidationIntervalMs);
+  let consolidationStopped = false;
+  let consolidationTimer: ReturnType<typeof setTimeout> | undefined;
+  function scheduleNextConsolidationSweep(delayMs: number): void {
+    if (consolidationStopped) return;
+    consolidationTimer = setTimeout(() => {
+      runMemoryConsolidationSweep(pool, modelProvider, tenantStore)
+        .catch((error) => {
+          console.error(`apps/worker: memory consolidation sweep failed: ${error instanceof Error ? error.message : String(error)}`);
+        })
+        .finally(() => scheduleNextConsolidationSweep(consolidationIntervalMs));
+    }, delayMs);
+  }
+  scheduleNextConsolidationSweep(consolidationIntervalMs);
 
   const healthPort = parsePositiveInt("HEALTH_PORT", 3002);
   const healthServer = createServer((_req, res) => {
@@ -137,7 +156,8 @@ if (isMain()) {
   // nice-to-have layered on top of core chat functionality, not load-bearing).
   async function shutdown(): Promise<void> {
     worker.stop();
-    clearInterval(consolidationTimer);
+    consolidationStopped = true;
+    if (consolidationTimer) clearTimeout(consolidationTimer);
     await eventBus.flush();
     await pool.end();
     process.exit(0);

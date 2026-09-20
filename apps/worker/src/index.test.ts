@@ -1,11 +1,14 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { Pool } from "pg";
+import type { ModelProvider, ModelResponseChunk } from "@opentalos/core-types";
 import { PostgresCheckpointStore } from "@opentalos/postgres-checkpoint";
 import { PostgresEventBus, listEventsSince } from "@opentalos/postgres-tracing";
+import { TenantStore } from "@opentalos/postgres-tenancy";
 import { Scheduler, Worker } from "@opentalos/scheduler";
 import { createModelProviderFromEnv } from "@opentalos/model-providers";
-import { buildWorkerRegistry } from "./index.js";
+import { insertRawMemory, listMemoriesForTenant, listRawMemoriesForTenant } from "@opentalos/postgres-memory";
+import { buildWorkerRegistry, runMemoryConsolidationSweep } from "./index.js";
 
 let container: StartedPostgreSqlContainer;
 let pool: Pool;
@@ -61,6 +64,24 @@ beforeAll(async () => {
       payload JSONB,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+    CREATE TABLE tenants (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      status TEXT NOT NULL,
+      max_concurrency INTEGER,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE TABLE raw_memories (
+      id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, session_id TEXT NOT NULL, run_id TEXT NOT NULL,
+      content TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE TABLE memories (
+      id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, type TEXT NOT NULL, scope TEXT NOT NULL DEFAULT 'private',
+      title TEXT NOT NULL, content TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), last_confirmed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE UNIQUE INDEX memories_tenant_id_title_idx ON memories (tenant_id, title);
   `);
 }, 120_000);
 
@@ -103,5 +124,54 @@ describe("apps/worker registry wiring", () => {
     expect(eventTypes).toContain("tool_call_start");
     expect(eventTypes).toContain("tool_call_end");
     expect(eventTypes).toContain("hitl_interrupt");
+  });
+});
+
+function fakeConsolidationProvider(responseText: string): ModelProvider {
+  return {
+    async *complete(): AsyncIterable<ModelResponseChunk> {
+      yield { type: "text_delta", textDelta: responseText };
+      yield { type: "message_stop" };
+    },
+  };
+}
+
+describe("runMemoryConsolidationSweep", () => {
+  it("consolidates a pending raw memory for a real, seeded tenant", async () => {
+    const tenantStore = new TenantStore(pool);
+    const tenant = await tenantStore.createTenant("sweep-tenant");
+    await insertRawMemory(pool, { tenantId: tenant.id, sessionId: "s1", runId: "run-1", content: "喜欢简洁回复" });
+
+    const provider = fakeConsolidationProvider(
+      '{"add": [{"type": "preference", "title": "回复偏好", "content": "喜欢简洁回复"}], "update": [], "delete": []}',
+    );
+    await runMemoryConsolidationSweep(pool, provider, tenantStore);
+
+    const memories = await listMemoriesForTenant(pool, tenant.id);
+    expect(memories).toMatchObject([{ type: "preference", title: "回复偏好", content: "喜欢简洁回复" }]);
+    expect(await listRawMemoriesForTenant(pool, tenant.id)).toEqual([]);
+  });
+
+  it("does not let one tenant's consolidation failure block another tenant's sweep", async () => {
+    const tenantStore = new TenantStore(pool);
+    const failingTenant = await tenantStore.createTenant("sweep-tenant-failing");
+    const okTenant = await tenantStore.createTenant("sweep-tenant-ok");
+    await insertRawMemory(pool, { tenantId: failingTenant.id, sessionId: "s1", runId: "run-2", content: "will fail" });
+    await insertRawMemory(pool, { tenantId: okTenant.id, sessionId: "s1", runId: "run-3", content: "住在北京" });
+
+    const provider: ModelProvider = {
+      complete: (request) => {
+        // No tenantId on ModelRequest, so distinguish which tenant's consolidation call this is
+        // by the raw observation text baked into the user prompt (set up above, per tenant).
+        const userPrompt = request.messages.find((m) => m.role === "user")?.content ?? "";
+        if (userPrompt.includes("will fail")) throw new Error("simulated provider failure");
+        return fakeConsolidationProvider(
+          '{"add": [{"type": "profile", "title": "居住地", "content": "住在北京"}], "update": [], "delete": []}',
+        ).complete(request);
+      },
+    };
+    await runMemoryConsolidationSweep(pool, provider, tenantStore);
+
+    expect(await listMemoriesForTenant(pool, okTenant.id)).toMatchObject([{ type: "profile", title: "居住地", content: "住在北京" }]);
   });
 });
