@@ -12,18 +12,23 @@ import { buildChatAgentGraph, createChatAgentToolRegistry, type ChatState } from
 import { createModelProviderFromEnv } from "@opentalos/model-providers";
 import { loadSkills, BUNDLED_SKILLS_DIR } from "@opentalos/skills";
 import { consolidateMemoriesForTenant, extractMemory } from "@opentalos/memory-agent";
-import { listTenantsWithUnconsolidatedRawMemories } from "@opentalos/postgres-memory";
+import { PostgresMemoryStore, listMemoriesForTenant, listTenantsWithUnconsolidatedRawMemories } from "@opentalos/postgres-memory";
 import { createTenantConcurrencyResolver } from "./tenant-quota.js";
 
 /** Builds and registers every graph this worker process knows how to run. Split out from the
  * bootstrap below so it can be exercised directly in tests without needing to start the
  * continuous polling loop or the health-check HTTP server. */
-export function buildWorkerRegistry(eventBus: EventBus, modelProvider: ModelProvider): GraphRegistry {
+export function buildWorkerRegistry(eventBus: EventBus, modelProvider: ModelProvider, pool: Pool): GraphRegistry {
   const registry = new GraphRegistry();
   const skills = loadSkills(BUNDLED_SKILLS_DIR);
-  const toolRegistryOptions = { modelProvider: process.env.MODEL_PROVIDER, skills };
+  const memoryStore = new PostgresMemoryStore(pool);
+  const toolRegistryOptions = { modelProvider: process.env.MODEL_PROVIDER, skills, memoryStore };
+  const listMemories = async (tenantId: string) => {
+    const entries = await listMemoriesForTenant(pool, tenantId);
+    return entries.map((entry) => ({ type: entry.type, title: entry.title }));
+  };
   registry.register("chat-agent", {
-    buildGraph: () => buildChatAgentGraph(modelProvider, createChatAgentToolRegistry(toolRegistryOptions)),
+    buildGraph: () => buildChatAgentGraph(modelProvider, createChatAgentToolRegistry(toolRegistryOptions), listMemories),
     buildDeps: () => ({ toolRegistry: createChatAgentToolRegistry(toolRegistryOptions), eventBus }),
   });
   return registry;
@@ -80,7 +85,7 @@ if (isMain()) {
   const tenantStore = new TenantStore(pool);
   const eventBus = new PostgresEventBus(pool);
   const modelProvider = createModelProviderFromEnv();
-  const registry = buildWorkerRegistry(eventBus, modelProvider);
+  const registry = buildWorkerRegistry(eventBus, modelProvider, pool);
 
   const defaultTenantConcurrency = parsePositiveInt("WORKER_TENANT_CONCURRENCY", 5);
   const worker = new Worker(pool, registry, checkpointStore, {

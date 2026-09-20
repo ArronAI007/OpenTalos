@@ -3,6 +3,25 @@ import type { ModelProvider, ToolRegistry } from "@opentalos/core-types";
 import { runModelWithTools } from "@opentalos/sdk";
 import type { ChatState } from "./state.js";
 
+const MAX_MEMORY_ENTRIES = 30;
+const MAX_MEMORY_SUMMARY_CHARS = 3000;
+
+/** 把该租户的记忆列表拼成一段紧凑摘要，追加进 system prompt。最多取 MAX_MEMORY_ENTRIES 条，且
+ * 总长度超过 MAX_MEMORY_SUMMARY_CHARS 时从末尾截断——参考 Claude Code 的 MEMORY.md 200 行/25KB
+ * 上限思路，按本仓库单租户记忆量小得多的实际情况按比例缩小。没有任何记忆时返回空字符串，不往
+ * system prompt 里加空标题。 */
+function buildMemorySummary(entries: { type: string; title: string }[]): string {
+  if (entries.length === 0) return "";
+  const lines = entries
+    .slice(0, MAX_MEMORY_ENTRIES)
+    .map((entry) => `- [${entry.type}] ${entry.title}`);
+  let summary = "\n\n[已知用户信息]\n" + lines.join("\n") + "\n（以上是历史对话中总结的信息，可能已过时；如与用户当前说法冲突，以当前对话为准）";
+  if (summary.length > MAX_MEMORY_SUMMARY_CHARS) {
+    summary = summary.slice(0, MAX_MEMORY_SUMMARY_CHARS);
+  }
+  return summary;
+}
+
 // Deliberately tool-agnostic: which tool (if any) fits a given message is decided by the model
 // reading each tool's own `description`/`inputSchema` (passed in via toolRegistry.list(), see
 // below) — not by naming tools here. Adding a new tool should never require editing this prompt;
@@ -23,13 +42,21 @@ const SYSTEM_PROMPT =
 // this deterministically — no prompting-only approach can guarantee it 100%.
 const REASONING_LANGUAGE_REMINDER = "\n\n（提醒：你接下来的思考过程和回复都必须全程使用中文。）";
 
-function buildRespondNode(modelProvider: ModelProvider, toolRegistry: ToolRegistry): NodeFn<ChatState> {
+export type ListMemoriesForSummary = (tenantId: string) => Promise<{ type: string; title: string }[]>;
+
+function buildRespondNode(
+  modelProvider: ModelProvider,
+  toolRegistry: ToolRegistry,
+  listMemories?: ListMemoriesForSummary,
+): NodeFn<ChatState> {
   return async function* respond(state: ChatState, ctx: NodeContext) {
+    const memoryEntries = listMemories ? await listMemories(ctx.tenant.tenantId) : [];
+    const systemPrompt = SYSTEM_PROMPT + buildMemorySummary(memoryEntries);
     const { finalText, messages, reasoningText } = yield* runModelWithTools(
       modelProvider,
       toolRegistry.list(),
       [
-        { role: "system", content: SYSTEM_PROMPT },
+        { role: "system", content: systemPrompt },
         { role: "user", content: state.message + REASONING_LANGUAGE_REMINDER, images: state.images },
       ],
       undefined,
@@ -63,11 +90,15 @@ const respondFinal: NodeFn<ChatState> = async function* respondFinal(state) {
   return { reply };
 };
 
-export function buildChatAgentGraph(modelProvider: ModelProvider, toolRegistry: ToolRegistry): GraphDefinition<ChatState> {
+export function buildChatAgentGraph(
+  modelProvider: ModelProvider,
+  toolRegistry: ToolRegistry,
+  listMemories?: ListMemoriesForSummary,
+): GraphDefinition<ChatState> {
   return {
     id: "chat-agent",
     entryNode: "respond",
-    nodes: { respond: buildRespondNode(modelProvider, toolRegistry), confirm, respondFinal },
+    nodes: { respond: buildRespondNode(modelProvider, toolRegistry, listMemories), confirm, respondFinal },
     edges: [
       { from: "respond", to: "confirm", condition: (state) => !!state.requiresApproval },
       { from: "respond", to: "respondFinal", condition: (state) => !state.requiresApproval },

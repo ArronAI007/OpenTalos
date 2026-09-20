@@ -263,4 +263,60 @@ describe("chat agent", () => {
     expect(checkpoint.status).toBe("done");
     expect(checkpoint.state.reply).toBe("loaded the fake skill");
   });
+
+  it("injects a compact memory summary into the system prompt when listMemories is provided", async () => {
+    const toolRegistry = createChatAgentToolRegistry();
+    const eventBus = new InMemoryEventBus();
+    const checkpointStore = new InMemoryCheckpointStore();
+    let capturedSystemPrompt: string | undefined;
+    const modelProvider: ModelProvider = {
+      async *complete(request) {
+        capturedSystemPrompt = request.messages.find((m) => m.role === "system")?.content;
+        yield { type: "text_delta", textDelta: "好的" };
+        yield { type: "message_stop" };
+      },
+    };
+    const listMemories = async (tenantId: string) => {
+      expect(tenantId).toBe("tenant-memory");
+      return [{ type: "preference", title: "回复偏好简洁" }];
+    };
+    const engine = new GraphEngine<ChatState>(buildChatAgentGraph(modelProvider, toolRegistry, listMemories), {
+      toolRegistry,
+      eventBus,
+      checkpointStore,
+    });
+
+    const initialState: ChatState = { message: "你好" };
+    const checkpoint = await engine.run(
+      engine.start(initialState, { tenantId: "tenant-memory", sessionId: "session-memory" }, "run-memory-1"),
+    );
+
+    expect(checkpoint.status).toBe("done");
+    expect(capturedSystemPrompt).toContain("[preference] 回复偏好简洁");
+    expect(capturedSystemPrompt).toContain("可能已过时");
+  });
+
+  it("injects no memory summary section when listMemories is omitted (existing callers unaffected)", async () => {
+    const toolRegistry = createChatAgentToolRegistry();
+    const eventBus = new InMemoryEventBus();
+    const checkpointStore = new InMemoryCheckpointStore();
+    let capturedSystemPrompt: string | undefined;
+    const modelProvider: ModelProvider = {
+      async *complete(request) {
+        capturedSystemPrompt = request.messages.find((m) => m.role === "system")?.content;
+        yield { type: "text_delta", textDelta: "好的" };
+        yield { type: "message_stop" };
+      },
+    };
+    const engine = new GraphEngine<ChatState>(buildChatAgentGraph(modelProvider, toolRegistry), {
+      toolRegistry,
+      eventBus,
+      checkpointStore,
+    });
+
+    const initialState: ChatState = { message: "你好" };
+    await engine.run(engine.start(initialState, { tenantId: "tenant-no-memory", sessionId: "s1" }, "run-no-memory-1"));
+
+    expect(capturedSystemPrompt).not.toContain("[已知用户信息]");
+  });
 });

@@ -94,7 +94,7 @@ describe("apps/worker registry wiring", () => {
   it("registers chat-agent and can run it to the HITL pause via a real Worker", async () => {
     const checkpointStore = new PostgresCheckpointStore(pool);
     const eventBus = new PostgresEventBus(pool);
-    const registry = buildWorkerRegistry(eventBus, createModelProviderFromEnv());
+    const registry = buildWorkerRegistry(eventBus, createModelProviderFromEnv(), pool);
     const scheduler = new Scheduler(pool, registry, checkpointStore);
     const worker = new Worker(pool, registry, checkpointStore, { globalConcurrency: 5, tenantConcurrency: 5 });
 

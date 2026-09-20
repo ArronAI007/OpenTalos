@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { MemoryStore } from "@opentalos/core-types";
 import { createChatAgentToolRegistry } from "./registry.js";
 
 describe("createChatAgentToolRegistry", () => {
@@ -22,5 +23,16 @@ describe("createChatAgentToolRegistry", () => {
     const definitions = registry.list();
     expect(definitions.map((tool) => tool.name)).toContain("$web_search");
     expect(definitions.find((tool) => tool.name === "$web_search")?.kind).toBe("builtin");
+  });
+
+  it("does not register search_memory when no memoryStore is given", () => {
+    const registry = createChatAgentToolRegistry();
+    expect(registry.list().map((tool) => tool.name)).not.toContain("search_memory");
+  });
+
+  it("registers search_memory when a memoryStore is given", () => {
+    const fakeMemoryStore: MemoryStore = { read: async () => undefined, write: async () => {}, search: async () => [] };
+    const registry = createChatAgentToolRegistry({ memoryStore: fakeMemoryStore });
+    expect(registry.list().map((tool) => tool.name)).toContain("search_memory");
   });
 });

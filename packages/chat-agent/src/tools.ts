@@ -1,4 +1,4 @@
-import type { Tool } from "@opentalos/core-types";
+import type { MemoryStore, TenantContext, Tool } from "@opentalos/core-types";
 
 /**
  * Deterministic mock tool: no network, no real exchange-rate API, no API key required. Always
@@ -60,3 +60,25 @@ export const webSearchTool: Tool = {
     return { id: "", output: JSON.stringify(input) };
   },
 };
+
+/** 按需查询完整记忆内容——模型看到 system prompt 里自动注入的摘要（见 graph.ts）某条标题相关、
+ * 但需要更完整内容时主动调用。这是 MemoryStore.search() 至今为止第一个真实调用方。只读查询，
+ * 不设 dangerous: true（不触发 HITL 审批）。 */
+export function createSearchMemoryTool(memoryStore: MemoryStore): Tool {
+  return {
+    definition: {
+      name: "search_memory",
+      description: "查询关于当前用户的历史记忆，返回匹配的完整记忆内容。当 system prompt 里的\"已知用户信息\"摘要提到某条相关但不够详细时使用。",
+      inputSchema: {
+        type: "object",
+        properties: { query: { type: "string", description: "要查询的关键词" } },
+        required: ["query"],
+      },
+    },
+    async execute(input, ctx: TenantContext) {
+      const { query } = input as { query: string };
+      const results = await memoryStore.search(query, ctx);
+      return { id: "", output: results };
+    },
+  };
+}
