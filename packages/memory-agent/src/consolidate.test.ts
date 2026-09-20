@@ -93,4 +93,36 @@ describe("consolidateMemoriesForTenant", () => {
     expect(await listMemoriesForTenant(pool, "tenant-malformed")).toEqual([]);
     expect(await listRawMemoriesForTenant(pool, "tenant-malformed")).toEqual([]);
   });
+
+  it("drops an add item with a hallucinated type and creates nothing", async () => {
+    await insertRawMemory(pool, { tenantId: "tenant-bad-type", sessionId: "s1", runId: "run-6", content: "some fact" });
+    const provider = fakeProvider('{"add": [{"type": "bogus-type", "title": "x", "content": "y"}], "update": [], "delete": []}');
+    await consolidateMemoriesForTenant(pool, provider, "tenant-bad-type");
+    expect(await listMemoriesForTenant(pool, "tenant-bad-type")).toEqual([]);
+    expect(await listRawMemoriesForTenant(pool, "tenant-bad-type")).toEqual([]);
+  });
+
+  it("applies only the valid item from a mixed batch of one valid and one invalid add item", async () => {
+    await insertRawMemory(pool, { tenantId: "tenant-mixed", sessionId: "s1", runId: "run-7", content: "喜欢简洁回复" });
+    const provider = fakeProvider(
+      '{"add": [{"type": "preference", "title": "回复偏好", "content": "喜欢简洁回复"}, {"type": "profile", "title": "缺 content"}], "update": [], "delete": []}',
+    );
+    await consolidateMemoriesForTenant(pool, provider, "tenant-mixed");
+    const memories = await listMemoriesForTenant(pool, "tenant-mixed");
+    expect(memories).toMatchObject([{ type: "preference", title: "回复偏好", content: "喜欢简洁回复" }]);
+  });
+
+  it("propagates a write failure mid-consolidation and leaves the raw memory untouched (deleteRawMemories never runs)", async () => {
+    await upsertMemories(pool, "tenant-conflict", { newEntries: [{ type: "profile", title: "重复标题", content: "已有内容" }], updates: [] });
+    await insertRawMemory(pool, { tenantId: "tenant-conflict", sessionId: "s1", runId: "run-8", content: "新的观察" });
+
+    // 让模型返回一个 add，其 title 跟已有记忆的 title 撞车——upsertMemories 内部的
+    // (tenantId, title) 唯一约束会真实地在 Postgres 里报错，不是 mock 出来的失败。
+    const provider = fakeProvider('{"add": [{"type": "profile", "title": "重复标题", "content": "冲突的新内容"}], "update": [], "delete": []}');
+
+    await expect(consolidateMemoriesForTenant(pool, provider, "tenant-conflict")).rejects.toThrow();
+
+    const rawAfter = await listRawMemoriesForTenant(pool, "tenant-conflict");
+    expect(rawAfter.map((r) => r.content)).toEqual(["新的观察"]);
+  });
 });

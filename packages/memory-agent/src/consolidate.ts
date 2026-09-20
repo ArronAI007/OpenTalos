@@ -28,6 +28,42 @@ interface ConsolidationResult {
   delete: string[];
 }
 
+const VALID_MEMORY_TYPES = new Set<string>(["profile", "preference", "context"]);
+
+function isValidNewMemory(item: unknown): item is ConsolidationResult["add"][number] {
+  return (
+    !!item &&
+    typeof item === "object" &&
+    VALID_MEMORY_TYPES.has((item as Record<string, unknown>).type as string) &&
+    typeof (item as Record<string, unknown>).title === "string" &&
+    typeof (item as Record<string, unknown>).content === "string"
+  );
+}
+
+function isValidMemoryUpdate(item: unknown): item is ConsolidationResult["update"][number] {
+  return (
+    !!item &&
+    typeof item === "object" &&
+    typeof (item as Record<string, unknown>).id === "string" &&
+    typeof (item as Record<string, unknown>).content === "string"
+  );
+}
+
+/** 从"已知是数组"的原始数组里过滤出形状合法的条目，把非法条目记录下来再丢弃——而不是直接
+ * cast 放行。 memories.type 在 schema 里就是普通 TEXT 字段，数据库层面不会拒绝一个模型幻觉出来的
+ * type 值，所以这一步是唯一的把关点。 */
+function filterValid<T>(items: unknown[], isValid: (item: unknown) => item is T, label: string): T[] {
+  const valid: T[] = [];
+  for (const item of items) {
+    if (isValid(item)) {
+      valid.push(item);
+    } else {
+      console.error(`memory-agent: consolidation model returned an invalid ${label} item, dropping it: ${JSON.stringify(item).slice(0, 200)}`);
+    }
+  }
+  return valid;
+}
+
 /** 任何解析失败都当成"这次什么都不做"，而不是抛出异常——原始观察本身不会丢（还留在
  * raw_memories 里，见下面的写回逻辑：只有真正跑完一次整合，处理过的原始观察才会被清空），下一
  * 次整合周期会重新尝试。跟 extraction.ts 的 parseExtractionResult 一样，区分"模型合法地说无操作"
@@ -45,12 +81,12 @@ function parseConsolidationResult(raw: string): ConsolidationResult {
     return { add: [], update: [], delete: [] };
   }
   const obj = parsed as Record<string, unknown>;
-  const add = Array.isArray(obj.add) ? (obj.add as ConsolidationResult["add"]) : [];
-  const update = Array.isArray(obj.update) ? (obj.update as ConsolidationResult["update"]) : [];
-  const del = Array.isArray(obj.delete) ? (obj.delete as ConsolidationResult["delete"]) : [];
   if (!Array.isArray(obj.add) || !Array.isArray(obj.update) || !Array.isArray(obj.delete)) {
     console.error(`memory-agent: consolidation model returned an unexpected shape (missing/non-array add/update/delete): ${raw.slice(0, 200)}`);
   }
+  const add = Array.isArray(obj.add) ? filterValid(obj.add, isValidNewMemory, "add") : [];
+  const update = Array.isArray(obj.update) ? filterValid(obj.update, isValidMemoryUpdate, "update") : [];
+  const del = Array.isArray(obj.delete) ? filterValid(obj.delete, (id): id is string => typeof id === "string", "delete") : [];
   return { add, update, delete: del };
 }
 
@@ -63,6 +99,9 @@ export async function consolidateMemoriesForTenant(
   const [existing, raw] = await Promise.all([listMemoriesForTenant(pool, tenantId), listRawMemoriesForTenant(pool, tenantId)]);
   if (raw.length === 0) return;
 
+  // 一旦某条 delete 提交，被删的记忆就不会再出现在下一轮传给模型的"已确认的记忆"里——如果后续
+  // 步骤（比如 deleteRawMemories）在这之后失败，触发过这条 delete 的原始观察下次重跑时会被当成
+  // "全新信息"重新解读，有可能把刚删掉的内容悄悄地重新加回来。
   const userPrompt =
     `已确认的记忆：\n${existing.map((m) => `- [${m.id}] [${m.type}] ${m.title}: ${m.content}`).join("\n") || "（无）"}\n\n` +
     `待处理的原始观察：\n${raw.map((r) => `- ${r.content}`).join("\n")}`;
@@ -75,6 +114,9 @@ export async function consolidateMemoriesForTenant(
   if (result.delete.length > 0) {
     await deleteMemories(pool, tenantId, result.delete);
   }
+  // 注意：upsertMemories/deleteMemories/deleteRawMemories 是三个独立事务，整体并不原子——如果在
+  // 它们之间崩溃，重试时对同一个 title 再次 add 会撞上 (tenantId, title) 唯一约束，且没有退避/去重
+  // 机制，存在活锁风险（留给调用方，即 Task 6/7 的 worker 处理）。
   // 处理过的 raw_memories 全部清空，不管模型是否采纳——这批已经被完整看过一遍，留着没有增量价值
   // （见 spec 里"整合"一节的明确设计决定）。
   await deleteRawMemories(pool, tenantId, raw.map((r) => r.id));
