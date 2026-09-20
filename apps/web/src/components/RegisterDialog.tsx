@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { registerUser } from "../api.js";
 
 interface RegisterDialogProps {
-  onSuccess: (apiKey: string) => void;
+  onSuccess: (username: string) => void;
   onCancel: () => void;
 }
 
@@ -31,8 +31,10 @@ export function RegisterDialog({ onSuccess, onCancel }: RegisterDialogProps) {
       return;
     }
     try {
-      const apiKey = await registerUser(username.trim(), password);
-      onSuccess(apiKey);
+      // Registering issues a fresh API key, but it's intentionally not used to auto-enter the
+      // app — the user is expected to log in explicitly afterward (see ApiKeyGate's onSuccess).
+      await registerUser(username.trim(), password);
+      onSuccess(username.trim());
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "注册失败，请重试");
     }

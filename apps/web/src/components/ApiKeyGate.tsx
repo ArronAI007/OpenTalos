@@ -11,11 +11,13 @@ export function ApiKeyGate({ onSubmit, error }: ApiKeyGateProps) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [formError, setFormError] = useState<string>();
+  const [successMessage, setSuccessMessage] = useState<string>();
   const [isRegisterOpen, setIsRegisterOpen] = useState(false);
 
   async function handleLoginSubmit(event: FormEvent) {
     event.preventDefault();
     setFormError(undefined);
+    setSuccessMessage(undefined);
     try {
       const apiKey = await loginUser(username.trim(), password);
       setApiKey(apiKey);
@@ -31,6 +33,7 @@ export function ApiKeyGate({ onSubmit, error }: ApiKeyGateProps) {
 
       {error && <p className="chat-error">{error}</p>}
       {formError && <p className="chat-error">{formError}</p>}
+      {successMessage && <p className="gate-success">{successMessage}</p>}
 
       <form onSubmit={handleLoginSubmit}>
         <input
@@ -53,17 +56,26 @@ export function ApiKeyGate({ onSubmit, error }: ApiKeyGateProps) {
 
       <div className="gate-footer">
         还没有账号？
-        <button type="button" className="gate-register-link" onClick={() => setIsRegisterOpen(true)}>
+        <button
+          type="button"
+          className="gate-register-link"
+          onClick={() => {
+            setSuccessMessage(undefined);
+            setIsRegisterOpen(true);
+          }}
+        >
           注册
         </button>
       </div>
 
       {isRegisterOpen && (
         <RegisterDialog
-          onSuccess={(apiKey) => {
-            setApiKey(apiKey);
+          onSuccess={(registeredUsername) => {
+            // Deliberately does not auto-login: registration and login are kept as two
+            // explicit steps, so the user always logs in themselves after creating an account.
+            setUsername(registeredUsername);
             setIsRegisterOpen(false);
-            onSubmit();
+            setSuccessMessage("注册成功，请登录");
           }}
           onCancel={() => setIsRegisterOpen(false)}
         />

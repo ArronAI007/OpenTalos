@@ -113,14 +113,24 @@ test("two tenants with different quotas get differentiated concurrency in the sa
   expect(highClaimed).toBeGreaterThan(lowClaimed);
 });
 
-test("registering a new account via the web UI logs straight into a working chat session", async ({ page }) => {
+test("registering a new account via the web UI then logging in reaches a working chat session", async ({
+  page,
+}) => {
+  const username = uniqueUsername("web-register");
   await page.goto("/");
   const registerDialog = page.getByRole("dialog", { name: "注册账号" });
   await page.getByRole("button", { name: "注册" }).click();
-  await registerDialog.getByPlaceholder("用户名").fill(uniqueUsername("web-register"));
+  await registerDialog.getByPlaceholder("用户名").fill(username);
   await registerDialog.getByPlaceholder("密码（至少 8 位）").fill("password123");
   await registerDialog.getByPlaceholder("确认密码").fill("password123");
   await registerDialog.getByRole("button", { name: "注册" }).click();
+
+  // Registration no longer auto-logs in: the gate shows a success message with the username
+  // prefilled, and the user must submit the login form explicitly.
+  await expect(page.getByText("注册成功，请登录")).toBeVisible();
+  await expect(page.getByPlaceholder("用户名")).toHaveValue(username);
+  await page.getByPlaceholder("密码").fill("password123");
+  await page.getByRole("button", { name: "登录" }).click();
 
   await page.getByPlaceholder("给智能体发消息").fill("你好");
   await page.getByRole("button", { name: "发送" }).click();
@@ -137,12 +147,28 @@ test("a revoked API key is rejected by the chat UI, which asks the user to re-en
   await registerDialog.getByPlaceholder("确认密码").fill("password123");
   await registerDialog.getByRole("button", { name: "注册" }).click();
 
-  // Confirms the session's API key genuinely works before it gets revoked — sends a real
-  // message and waits for the server to echo it back, not just that the composer renders
-  // (rendering only depends on localStorage having a string, not on any server round-trip).
-  await page.getByPlaceholder("给智能体发消息").fill("hello before revoke");
-  await page.getByRole("button", { name: "发送" }).click();
-  await expect(page.getByText("hello before revoke").first()).toBeVisible();
+  // Registration no longer auto-logs in — log in explicitly to get a working session (the
+  // username field is already prefilled by the gate after a successful registration). Waiting
+  // for the success message first is necessary, not just nice-to-have: it's the signal that the
+  // register dialog has actually unmounted, since immediately after the click the dialog's own
+  // "密码（至少 8 位）"/"确认密码" fields can still be present (async registerUser still in
+  // flight), making an unscoped getByPlaceholder("密码") match 3 elements instead of 1.
+  await expect(page.getByText("注册成功，请登录")).toBeVisible();
+  await page.getByPlaceholder("密码").fill("password123");
+  await page.getByRole("button", { name: "登录" }).click();
+
+  // Confirms the session's API key genuinely works before it gets revoked, via a direct
+  // authenticated request rather than through the chat UI: sending a real chat message here
+  // would leave a HITL-paused run in flight, which disables the composer/send button until
+  // that run is approved/rejected (see chat.spec.ts) — exactly the button this test needs to
+  // click again below for the actual revoked-key check.
+  const rawApiKey = await page.evaluate(() => localStorage.getItem("opentalos-api-key"));
+  const preRevokeRes = await fetch(`${API_BASE}/runs?sessionId=pre-revoke-check`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${rawApiKey}` },
+    body: JSON.stringify({ message: "pre-revoke check" }),
+  });
+  expect(preRevokeRes.status).toBe(201);
 
   const usersRes = await fetch(`${ADMIN_BASE}/users`, { headers: { Authorization: `Bearer ${ADMIN_API_KEY}` } });
   const user = (await usersRes.json()).find((u: { username: string; tenantId: string }) => u.username === username);
@@ -175,6 +201,13 @@ test("registering then logging out and back in with the same credentials works",
   await registerDialog.getByPlaceholder("密码（至少 8 位）").fill("password123");
   await registerDialog.getByPlaceholder("确认密码").fill("password123");
   await registerDialog.getByRole("button", { name: "注册" }).click();
+
+  // Registration no longer auto-logs in — log in explicitly first (username is prefilled).
+  // Waiting for the success message confirms the register dialog has actually unmounted, so
+  // getByPlaceholder("密码") below doesn't also match the dialog's own password fields.
+  await expect(page.getByText("注册成功，请登录")).toBeVisible();
+  await page.getByPlaceholder("密码").fill("password123");
+  await page.getByRole("button", { name: "登录" }).click();
   await expect(page.getByPlaceholder("给智能体发消息")).toBeVisible();
 
   // Simulate "logging out" by clearing the stored key and reloading into the gate.
@@ -217,6 +250,14 @@ test("logging in with a wrong password shows an error and stays on the gate", as
   await registerDialog.getByPlaceholder("密码（至少 8 位）").fill("password123");
   await registerDialog.getByPlaceholder("确认密码").fill("password123");
   await registerDialog.getByRole("button", { name: "注册" }).click();
+
+  // Registration no longer auto-logs in — log in explicitly first, to reach a real session
+  // before testing that a *subsequent* wrong-password attempt is rejected. Waiting for the
+  // success message confirms the register dialog has actually unmounted, so
+  // getByPlaceholder("密码") below doesn't also match the dialog's own password fields.
+  await expect(page.getByText("注册成功，请登录")).toBeVisible();
+  await page.getByPlaceholder("密码").fill("password123");
+  await page.getByRole("button", { name: "登录" }).click();
   await expect(page.getByPlaceholder("给智能体发消息")).toBeVisible();
 
   await page.evaluate(() => localStorage.removeItem("opentalos-api-key"));

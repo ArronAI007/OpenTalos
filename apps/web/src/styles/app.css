@@ -1412,6 +1412,12 @@ body {
   font-weight: 700;
 }
 
+.gate-success {
+  color: var(--color-accent);
+  font-size: 13px;
+  margin: 0 0 var(--space-md);
+}
+
 .gate-footer {
   display: flex;
   justify-content: flex-end;
