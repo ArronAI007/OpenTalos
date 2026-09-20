@@ -71,7 +71,15 @@ if (isMain()) {
     // Fire-and-forget: a failed/slow extraction must never affect the main run's own success, and
     // a process restart mid-extraction just loses that one turn's worth of memory — acceptable,
     // since memory is a nice-to-have on top of the core chat functionality, not load-bearing.
+    //
+    // The graphId check matters: onRunDone is a single, worker-wide hook, not scoped to any one
+    // registered graph. Right now "chat-agent" is the only graph this Worker runs, so this guard
+    // is a no-op in practice — but without it, registering a second graph in the future (any batch
+    // job, not just Tasks 7/8) would silently start casting ITS checkpoint.state to ChatState too,
+    // reading state.message as undefined rather than erroring, and firing a wasted extraction call
+    // with no log signal that anything was wrong.
     onRunDone: (checkpoint) => {
+      if (checkpoint.graphId !== "chat-agent") return;
       const state = checkpoint.state as ChatState;
       void extractMemory(pool, modelProvider, {
         tenantId: checkpoint.tenantId,
@@ -99,6 +107,13 @@ if (isMain()) {
     console.log(`apps/worker: health check listening on :${healthPort}`);
   });
 
+  // Known, accepted gap: worker.stop() only cancels the NEXT poll tick — it doesn't wait for any
+  // fire-and-forget extraction already in flight from onRunDone above. On a normal graceful
+  // SIGTERM/SIGINT (not just a crash), pool.end() below can close the connection out from under
+  // an in-flight extractMemory() call, surfacing as a "pool has ended"-style error logged via that
+  // callback's own .catch() — expected noise on every graceful restart, not a real failure; treat
+  // it the same as the crash-mid-extraction case this feature already accepts (memory is a
+  // nice-to-have layered on top of core chat functionality, not load-bearing).
   async function shutdown(): Promise<void> {
     worker.stop();
     await eventBus.flush();
