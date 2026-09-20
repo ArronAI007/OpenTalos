@@ -157,6 +157,12 @@ test("a revoked API key is rejected by the chat UI, which asks the user to re-en
   await page.getByPlaceholder("密码").fill("password123");
   await page.getByRole("button", { name: "登录" }).click();
 
+  // Waiting for the composer confirms loginUser's async call has actually resolved and
+  // setApiKey has run — reading localStorage any earlier could race ahead of that and read
+  // the stale (empty) value, which is exactly what caused the pre-revoke check below to
+  // itself get rejected with a 401.
+  await expect(page.getByPlaceholder("给智能体发消息")).toBeVisible();
+
   // Confirms the session's API key genuinely works before it gets revoked, via a direct
   // authenticated request rather than through the chat UI: sending a real chat message here
   // would leave a HITL-paused run in flight, which disables the composer/send button until
@@ -175,8 +181,14 @@ test("a revoked API key is rejected by the chat UI, which asks the user to re-en
   const keysRes = await fetch(`${ADMIN_BASE}/tenants/${user.tenantId}/api-keys`, {
     headers: { Authorization: `Bearer ${ADMIN_API_KEY}` },
   });
-  const keys = await keysRes.json();
-  await fetch(`${ADMIN_BASE}/api-keys/${keys[0].id}`, {
+  const keys: { id: string; keyPrefix: string }[] = await keysRes.json();
+  // This tenant now has TWO keys, not one: registering issues one (unused, since registration
+  // no longer auto-logs in) and the explicit login above issues a second, separate one (the
+  // one actually stored in localStorage and in use). keys[0] would be the wrong, unused one —
+  // find the key whose prefix is a prefix of the raw key actually in use instead.
+  const activeKey = keys.find((key) => rawApiKey?.startsWith(key.keyPrefix));
+  if (!activeKey) throw new Error("could not find the API key currently in use among the tenant's keys");
+  await fetch(`${ADMIN_BASE}/api-keys/${activeKey.id}`, {
     method: "DELETE",
     headers: { Authorization: `Bearer ${ADMIN_API_KEY}` },
   });
