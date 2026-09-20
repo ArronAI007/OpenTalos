@@ -11,7 +11,8 @@ import { GraphRegistry, Worker } from "@opentalos/scheduler";
 import { buildChatAgentGraph, createChatAgentToolRegistry, type ChatState } from "@opentalos/chat-agent";
 import { createModelProviderFromEnv } from "@opentalos/model-providers";
 import { loadSkills, BUNDLED_SKILLS_DIR } from "@opentalos/skills";
-import { extractMemory } from "@opentalos/memory-agent";
+import { consolidateMemoriesForTenant, extractMemory } from "@opentalos/memory-agent";
+import { listTenantsWithUnconsolidatedRawMemories } from "@opentalos/postgres-memory";
 import { createTenantConcurrencyResolver } from "./tenant-quota.js";
 
 /** Builds and registers every graph this worker process knows how to run. Split out from the
@@ -95,6 +96,26 @@ if (isMain()) {
   worker.start();
   console.log("apps/worker: started, polling for tasks...");
 
+  // 仓库里目前唯一的另一类"循环"是 Worker 自己那个基于 tasks 表的轮询——这是全新引入的一类
+  // 定时任务，专门给记忆整合用，跟任务调度完全独立。周期由 MEMORY_CONSOLIDATION_INTERVAL_MS
+  // 控制，默认 1 小时。失败只打日志，不影响下一次循环。
+  const consolidationIntervalMs = parsePositiveInt("MEMORY_CONSOLIDATION_INTERVAL_MS", 3_600_000);
+  const consolidationTimer = setInterval(() => {
+    void (async () => {
+      const allTenants = await tenantStore.listTenants();
+      const tenantIds = await listTenantsWithUnconsolidatedRawMemories(pool, allTenants.map((t) => t.id));
+      for (const tenantId of tenantIds) {
+        try {
+          await consolidateMemoriesForTenant(pool, modelProvider, tenantId);
+        } catch (error) {
+          console.error(`apps/worker: memory consolidation failed for tenant "${tenantId}": ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+    })().catch((error) => {
+      console.error(`apps/worker: memory consolidation sweep failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  }, consolidationIntervalMs);
+
   const healthPort = parsePositiveInt("HEALTH_PORT", 3002);
   const healthServer = createServer((_req, res) => {
     res.writeHead(200, { "Content-Type": "text/plain" });
@@ -116,6 +137,7 @@ if (isMain()) {
   // nice-to-have layered on top of core chat functionality, not load-bearing).
   async function shutdown(): Promise<void> {
     worker.stop();
+    clearInterval(consolidationTimer);
     await eventBus.flush();
     await pool.end();
     process.exit(0);
