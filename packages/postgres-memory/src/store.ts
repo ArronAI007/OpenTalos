@@ -30,26 +30,29 @@ export class PostgresMemoryStore implements MemoryStore {
     return rows[0]?.content;
   }
 
+  /** A real DB-level upsert via onConflictDoUpdate (targeting the memories_tenant_id_title_idx
+   * unique index — see schema.ts) rather than a select-then-branch: two concurrent write() calls
+   * for the same (tenantId, key) racing a plain SELECT-then-INSERT/UPDATE could both observe "not
+   * found" and both INSERT, producing duplicate rows. A single atomic INSERT ... ON CONFLICT
+   * closes that race entirely, matching how packages/postgres-checkpoint's save() upserts on
+   * checkpoints.runId. */
   async write(key: string, value: unknown, ctx: TenantContext): Promise<void> {
     const content = typeof value === "string" ? value : JSON.stringify(value);
     await this.db.transaction(async (tx) => {
       await tx.execute(sql`select set_config('app.tenant_id', ${ctx.tenantId}, true)`);
-      const existing = await tx
-        .select({ id: memories.id })
-        .from(memories)
-        .where(and(eq(memories.tenantId, ctx.tenantId), eq(memories.title, key)))
-        .limit(1);
-      if (existing[0]) {
-        await tx.update(memories).set({ content, updatedAt: new Date() }).where(eq(memories.id, existing[0].id));
-      } else {
-        await tx.insert(memories).values({
+      await tx
+        .insert(memories)
+        .values({
           id: crypto.randomUUID(),
           tenantId: ctx.tenantId,
           type: DEFAULT_TYPE,
           title: key,
           content,
+        })
+        .onConflictDoUpdate({
+          target: [memories.tenantId, memories.title],
+          set: { content, updatedAt: new Date() },
         });
-      }
     });
   }
 

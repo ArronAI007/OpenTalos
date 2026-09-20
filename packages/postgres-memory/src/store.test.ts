@@ -22,6 +22,7 @@ beforeAll(async () => {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       last_confirmed_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+    CREATE UNIQUE INDEX memories_tenant_id_title_idx ON memories (tenant_id, title);
   `);
   store = new PostgresMemoryStore(pool);
 }, 120_000);
@@ -69,5 +70,23 @@ describe("PostgresMemoryStore", () => {
     // and vice versa via a different tenantId in ctx.
     const resultsOtherTenant = await store.search("简洁", { tenantId: "tenant-search-nonexistent", sessionId: "s1" });
     expect(resultsOtherTenant).toEqual([]);
+  });
+
+  it("two concurrent write() calls to the same key result in exactly one row, not a duplicate", async () => {
+    const ctx = { tenantId: "tenant-concurrent", sessionId: "s1" };
+    await Promise.all([
+      store.write("concurrent-key", "value from writer A", ctx),
+      store.write("concurrent-key", "value from writer B", ctx),
+    ]);
+
+    const results = await store.search("concurrent-key", ctx);
+    expect(results).toHaveLength(1);
+    expect(["value from writer A", "value from writer B"]).toContain(results[0]?.value);
+  });
+
+  it("write() serializes a non-string value to JSON, and read() returns it as that JSON string", async () => {
+    const ctx = { tenantId: "tenant-json", sessionId: "s1" };
+    await store.write("structured", { foo: "bar" }, ctx);
+    await expect(store.read("structured", ctx)).resolves.toBe(JSON.stringify({ foo: "bar" }));
   });
 });
