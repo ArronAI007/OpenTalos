@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
 from opentalos.checkpoint.schema import metadata as checkpoint_metadata
-from opentalos.tracing.schema import trace_events_table
+from opentalos.tracing.schema import metadata as tracing_metadata
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -22,12 +22,10 @@ if config.config_file_name is not None:
 # add your model's MetaData object here
 # for 'autogenerate' support
 #
-# checkpoint_metadata.tables is a read-only FacadeDict in SQLAlchemy 2.x, so it can't be
-# mutated via .update({...}) (the brief's exact snippet raises "FacadeDict object is
-# immutable" here) -- Table.to_metadata() is the supported way to copy a table that was
-# declared against a different MetaData into this one.
-trace_events_table.to_metadata(checkpoint_metadata)
-target_metadata = checkpoint_metadata
+# Alembic natively supports a list of MetaData objects for target_metadata, so each table's
+# schema module keeps its own MetaData instance -- no need to merge them into one shared object
+# (which would mutate opentalos.checkpoint.schema.metadata as an import side effect).
+target_metadata = [checkpoint_metadata, tracing_metadata]
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
