@@ -6,9 +6,15 @@ def test_llm_response_str_returns_content():
     assert str(response) == "hello"
 
 
-def test_llm_response_to_dict_omits_reasoning_content_when_absent():
+def test_llm_response_to_dict_includes_all_fields():
     response = LLMResponse(content="hi", model="mock-model")
-    assert "reasoning_content" not in response.to_dict()
+    assert response.to_dict() == {
+        "content": "hi",
+        "model": "mock-model",
+        "usage": {},
+        "latency_ms": 0,
+        "reasoning_content": None,
+    }
 
 
 def test_llm_response_to_dict_includes_reasoning_content_when_present():

@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 
 
 @dataclass
@@ -29,15 +29,7 @@ class LLMResponse:
         return self.content
 
     def to_dict(self) -> dict:
-        result = {
-            "content": self.content,
-            "model": self.model,
-            "usage": self.usage,
-            "latency_ms": self.latency_ms,
-        }
-        if self.reasoning_content:
-            result["reasoning_content"] = self.reasoning_content
-        return result
+        return asdict(self)
 
 
 @dataclass
@@ -48,11 +40,4 @@ class StreamStats:
     reasoning_content: str | None = None
 
     def to_dict(self) -> dict:
-        result = {
-            "model": self.model,
-            "usage": self.usage,
-            "latency_ms": self.latency_ms,
-        }
-        if self.reasoning_content:
-            result["reasoning_content"] = self.reasoning_content
-        return result
+        return asdict(self)
