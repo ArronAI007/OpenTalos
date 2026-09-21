@@ -12,9 +12,9 @@ Usage: scripts/start.sh [chat|skill]
          Requires Docker running (it sandboxes skill-script execution
          in containers).
 
-Reads MODEL_PROVIDER/MODEL_API_KEY/MODEL_NAME/... from .env if present
-(via `uv run --env-file .env`); otherwise falls back to whatever is
-already exported in your shell (see .env.example).
+packages/core/model_client.py loads MODEL_PROVIDER/MODEL_API_KEY/MODEL_NAME/...
+from .env itself (see .env.example) — values already in your shell
+environment take precedence over it.
 EOF
 }
 
@@ -39,15 +39,8 @@ if ! command -v uv >/dev/null 2>&1; then
   exit 1
 fi
 
-env_args=()
-if [ -f .env ]; then
-  env_args=(--env-file .env)
-else
-  echo "note: no .env found (copy .env.example) — using whatever is already in your shell environment" >&2
-fi
-
 if [ "$target" = "chat" ]; then
-  exec uv run "${env_args[@]}" python apps/chat_console/app.py
+  exec uv run python apps/chat_console/app.py
 fi
 
 # target == skill
@@ -56,4 +49,4 @@ if ! docker info >/dev/null 2>&1; then
   exit 1
 fi
 
-exec env PYTHONPATH=packages uv run "${env_args[@]}" uvicorn skill.main:app --host 0.0.0.0 --port 8000
+exec env PYTHONPATH=packages uv run uvicorn skill.main:app --host 0.0.0.0 --port 8000

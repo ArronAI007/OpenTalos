@@ -1,12 +1,20 @@
 import asyncio
 import os
+from pathlib import Path
 from typing import Any, AsyncIterator, Iterator
+
+from dotenv import load_dotenv
 
 from .completion import Completion, StreamSummary, ToolCompletion
 from .errors import SettingsError
 from .model_backends import ModelBackend, create_model_backend
 
 DEFAULT_TIMEOUT_SECONDS = 60
+
+# 任何构造 ModelClient 的脚本都经过这个模块，所以在这里统一加载一次 .env 里的模型配置，而不是
+# 指望每个脚本自己记得 --env-file/load_dotenv。已存在于进程环境里的变量优先级更高（override
+# 默认 False），跟 .env.example 里说的"shell 环境优先"保持一致；.env 不存在时静默跳过。
+load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 
 class ModelClient:

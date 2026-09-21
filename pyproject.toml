@@ -11,6 +11,7 @@ dependencies = [
     "docker>=7.1",
     "tiktoken>=0.8",
     "gradio>=5.0",
+    "python-dotenv>=1.0",
 ]
 
 [dependency-groups]
