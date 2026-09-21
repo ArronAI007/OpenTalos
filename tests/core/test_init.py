@@ -2,22 +2,22 @@ def test_core_package_exports_public_api():
     import core
 
     expected = {
-        "Agent",
-        "Config",
-        "OpenTalosError",
-        "ConfigError",
-        "LLMError",
-        "AgentError",
-        "AgentEvent",
-        "EventType",
-        "LifecycleHook",
-        "LLMClient",
+        "AgentBase",
+        "RuntimeSettings",
+        "CoreError",
+        "SettingsError",
+        "ModelError",
+        "AgentRuntimeError",
+        "PhaseSignal",
+        "AgentPhase",
+        "PhaseCallback",
+        "ModelClient",
         "Completion",
         "ToolCompletion",
         "StreamSummary",
         "ToolInvocation",
-        "Message",
-        "MessageRole",
+        "ChatMessage",
+        "SpeakerRole",
     }
     assert expected.issubset(set(core.__all__))
     for name in expected:
