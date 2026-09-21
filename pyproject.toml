@@ -10,6 +10,7 @@ dependencies = [
     "uvicorn[standard]>=0.32",
     "docker>=7.1",
     "tiktoken>=0.8",
+    "gradio>=5.0",
 ]
 
 [dependency-groups]

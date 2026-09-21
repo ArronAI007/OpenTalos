@@ -29,4 +29,4 @@ __pycache__/
 *.pyc
 .pytest_cache/
 /tool-output
-/traces
+traces/

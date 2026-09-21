@@ -60,6 +60,10 @@ class RunRecorder:
         self._html_file.write(html_report.render_event(record, len(self._events)))
         self._html_file.flush()
 
+    def events(self) -> list[dict[str, Any]]:
+        """到目前为止记的所有事件（不需要 finalize 就能看，供正在进行中的运行做实时查看）。"""
+        return list(self._events)
+
     def finalize(self) -> dict[str, Any]:
         """写 HTML 尾部（统计面板）、关闭文件，返回本次运行的汇总统计。"""
         stats = summarize(self._events)

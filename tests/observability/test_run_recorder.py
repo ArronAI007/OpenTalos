@@ -48,6 +48,29 @@ def test_log_event_skips_redaction_when_disabled(tmp_path):
     assert record["payload"]["auth"] == "Bearer sk-abc123"
 
 
+def test_events_returns_whats_logged_so_far_without_finalizing(tmp_path):
+    recorder = RunRecorder(output_dir=str(tmp_path))
+    recorder.log_event("session_start", {})
+    recorder.log_event("tool_call", {"tool_name": "echo"}, step=1)
+
+    events = recorder.events()
+
+    assert [e["event"] for e in events] == ["session_start", "tool_call"]
+    assert not recorder._jsonl_file.closed
+    recorder.finalize()
+
+
+def test_events_returns_a_copy(tmp_path):
+    recorder = RunRecorder(output_dir=str(tmp_path))
+    recorder.log_event("session_start", {})
+
+    events = recorder.events()
+    events.append({"event": "injected"})
+
+    assert len(recorder.events()) == 1
+    recorder.finalize()
+
+
 def test_finalize_returns_the_summary_stats(tmp_path):
     recorder = RunRecorder(output_dir=str(tmp_path))
     recorder.log_event("tool_call", {"tool_name": "echo"}, step=1)
