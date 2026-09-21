@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 MessageRole = Literal["user", "assistant", "system", "tool", "summary"]
 
@@ -9,31 +9,15 @@ MessageRole = Literal["user", "assistant", "system", "tool", "summary"]
 class Message(BaseModel):
     content: str
     role: MessageRole
-    timestamp: datetime
+    timestamp: datetime = Field(default_factory=datetime.now)
     metadata: dict[str, Any] | None = None
 
-    def __init__(self, content: str, role: MessageRole, **kwargs: Any) -> None:
-        super().__init__(
-            content=content,
-            role=role,
-            timestamp=kwargs.get("timestamp") or datetime.now(),
-            metadata=kwargs.get("metadata", {}),
-        )
-
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "role": self.role,
-            "content": self.content,
-            "timestamp": self.timestamp.isoformat(),
-            "metadata": self.metadata,
-        }
+        return self.model_dump(mode="json")
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Message":
-        timestamp = data.get("timestamp")
-        if isinstance(timestamp, str):
-            timestamp = datetime.fromisoformat(timestamp)
-        return cls(content=data["content"], role=data["role"], timestamp=timestamp, metadata=data.get("metadata"))
+        return cls.model_validate(data)
 
     def to_text(self) -> str:
         return f"[{self.role}] {self.content}"
