@@ -2,7 +2,7 @@ def test_core_package_exports_public_api():
     import core
 
     expected = {
-        "AgentBase",
+        "Agent",
         "RuntimeSettings",
         "CoreError",
         "SettingsError",

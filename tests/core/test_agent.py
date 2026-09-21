@@ -2,19 +2,19 @@ import asyncio
 
 import pytest
 
-from core.agent_base import AgentBase
+from core.agent import Agent
 from core.chat_message import ChatMessage
 from core.events import PhaseSignal
 from core.model_client import ModelClient
 from core.settings import RuntimeSettings
 
 
-class _EchoAgent(AgentBase):
+class _EchoAgent(Agent):
     async def arespond(self, input_text: str, **kwargs: object) -> str:
         return f"echo: {input_text}"
 
 
-class _FailingAgent(AgentBase):
+class _FailingAgent(Agent):
     async def arespond(self, input_text: str, **kwargs: object) -> str:
         raise ValueError("boom")
 

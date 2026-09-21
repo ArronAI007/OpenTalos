@@ -1,4 +1,4 @@
-from .agent_base import AgentBase
+from .agent import Agent
 from .chat_message import ChatMessage, SpeakerRole
 from .completion import Completion, StreamSummary, ToolCompletion, ToolInvocation
 from .errors import AgentRuntimeError, CoreError, ModelError, SettingsError
@@ -7,7 +7,7 @@ from .model_client import ModelClient
 from .settings import RuntimeSettings
 
 __all__ = [
-    "AgentBase",
+    "Agent",
     "RuntimeSettings",
     "CoreError",
     "SettingsError",

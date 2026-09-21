@@ -7,7 +7,7 @@ from .model_client import ModelClient
 from .settings import RuntimeSettings
 
 
-class AgentBase(ABC):
+class Agent(ABC):
     def __init__(
         self,
         name: str,
