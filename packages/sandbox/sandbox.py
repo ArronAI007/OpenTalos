@@ -4,13 +4,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import docker
-from docker.types import Ulimit
 
 IMAGE = "nikolaik/python-nodejs:python3.12-nodejs22"
 CONTAINER_SCRIPT_DIR = "/skill"
 SANDBOX_INPUT_PATH = "/scratch/input.txt"
 MEMORY_LIMIT = "256m"
 NANO_CPUS = 500_000_000  # 0.5 核
+PIDS_LIMIT = 64
 
 INTERPRETER_BY_EXTENSION = {
     ".js": "node",
@@ -112,7 +112,7 @@ async def run_sandboxed_script(
             user="pn",
             mem_limit=MEMORY_LIMIT,
             nano_cpus=NANO_CPUS,
-            ulimits=[Ulimit(name="nproc", soft=64, hard=64)],
+            pids_limit=PIDS_LIMIT,
             volumes={str(script_path): {"bind": container_path, "mode": "ro"}},
             tmpfs={"/scratch": "rw,size=16m"},
         ),
