@@ -116,3 +116,88 @@ def test_create_adapter_returns_openai_compatible_adapter_for_that_provider(monk
     monkeypatch.setattr("core.llm_adapters.AsyncOpenAI", lambda **kwargs: SimpleNamespace())
     adapter = create_adapter("openai-compatible", api_key="k", base_url=None, timeout=60, model="gpt-test")
     assert isinstance(adapter, OpenAICompatibleAdapter)
+
+
+import json
+from unittest.mock import Mock
+
+from core.llm_adapters import AnthropicAdapter
+
+
+def _fake_anthropic_message(text, *, tool_use_blocks=None):
+    blocks = [SimpleNamespace(type="text", text=text)]
+    if tool_use_blocks:
+        blocks += tool_use_blocks
+    usage = SimpleNamespace(input_tokens=20, output_tokens=8)
+    return SimpleNamespace(content=blocks, usage=usage)
+
+
+class _FakeAnthropicStream:
+    def __init__(self, chunks, final_usage):
+        self._chunks = chunks
+        self._final_usage = final_usage
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def _iter_text(self):
+        for chunk in self._chunks:
+            yield chunk
+
+    @property
+    def text_stream(self):
+        return self._iter_text()
+
+    async def get_final_message(self):
+        return SimpleNamespace(usage=self._final_usage)
+
+
+async def test_anthropic_adapter_ainvoke_parses_text_content_and_splits_system_message(monkeypatch):
+    fake_response = _fake_anthropic_message("hello from claude")
+    fake_client = SimpleNamespace(messages=SimpleNamespace(create=AsyncMock(return_value=fake_response)))
+    monkeypatch.setattr("core.llm_adapters.AsyncAnthropic", lambda **kwargs: fake_client)
+
+    adapter = AnthropicAdapter(api_key="k", base_url=None, timeout=60, model="claude-test")
+    result = await adapter.ainvoke([{"role": "system", "content": "be nice"}, {"role": "user", "content": "hi"}])
+
+    assert result.content == "hello from claude"
+    assert result.usage == {"prompt_tokens": 20, "completion_tokens": 8, "total_tokens": 28}
+    _, kwargs = fake_client.messages.create.call_args
+    assert kwargs["system"] == "be nice"
+    assert kwargs["messages"] == [{"role": "user", "content": "hi"}]
+
+
+async def test_anthropic_adapter_ainvoke_with_tools_parses_tool_use_blocks(monkeypatch):
+    tool_block = SimpleNamespace(type="tool_use", id="call_1", name="search", input={"q": "x"})
+    fake_response = _fake_anthropic_message("", tool_use_blocks=[tool_block])
+    fake_client = SimpleNamespace(messages=SimpleNamespace(create=AsyncMock(return_value=fake_response)))
+    monkeypatch.setattr("core.llm_adapters.AsyncAnthropic", lambda **kwargs: fake_client)
+
+    adapter = AnthropicAdapter(api_key="k", base_url=None, timeout=60, model="claude-test")
+    result = await adapter.ainvoke_with_tools([{"role": "user", "content": "hi"}], tools=[{"name": "search"}])
+
+    assert result.content is None
+    assert len(result.tool_calls) == 1
+    assert result.tool_calls[0].name == "search"
+    assert json.loads(result.tool_calls[0].arguments) == {"q": "x"}
+
+
+async def test_anthropic_adapter_astream_invoke_yields_text_chunks(monkeypatch):
+    fake_stream = _FakeAnthropicStream(["he", "llo"], SimpleNamespace(input_tokens=1, output_tokens=2))
+    fake_client = SimpleNamespace(messages=SimpleNamespace(stream=Mock(return_value=fake_stream)))
+    monkeypatch.setattr("core.llm_adapters.AsyncAnthropic", lambda **kwargs: fake_client)
+
+    adapter = AnthropicAdapter(api_key="k", base_url=None, timeout=60, model="claude-test")
+    chunks = [chunk async for chunk in adapter.astream_invoke([{"role": "user", "content": "hi"}])]
+
+    assert chunks == ["he", "llo"]
+    assert adapter.last_stats.usage == {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3}
+
+
+def test_create_adapter_returns_anthropic_adapter_for_that_provider(monkeypatch):
+    monkeypatch.setattr("core.llm_adapters.AsyncAnthropic", lambda **kwargs: SimpleNamespace())
+    adapter = create_adapter("anthropic", api_key="k", base_url=None, timeout=60, model="claude-test")
+    assert isinstance(adapter, AnthropicAdapter)
