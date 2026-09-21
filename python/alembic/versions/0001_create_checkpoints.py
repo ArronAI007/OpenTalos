@@ -32,7 +32,9 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
     )
+    op.create_index("ix_checkpoints_tenant_id_session_id", "checkpoints", ["tenant_id", "session_id"])
 
 
 def downgrade() -> None:
+    op.drop_index("ix_checkpoints_tenant_id_session_id", table_name="checkpoints")
     op.drop_table("checkpoints")

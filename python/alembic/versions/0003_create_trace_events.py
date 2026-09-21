@@ -19,7 +19,7 @@ depends_on = None
 def upgrade() -> None:
     op.create_table(
         "trace_events",
-        sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),
+        sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
         sa.Column("run_id", sa.Text, nullable=False),
         sa.Column("tenant_id", sa.Text, nullable=False),
         sa.Column("session_id", sa.Text, nullable=False),
@@ -27,7 +27,9 @@ def upgrade() -> None:
         sa.Column("payload", JSONB, nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
     )
+    op.create_index("ix_trace_events_run_id_id", "trace_events", ["run_id", "id"])
 
 
 def downgrade() -> None:
+    op.drop_index("ix_trace_events_run_id_id", table_name="trace_events")
     op.drop_table("trace_events")

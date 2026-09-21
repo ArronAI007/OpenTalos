@@ -1,6 +1,6 @@
 """对应 packages/postgres-checkpoint/src/schema.ts。"""
 
-from sqlalchemy import Boolean, Column, DateTime, MetaData, Table, Text
+from sqlalchemy import Boolean, Column, DateTime, Index, MetaData, Table, Text
 from sqlalchemy.dialects.postgresql import JSONB
 
 metadata = MetaData()
@@ -22,3 +22,6 @@ checkpoints_table = Table(
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False, server_default="now()"),
 )
+
+# list_checkpoints filters by tenant_id and optionally session_id.
+Index("ix_checkpoints_tenant_id_session_id", checkpoints_table.c.tenant_id, checkpoints_table.c.session_id)
