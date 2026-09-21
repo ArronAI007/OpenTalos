@@ -2,9 +2,9 @@ import asyncio
 import os
 from typing import Any, AsyncIterator, Iterator
 
+from .completion import Completion, StreamSummary, ToolCompletion
 from .exceptions import ConfigError
 from .llm_adapters import BaseLLMAdapter, create_adapter
-from .llm_response import LLMResponse, LLMToolResponse, StreamStats
 
 DEFAULT_TIMEOUT_SECONDS = 60
 
@@ -45,7 +45,7 @@ class LLMClient:
         self._adapter: BaseLLMAdapter = create_adapter(
             self.provider, api_key=self.api_key, base_url=self.base_url, timeout=self.timeout, model=self.model
         )
-        self.last_call_stats: StreamStats | None = None
+        self.last_call_stats: StreamSummary | None = None
 
     def _call_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         call_kwargs = {"temperature": kwargs.pop("temperature", self.temperature)}
@@ -54,7 +54,7 @@ class LLMClient:
         call_kwargs.update(kwargs)
         return call_kwargs
 
-    async def ainvoke(self, messages: list[dict], **kwargs: Any) -> LLMResponse:
+    async def ainvoke(self, messages: list[dict], **kwargs: Any) -> Completion:
         return await self._adapter.ainvoke(messages, **self._call_kwargs(kwargs))
 
     async def astream_invoke(self, messages: list[dict], **kwargs: Any) -> AsyncIterator[str]:
@@ -64,12 +64,12 @@ class LLMClient:
 
     async def ainvoke_with_tools(
         self, messages: list[dict], tools: list[dict], tool_choice: str | dict = "auto", **kwargs: Any
-    ) -> LLMToolResponse:
+    ) -> ToolCompletion:
         call_kwargs = self._call_kwargs(kwargs)
         call_kwargs["tool_choice"] = tool_choice
         return await self._adapter.ainvoke_with_tools(messages, tools, **call_kwargs)
 
-    def invoke(self, messages: list[dict], **kwargs: Any) -> LLMResponse:
+    def invoke(self, messages: list[dict], **kwargs: Any) -> Completion:
         return asyncio.run(self.ainvoke(messages, **kwargs))
 
     def stream_invoke(self, messages: list[dict], **kwargs: Any) -> Iterator[str]:
@@ -82,5 +82,5 @@ class LLMClient:
 
     def invoke_with_tools(
         self, messages: list[dict], tools: list[dict], tool_choice: str | dict = "auto", **kwargs: Any
-    ) -> LLMToolResponse:
+    ) -> ToolCompletion:
         return asyncio.run(self.ainvoke_with_tools(messages, tools, tool_choice, **kwargs))

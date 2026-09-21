@@ -1,9 +1,9 @@
 import pytest
 
+from core.completion import Completion
 from core.exceptions import ConfigError
 from core.llm import LLMClient
 from core.llm_adapters import MockAdapter
-from core.llm_response import LLMResponse
 
 
 def test_llm_client_requires_provider(monkeypatch):
@@ -32,14 +32,14 @@ def test_llm_client_defaults_timeout_to_60_seconds(monkeypatch):
 
 async def test_llm_client_ainvoke_delegates_to_adapter():
     client = LLMClient(provider="mock")
-    client._adapter = MockAdapter(model="mock-model", response=LLMResponse(content="hi", model="mock-model"))
+    client._adapter = MockAdapter(model="mock-model", response=Completion(text="hi", model_id="mock-model"))
     result = await client.ainvoke([{"role": "user", "content": "hello"}])
-    assert result.content == "hi"
+    assert result.text == "hi"
 
 
 async def test_llm_client_astream_invoke_updates_last_call_stats():
     client = LLMClient(provider="mock")
-    client._adapter = MockAdapter(model="mock-model", response=LLMResponse(content="ab", model="mock-model"))
+    client._adapter = MockAdapter(model="mock-model", response=Completion(text="ab", model_id="mock-model"))
     chunks = [chunk async for chunk in client.astream_invoke([{"role": "user", "content": "hi"}])]
     assert chunks == ["a", "b"]
     assert client.last_call_stats is not None
@@ -47,20 +47,20 @@ async def test_llm_client_astream_invoke_updates_last_call_stats():
 
 def test_llm_client_invoke_sync_wrapper_matches_async_result():
     client = LLMClient(provider="mock")
-    client._adapter = MockAdapter(model="mock-model", response=LLMResponse(content="hi", model="mock-model"))
+    client._adapter = MockAdapter(model="mock-model", response=Completion(text="hi", model_id="mock-model"))
     result = client.invoke([{"role": "user", "content": "hello"}])
-    assert result.content == "hi"
+    assert result.text == "hi"
 
 
 def test_llm_client_stream_invoke_sync_wrapper_yields_chunks():
     client = LLMClient(provider="mock")
-    client._adapter = MockAdapter(model="mock-model", response=LLMResponse(content="ab", model="mock-model"))
+    client._adapter = MockAdapter(model="mock-model", response=Completion(text="ab", model_id="mock-model"))
     chunks = list(client.stream_invoke([{"role": "user", "content": "hello"}]))
     assert chunks == ["a", "b"]
 
 
 def test_llm_client_invoke_with_tools_sync_wrapper_matches_async_result():
     client = LLMClient(provider="mock")
-    client._adapter = MockAdapter(model="mock-model", response=LLMResponse(content="hi", model="mock-model"))
+    client._adapter = MockAdapter(model="mock-model", response=Completion(text="hi", model_id="mock-model"))
     result = client.invoke_with_tools([{"role": "user", "content": "hello"}], tools=[])
-    assert result.content == "hi"
+    assert result.text == "hi"

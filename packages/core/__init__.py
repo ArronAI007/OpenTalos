@@ -1,9 +1,9 @@
 from .agent import Agent
+from .completion import Completion, StreamSummary, ToolCompletion, ToolInvocation
 from .config import Config
 from .exceptions import AgentError, ConfigError, LLMError, OpenTalosError
 from .lifecycle import AgentEvent, EventType, LifecycleHook
 from .llm import LLMClient
-from .llm_response import LLMResponse, LLMToolResponse, StreamStats, ToolCall
 from .message import Message, MessageRole
 
 __all__ = [
@@ -17,10 +17,10 @@ __all__ = [
     "EventType",
     "LifecycleHook",
     "LLMClient",
-    "LLMResponse",
-    "LLMToolResponse",
-    "StreamStats",
-    "ToolCall",
+    "Completion",
+    "ToolCompletion",
+    "StreamSummary",
+    "ToolInvocation",
     "Message",
     "MessageRole",
 ]
