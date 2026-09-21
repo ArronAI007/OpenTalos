@@ -130,3 +130,15 @@ def test_compress_history_is_a_noop_below_the_retain_threshold(model_client):
 
     assert agent.compress_history("summary") is False
     assert len(agent.history_snapshot()) == 1
+
+
+def test_recorder_is_none_by_default(model_client):
+    agent = _EchoAgent(name="echo", model_client=model_client)
+    assert agent.recorder is None
+
+
+def test_recorder_is_created_when_trace_dir_is_given(model_client, tmp_path):
+    agent = _EchoAgent(name="echo", model_client=model_client, trace_dir=str(tmp_path))
+    assert agent.recorder is not None
+    agent.recorder.finalize()
+    assert agent.recorder.jsonl_path.parent == tmp_path

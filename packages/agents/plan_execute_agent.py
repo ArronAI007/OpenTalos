@@ -45,6 +45,7 @@ class PlanExecuteAgent(Agent):
         runner_system_prompt: str | None = None,
         context_config: AssemblyConfig | None = None,
         min_retain_turns: int = 10,
+        trace_dir: str | None = None,
     ) -> None:
         super().__init__(
             name,
@@ -53,6 +54,7 @@ class PlanExecuteAgent(Agent):
             settings,
             context_config,
             min_retain_turns,
+            trace_dir,
         )
         self.tool_registry = tool_registry
         self.max_tool_iterations = max_tool_iterations
@@ -78,20 +80,30 @@ class PlanExecuteAgent(Agent):
             **kwargs,
         )
         if not completion.requested_tools:
-            return [question]
-        try:
-            arguments = json.loads(completion.requested_tools[0].arguments_json)
-        except json.JSONDecodeError:
-            return [question]
-        return arguments.get("steps") or [question]
+            steps = [question]
+        else:
+            try:
+                arguments = json.loads(completion.requested_tools[0].arguments_json)
+            except json.JSONDecodeError:
+                steps = [question]
+            else:
+                steps = arguments.get("steps") or [question]
+
+        if self.recorder:
+            self.recorder.log_event("plan", {"steps": steps})
+        return steps
 
     async def _run_steps(self, question: str, steps: list[str], **kwargs: object) -> str:
         history: list[tuple[str, str]] = []
         answer = ""
-        for step in steps:
+        for index, step in enumerate(steps, start=1):
             context = _render_step(question, steps, history, step)
             messages = [{"role": "system", "content": self.runner_system_prompt}, {"role": "user", "content": context}]
-            answer = await run_tool_turn(self.model_client, messages, self.tool_registry, self.max_tool_iterations, **kwargs)
+            if self.recorder:
+                self.recorder.log_event("step_start", {"step_text": step}, step=index)
+            answer = await run_tool_turn(
+                self.model_client, messages, self.tool_registry, self.max_tool_iterations, self.recorder, **kwargs
+            )
             history.append((step, answer))
         return answer
 

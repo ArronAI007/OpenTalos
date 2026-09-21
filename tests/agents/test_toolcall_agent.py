@@ -1,3 +1,5 @@
+import json
+
 from core.chat_message import ChatMessage
 from core.completion import Completion, ToolCompletion, ToolInvocation
 from agents.toolcall_agent import ToolCallingAgent
@@ -44,3 +46,27 @@ async def test_arespond_records_history_that_seeds_the_next_turn(scripted_client
     history = agent.history_snapshot()
     assert [m.content for m in history] == ["first question", "first reply", "second question", "second reply"]
     assert isinstance(history[0], ChatMessage)
+
+
+async def test_arespond_logs_model_and_tool_events_when_tracing_is_enabled(scripted_client, echo_tool_registry, tmp_path):
+    client = scripted_client(
+        tool_completions=[
+            ToolCompletion(
+                text=None,
+                requested_tools=[ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text": "hi"}')],
+                model_id="mock",
+            ),
+            ToolCompletion(text="all done", requested_tools=[], model_id="mock"),
+        ]
+    )
+    agent = ToolCallingAgent(
+        name="bot", model_client=client, tool_registry=echo_tool_registry, trace_dir=str(tmp_path)
+    )
+
+    await agent.arespond("say hi via the echo tool")
+    stats = agent.recorder.finalize()
+
+    lines = [json.loads(line) for line in agent.recorder.jsonl_path.read_text(encoding="utf-8").splitlines()]
+    event_types = [line["event"] for line in lines]
+    assert event_types == ["model_output", "tool_call", "tool_result", "model_output"]
+    assert stats["tool_calls"] == {"echo": 1}

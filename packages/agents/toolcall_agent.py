@@ -22,6 +22,7 @@ class ToolCallingAgent(Agent):
         max_tool_iterations: int = 3,
         context_config: AssemblyConfig | None = None,
         min_retain_turns: int = 10,
+        trace_dir: str | None = None,
     ) -> None:
         super().__init__(
             name,
@@ -30,13 +31,16 @@ class ToolCallingAgent(Agent):
             settings,
             context_config,
             min_retain_turns,
+            trace_dir,
         )
         self.tool_registry = tool_registry
         self.max_tool_iterations = max_tool_iterations
 
     async def arespond(self, input_text: str, **kwargs: object) -> str:
         messages = seed_messages(self.system_prompt, self.history_snapshot(), input_text)
-        answer = await run_tool_turn(self.model_client, messages, self.tool_registry, self.max_tool_iterations, **kwargs)
+        answer = await run_tool_turn(
+            self.model_client, messages, self.tool_registry, self.max_tool_iterations, self.recorder, **kwargs
+        )
 
         self.record_message(ChatMessage(content=input_text, role="user"))
         self.record_message(ChatMessage(content=answer, role="assistant"))

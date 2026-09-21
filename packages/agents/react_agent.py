@@ -46,6 +46,7 @@ class ReActAgent(Agent):
         max_steps: int = 6,
         context_config: AssemblyConfig | None = None,
         min_retain_turns: int = 10,
+        trace_dir: str | None = None,
     ) -> None:
         super().__init__(
             name,
@@ -54,6 +55,7 @@ class ReActAgent(Agent):
             settings,
             context_config,
             min_retain_turns,
+            trace_dir,
         )
         self.tool_registry = tool_registry
         self.max_steps = max_steps
@@ -67,8 +69,14 @@ class ReActAgent(Agent):
         tools = self._tool_schemas()
         answer: str | None = None
 
-        for _ in range(self.max_steps):
+        for step in range(1, self.max_steps + 1):
             completion = await self.model_client.acomplete_with_tools(messages, tools, **kwargs)
+            if self.recorder:
+                self.recorder.log_event(
+                    "model_output",
+                    {"content": completion.text, "tool_calls": len(completion.requested_tools), "usage": completion.token_usage},
+                    step=step,
+                )
             if not completion.requested_tools:
                 answer = completion.text or ""
                 break
@@ -78,10 +86,12 @@ class ReActAgent(Agent):
             for invocation in completion.requested_tools:
                 if invocation.tool_name == FINISH_TOOL_NAME:
                     answer = _read_final_answer(invocation)
+                    if self.recorder:
+                        self.recorder.log_event("finish", {"final_answer": answer}, step=step)
                     messages.append({"role": "tool", "tool_call_id": invocation.call_id, "content": "acknowledged"})
                     finished = True
                     continue
-                messages.append(await self._resolve(invocation))
+                messages.append(await self._resolve(invocation, step))
             if finished:
                 break
 
@@ -92,10 +102,10 @@ class ReActAgent(Agent):
         self.record_message(ChatMessage(content=answer, role="assistant"))
         return answer
 
-    async def _resolve(self, invocation: ToolInvocation) -> dict[str, str]:
+    async def _resolve(self, invocation: ToolInvocation, step: int) -> dict[str, str]:
         if self.tool_registry is None:
             return {"role": "tool", "tool_call_id": invocation.call_id, "content": "No tools are available."}
-        return await resolve_tool_call(self.tool_registry, invocation)
+        return await resolve_tool_call(self.tool_registry, invocation, self.recorder, step)
 
 
 def _read_final_answer(invocation: ToolInvocation) -> str:

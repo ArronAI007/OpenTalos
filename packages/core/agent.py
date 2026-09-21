@@ -2,6 +2,7 @@ import asyncio
 from abc import ABC, abstractmethod
 
 from context import AssemblyConfig, ContextAssembler, ContextSlice, TranscriptStore
+from observability import RunRecorder
 
 from .chat_message import ChatMessage
 from .events import AgentPhase, PhaseCallback, PhaseSignal
@@ -18,6 +19,7 @@ class Agent(ABC):
         settings: RuntimeSettings | None = None,
         context_config: AssemblyConfig | None = None,
         min_retain_turns: int = 10,
+        trace_dir: str | None = None,
     ) -> None:
         self.name = name
         self.model_client = model_client
@@ -25,6 +27,7 @@ class Agent(ABC):
         self.settings = settings or RuntimeSettings()
         self._transcript = TranscriptStore(min_retain_turns=min_retain_turns, message_type=ChatMessage)
         self._context_assembler = ContextAssembler(context_config)
+        self.recorder: RunRecorder | None = RunRecorder(output_dir=trace_dir) if trace_dir else None
 
     @abstractmethod
     async def arespond(self, input_text: str, **kwargs: object) -> str: ...
