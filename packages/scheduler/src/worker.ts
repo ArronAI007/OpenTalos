@@ -22,8 +22,8 @@ export interface WorkerOptions {
   pollIntervalMs?: number;
   batchSize?: number;
   /** 可选：每当一个任务的 checkpoint 真正到达终态 "done"（不是 "paused"）时调用一次，用于挂载
-   * 跟调度本身无关的后续处理（apps/worker 用它触发记忆提取，见 packages/memory-agent）——保持
-   * packages/scheduler 对任何具体业务逻辑（chat-agent、memory-agent 等）零依赖，只通过这个回调
+   * 跟调度本身无关的后续处理（apps/worker 用它触发记忆提取，见 services/memory-service）——保持
+   * packages/scheduler 对任何具体业务逻辑（chat-agent、memory-service 等）零依赖，只通过这个回调
    * 解耦。不 await 这个回调：调用方自己决定是否异步处理，慢/失败的钩子不应该拖慢或搞挂调度本身。 */
   onRunDone?: (checkpoint: Checkpoint) => void;
 }
