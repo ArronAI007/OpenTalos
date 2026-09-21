@@ -144,22 +144,24 @@ class CheckpointQuery(BaseModel):
 
 
 class CheckpointStore(Protocol):
-    # save/load/list_checkpoints/request_cancel/request_steer/clear_steer_message (the five
-    # methods right below, plus `save`) are the TRUSTED INTERNAL CALLER surface: they assume a
-    # DB connection that is NOT subject to the Row-Level Security policies added for
-    # `checkpoints`/`trace_events` (e.g. a superuser connection, or a role explicitly granted
-    # BYPASSRLS). PostgresCheckpointStore's implementations of these methods never call
+    # load/list_checkpoints/request_cancel/request_steer/clear_steer_message (the five methods
+    # right below `save`) are the TRUSTED INTERNAL CALLER surface: they assume a DB connection
+    # that is NOT subject to the Row-Level Security policies added for `checkpoints`/
+    # `trace_events` (e.g. a superuser connection, or a role explicitly granted BYPASSRLS).
+    # PostgresCheckpointStore's implementations of these five never call
     # `set_config('app.tenant_id', ...)`, so if they're called through an RLS-restricted
     # connection (e.g. authenticated as the `opentalos_app` role under `FORCE ROW LEVEL
     # SECURITY`), the policy's `current_setting('app.tenant_id', true)` is NULL and
     # `tenant_id = NULL` is never true -- every one of these methods silently sees/changes
     # nothing (e.g. `request_cancel()` becomes `UPDATE 0`) rather than raising an error. This
-    # exactly mirrors the original TypeScript `store.ts`'s identical design. The `*_for_tenant`
-    # variants below are the correct surface for request-driven/tenant-scoped callers -- they
-    # explicitly set `app.tenant_id` themselves. Which DB role the worker actually connects as
-    # (and therefore whether the plain methods above are ever safe to call directly against a
-    # live database) is a real design decision reserved for Phase 5 (scheduler+worker); it is
-    # deliberately NOT decided here.
+    # exactly mirrors the original TypeScript `store.ts`'s identical design. `save` itself is
+    # NOT in this group -- it already sets `app.tenant_id` from the checkpoint's own tenant_id
+    # as defense-in-depth (see PostgresCheckpointStore.save), so it works correctly under an
+    # RLS-restricted connection. The `*_for_tenant` variants below are the correct surface for
+    # request-driven/tenant-scoped callers -- they explicitly set `app.tenant_id` themselves.
+    # Which DB role the worker actually connects as (and therefore whether the five plain
+    # methods below are ever safe to call directly against a live database) is a real design
+    # decision reserved for Phase 5 (scheduler+worker); it is deliberately NOT decided here.
     async def save(self, checkpoint: Checkpoint) -> None: ...
     async def load(self, run_id: str) -> Checkpoint | None: ...
     async def list_checkpoints(self, query: CheckpointQuery) -> list[Checkpoint]: ...
