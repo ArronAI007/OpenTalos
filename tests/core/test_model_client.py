@@ -30,6 +30,24 @@ def test_model_client_defaults_timeout_to_60_seconds(monkeypatch):
     assert client.timeout == 60
 
 
+def test_model_client_defaults_temperature_to_0_7(monkeypatch):
+    monkeypatch.delenv("MODEL_TEMPERATURE", raising=False)
+    client = ModelClient(provider="mock")
+    assert client.temperature == 0.7
+
+
+def test_model_client_reads_temperature_from_env(monkeypatch):
+    monkeypatch.setenv("MODEL_TEMPERATURE", "1")
+    client = ModelClient(provider="mock")
+    assert client.temperature == 1.0
+
+
+def test_model_client_explicit_temperature_overrides_env(monkeypatch):
+    monkeypatch.setenv("MODEL_TEMPERATURE", "1")
+    client = ModelClient(provider="mock", temperature=0.2)
+    assert client.temperature == 0.2
+
+
 async def test_model_client_acomplete_delegates_to_backend():
     client = ModelClient(provider="mock")
     client._backend = FakeModelBackend(model_name="mock-model", response=Completion(text="hi", model_id="mock-model"))

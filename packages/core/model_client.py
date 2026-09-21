@@ -10,6 +10,7 @@ from .errors import SettingsError
 from .model_backends import ModelBackend, create_model_backend
 
 DEFAULT_TIMEOUT_SECONDS = 60
+DEFAULT_TEMPERATURE = 0.7
 
 # 任何构造 ModelClient 的脚本都经过这个模块，所以在这里统一加载一次 .env 里的模型配置，而不是
 # 指望每个脚本自己记得 --env-file/load_dotenv。已存在于进程环境里的变量优先级更高（override
@@ -25,7 +26,7 @@ class ModelClient:
         api_key: str | None = None,
         base_url: str | None = None,
         timeout: int | None = None,
-        temperature: float = 0.7,
+        temperature: float | None = None,
         max_tokens: int | None = None,
     ) -> None:
         self.provider = provider or os.getenv("MODEL_PROVIDER")
@@ -47,7 +48,10 @@ class ModelClient:
         timeout_env = os.getenv("MODEL_TIMEOUT")
         self.timeout = timeout if timeout is not None else (int(timeout_env) if timeout_env else DEFAULT_TIMEOUT_SECONDS)
 
-        self.temperature = temperature
+        temperature_env = os.getenv("MODEL_TEMPERATURE")
+        self.temperature = (
+            temperature if temperature is not None else (float(temperature_env) if temperature_env else DEFAULT_TEMPERATURE)
+        )
         self.max_tokens = max_tokens
 
         self._backend: ModelBackend = create_model_backend(
