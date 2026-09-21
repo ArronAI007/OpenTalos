@@ -32,7 +32,7 @@ PROPOSE_STEPS_TOOL = {
 }
 
 
-class PlannerAgent(Agent):
+class PlanExecuteAgent(Agent):
     """先把问题拆成有序步骤（强制 function call），再逐步执行，滚动累积上下文。"""
 
     def __init__(

@@ -1,5 +1,5 @@
 from core.completion import Completion, ToolCompletion, ToolInvocation
-from agents.planner_agent import PlannerAgent
+from agents.plan_execute_agent import PlanExecuteAgent
 
 
 async def test_arespond_plans_then_executes_each_step(scripted_client):
@@ -21,7 +21,7 @@ async def test_arespond_plans_then_executes_each_step(scripted_client):
             ),
         ],
     )
-    agent = PlannerAgent(name="bot", model_client=client)
+    agent = PlanExecuteAgent(name="bot", model_client=client)
 
     answer = await agent.arespond("plan a trip")
 
@@ -33,7 +33,7 @@ async def test_arespond_falls_back_to_a_single_step_when_planning_returns_no_too
         completions=[Completion(text="direct answer", model_id="mock")],
         tool_completions=[ToolCompletion(text="no plan tool call", requested_tools=[], model_id="mock")],
     )
-    agent = PlannerAgent(name="bot", model_client=client)
+    agent = PlanExecuteAgent(name="bot", model_client=client)
 
     answer = await agent.arespond("simple question")
 
@@ -58,7 +58,7 @@ async def test_step_execution_uses_the_tool_registry(scripted_client, echo_tool_
             ToolCompletion(text="step done", requested_tools=[], model_id="mock"),
         ]
     )
-    agent = PlannerAgent(name="bot", model_client=client, tool_registry=echo_tool_registry)
+    agent = PlanExecuteAgent(name="bot", model_client=client, tool_registry=echo_tool_registry)
 
     answer = await agent.arespond("echo something")
 

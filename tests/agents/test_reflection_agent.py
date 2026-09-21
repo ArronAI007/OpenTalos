@@ -1,5 +1,5 @@
 from core.completion import Completion
-from agents.critique_agent import SATISFIED_MARKER, CritiqueAgent
+from agents.reflection_agent import SATISFIED_MARKER, ReflectionAgent
 
 
 async def test_arespond_stops_early_when_critique_is_satisfied(scripted_client):
@@ -9,7 +9,7 @@ async def test_arespond_stops_early_when_critique_is_satisfied(scripted_client):
             Completion(text=SATISFIED_MARKER, model_id="mock"),
         ]
     )
-    agent = CritiqueAgent(name="bot", model_client=client, max_rounds=3)
+    agent = ReflectionAgent(name="bot", model_client=client, max_rounds=3)
 
     answer = await agent.arespond("write a haiku")
 
@@ -26,7 +26,7 @@ async def test_arespond_revises_until_satisfied_or_out_of_rounds(scripted_client
             Completion(text=SATISFIED_MARKER, model_id="mock"),
         ]
     )
-    agent = CritiqueAgent(name="bot", model_client=client, max_rounds=3)
+    agent = ReflectionAgent(name="bot", model_client=client, max_rounds=3)
 
     answer = await agent.arespond("write a summary")
 
@@ -46,7 +46,7 @@ async def test_arespond_gives_up_after_max_rounds_without_satisfaction(scripted_
             Completion(text="draft v3", model_id="mock"),
         ]
     )
-    agent = CritiqueAgent(name="bot", model_client=client, max_rounds=2)
+    agent = ReflectionAgent(name="bot", model_client=client, max_rounds=2)
 
     answer = await agent.arespond("write a summary")
 

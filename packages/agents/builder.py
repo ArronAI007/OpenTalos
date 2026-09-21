@@ -3,16 +3,16 @@ from core.model_client import ModelClient
 from core.settings import RuntimeSettings
 from tool.registry import ToolRegistry
 
-from .critique_agent import CritiqueAgent
-from .planner_agent import PlannerAgent
-from .stepwise_agent import StepwiseAgent
+from .plan_execute_agent import PlanExecuteAgent
+from .react_agent import ReActAgent
+from .reflection_agent import ReflectionAgent
 from .toolcall_agent import ToolCallingAgent
 
 AGENT_TYPES: dict[str, type[Agent]] = {
     "toolcall": ToolCallingAgent,
-    "stepwise": StepwiseAgent,
-    "critique": CritiqueAgent,
-    "planner": PlannerAgent,
+    "react": ReActAgent,
+    "reflection": ReflectionAgent,
+    "plan_execute": PlanExecuteAgent,
 }
 
 
@@ -42,9 +42,9 @@ def build_agent(
 
 SUBAGENT_SYSTEM_PROMPTS: dict[str, str] = {
     "toolcall": "You are a focused sub-agent. Complete the delegated sub-task directly and concisely.",
-    "stepwise": "You are a focused sub-agent. Use tools efficiently and finish within the step budget.",
-    "critique": "You are a quality-focused sub-agent. Draft, critique, and refine your answer before returning it.",
-    "planner": "You are a planning sub-agent. Break the delegated task into steps and execute them in order.",
+    "react": "You are a focused sub-agent. Use tools efficiently and finish within the step budget.",
+    "reflection": "You are a quality-focused sub-agent. Draft, critique, and refine your answer before returning it.",
+    "plan_execute": "You are a planning sub-agent. Break the delegated task into steps and execute them in order.",
 }
 
 

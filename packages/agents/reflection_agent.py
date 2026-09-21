@@ -15,7 +15,7 @@ DEFAULT_SYSTEM_PROMPT = (
 )
 
 
-class CritiqueAgent(Agent):
+class ReflectionAgent(Agent):
     """draft -> critique -> revise 循环，critique 里出现 SATISFIED_MARKER 就提前收敛。"""
 
     def __init__(

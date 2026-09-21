@@ -34,7 +34,7 @@ DEFAULT_SYSTEM_PROMPT = (
 STEP_LIMIT_MESSAGE = "Reached the step limit without a final answer."
 
 
-class StepwiseAgent(Agent):
+class ReActAgent(Agent):
     """ReAct 风格：一步步推理 + 调用工具，直到模型主动调用内置 finish 工具或用光步数。"""
 
     def __init__(
