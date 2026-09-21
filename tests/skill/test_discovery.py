@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from discovery import discover_skills
+from skill.discovery import discover_skills
 
 
 def test_discover_skills_finds_all_skill_directories_with_a_skill_md(tmp_path: Path) -> None:

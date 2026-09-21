@@ -1,0 +1,8 @@
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+# packages/ 加进 sys.path 的逻辑在 tests/conftest.py 里（pytest 的 pythonpath ini 选项实测在这个
+# 仓库装的 pytest 版本上不生效）。

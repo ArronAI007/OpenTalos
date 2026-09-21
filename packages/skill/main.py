@@ -6,15 +6,15 @@ from pathlib import Path
 import docker
 from fastapi import FastAPI, HTTPException
 
-from discovery import discover_skills
-from models import (
+from skill.discovery import discover_skills
+from skill.models import (
     RunScriptRequest,
     RunScriptResponse,
     SkillDetailResponse,
     SkillListResponse,
     SkillSummary,
 )
-from sandbox import PathValidationError, resolve_interpreter, resolve_script_path, run_sandboxed_script
+from skill.sandbox import PathValidationError, resolve_interpreter, resolve_script_path, run_sandboxed_script
 
 DEFAULT_MAX_CONCURRENCY = 4
 # packages/skill/main.py -> packages/skill -> packages -> 仓库根目录
