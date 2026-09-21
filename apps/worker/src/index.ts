@@ -11,8 +11,13 @@ import { GraphRegistry, Worker } from "@opentalos/scheduler";
 import { buildChatAgentGraph, createChatAgentToolRegistry, type ChatState } from "@opentalos/chat-agent";
 import { createModelProviderFromEnv } from "@opentalos/model-providers";
 import { loadSkills, BUNDLED_SKILLS_DIR } from "@opentalos/skills";
-import { consolidateMemoriesForTenant, extractMemory } from "@opentalos/memory-agent";
-import { PostgresMemoryStore, listMemoriesForTenant, listTenantsWithUnconsolidatedRawMemories } from "@opentalos/postgres-memory";
+import {
+  consolidateTenant,
+  extractMemory,
+  HttpMemoryStore,
+  listMemorySummary,
+  listTenantsWithPendingMemories,
+} from "./memory-client.js";
 import { createTenantConcurrencyResolver } from "./tenant-quota.js";
 
 /** Builds and registers every graph this worker process knows how to run. Split out from the
@@ -21,14 +26,11 @@ import { createTenantConcurrencyResolver } from "./tenant-quota.js";
 export function buildWorkerRegistry(eventBus: EventBus, modelProvider: ModelProvider, pool: Pool): GraphRegistry {
   const registry = new GraphRegistry();
   const skills = loadSkills(BUNDLED_SKILLS_DIR);
-  const memoryStore = new PostgresMemoryStore(pool);
+  const memoryStore = new HttpMemoryStore();
   const toolRegistryOptions = { modelProvider: process.env.MODEL_PROVIDER, skills, memoryStore };
-  const listMemories = async (tenantId: string) => {
-    const entries = await listMemoriesForTenant(pool, tenantId);
-    return entries.map((entry) => ({ type: entry.type, title: entry.title }));
-  };
   registry.register("chat-agent", {
-    buildGraph: () => buildChatAgentGraph(modelProvider, createChatAgentToolRegistry(toolRegistryOptions), listMemories),
+    buildGraph: () =>
+      buildChatAgentGraph(modelProvider, createChatAgentToolRegistry(toolRegistryOptions), listMemorySummary),
     buildDeps: () => ({ toolRegistry: createChatAgentToolRegistry(toolRegistryOptions), eventBus }),
   });
   return registry;
@@ -36,16 +38,12 @@ export function buildWorkerRegistry(eventBus: EventBus, modelProvider: ModelProv
 
 /** One consolidation pass across every tenant with pending raw memories. Exported (like
  * buildWorkerRegistry above) so it can be tested directly without needing a running timer. */
-export async function runMemoryConsolidationSweep(
-  pool: Pool,
-  modelProvider: ModelProvider,
-  tenantStore: TenantStore,
-): Promise<void> {
+export async function runMemoryConsolidationSweep(pool: Pool, tenantStore: TenantStore): Promise<void> {
   const allTenants = await tenantStore.listTenants();
-  const tenantIds = await listTenantsWithUnconsolidatedRawMemories(pool, allTenants.map((t) => t.id));
+  const tenantIds = await listTenantsWithPendingMemories(allTenants.map((t) => t.id));
   for (const tenantId of tenantIds) {
     try {
-      await consolidateMemoriesForTenant(pool, modelProvider, tenantId);
+      await consolidateTenant(tenantId);
     } catch (error) {
       console.error(`apps/worker: memory consolidation failed for tenant "${tenantId}": ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -98,14 +96,12 @@ if (isMain()) {
     //
     // The graphId check matters: onRunDone is a single, worker-wide hook, not scoped to any one
     // registered graph. Right now "chat-agent" is the only graph this Worker runs, so this guard
-    // is a no-op in practice — but without it, registering a second graph in the future (any batch
-    // job, not just Tasks 7/8) would silently start casting ITS checkpoint.state to ChatState too,
-    // reading state.message as undefined rather than erroring, and firing a wasted extraction call
-    // with no log signal that anything was wrong.
+    // is a no-op in practice — but without it, registering a second graph in the future would
+    // silently start casting ITS checkpoint.state to ChatState too.
     onRunDone: (checkpoint) => {
       if (checkpoint.graphId !== "chat-agent") return;
       const state = checkpoint.state as ChatState;
-      void extractMemory(pool, modelProvider, {
+      void extractMemory({
         tenantId: checkpoint.tenantId,
         sessionId: checkpoint.sessionId,
         runId: checkpoint.runId,
@@ -119,19 +115,17 @@ if (isMain()) {
   worker.start();
   console.log("apps/worker: started, polling for tasks...");
 
-  // 仓库里目前唯一的另一类"循环"是 Worker 自己那个基于 tasks 表的轮询——这是全新引入的一类
-  // 定时任务，专门给记忆整合用，跟任务调度完全独立。周期由 MEMORY_CONSOLIDATION_INTERVAL_MS
-  // 控制，默认 1 小时。失败只打日志，不影响下一次循环。跟 Worker.scheduleNextPoll 用的是同一种
+  // 记忆整合是一类跟任务调度完全独立的定时循环。周期由 MEMORY_CONSOLIDATION_INTERVAL_MS 控制，
+  // 默认 1 小时。失败只打日志，不影响下一次循环。跟 Worker.scheduleNextPoll 用的是同一种
   // setTimeout 自重排模式（而不是 setInterval）：只有上一轮 sweep 真正 settle 之后才会重新排下
-  // 一轮，保证任意时刻最多只有一轮 sweep 在跑——sweep 可能要对多个租户各发一次 LLM 调用，耗时不
-  // 可控，setInterval 没有这个保证，可能在上一轮还没跑完时就叠加发起下一轮。
+  // 一轮，保证任意时刻最多只有一轮 sweep 在跑。
   const consolidationIntervalMs = parsePositiveInt("MEMORY_CONSOLIDATION_INTERVAL_MS", 3_600_000);
   let consolidationStopped = false;
   let consolidationTimer: ReturnType<typeof setTimeout> | undefined;
   function scheduleNextConsolidationSweep(delayMs: number): void {
     if (consolidationStopped) return;
     consolidationTimer = setTimeout(() => {
-      runMemoryConsolidationSweep(pool, modelProvider, tenantStore)
+      runMemoryConsolidationSweep(pool, tenantStore)
         .catch((error) => {
           console.error(`apps/worker: memory consolidation sweep failed: ${error instanceof Error ? error.message : String(error)}`);
         })
@@ -155,10 +149,8 @@ if (isMain()) {
   // Known, accepted gap: worker.stop() only cancels the NEXT poll tick — it doesn't wait for any
   // fire-and-forget extraction already in flight from onRunDone above. On a normal graceful
   // SIGTERM/SIGINT (not just a crash), pool.end() below can close the connection out from under
-  // an in-flight extractMemory() call, surfacing as a "pool has ended"-style error logged via that
-  // callback's own .catch() — expected noise on every graceful restart, not a real failure; treat
-  // it the same as the crash-mid-extraction case this feature already accepts (memory is a
-  // nice-to-have layered on top of core chat functionality, not load-bearing).
+  // an in-flight extractMemory() call, surfacing as a network error logged via that callback's
+  // own .catch() — expected noise on every graceful restart, not a real failure.
   async function shutdown(): Promise<void> {
     worker.stop();
     consolidationStopped = true;

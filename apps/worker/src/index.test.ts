@@ -1,13 +1,12 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createServer, type Server } from "node:http";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { Pool } from "pg";
-import type { ModelProvider, ModelResponseChunk } from "@opentalos/core-types";
 import { PostgresCheckpointStore } from "@opentalos/postgres-checkpoint";
 import { PostgresEventBus, listEventsSince } from "@opentalos/postgres-tracing";
 import { TenantStore } from "@opentalos/postgres-tenancy";
 import { Scheduler, Worker } from "@opentalos/scheduler";
 import { createModelProviderFromEnv } from "@opentalos/model-providers";
-import { insertRawMemory, listMemoriesForTenant, listRawMemoriesForTenant } from "@opentalos/postgres-memory";
 import { buildWorkerRegistry, runMemoryConsolidationSweep } from "./index.js";
 
 let container: StartedPostgreSqlContainer;
@@ -72,16 +71,6 @@ beforeAll(async () => {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
-    CREATE TABLE raw_memories (
-      id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, session_id TEXT NOT NULL, run_id TEXT NOT NULL,
-      content TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-    );
-    CREATE TABLE memories (
-      id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, type TEXT NOT NULL, scope TEXT NOT NULL DEFAULT 'private',
-      title TEXT NOT NULL, content TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), last_confirmed_at TIMESTAMPTZ NOT NULL DEFAULT now()
-    );
-    CREATE UNIQUE INDEX memories_tenant_id_title_idx ON memories (tenant_id, title);
   `);
 }, 120_000);
 
@@ -127,51 +116,88 @@ describe("apps/worker registry wiring", () => {
   });
 });
 
-function fakeConsolidationProvider(responseText: string): ModelProvider {
-  return {
-    async *complete(): AsyncIterable<ModelResponseChunk> {
-      yield { type: "text_delta", textDelta: responseText };
-      yield { type: "message_stop" };
-    },
-  };
-}
-
 describe("runMemoryConsolidationSweep", () => {
-  it("consolidates a pending raw memory for a real, seeded tenant", async () => {
+  afterEach(() => {
+    delete process.env.MEMORY_SERVICE_URL;
+  });
+
+  it("only calls /memory/consolidate for tenants the fake memory-service reports as pending", async () => {
     const tenantStore = new TenantStore(pool);
-    const tenant = await tenantStore.createTenant("sweep-tenant");
-    await insertRawMemory(pool, { tenantId: tenant.id, sessionId: "s1", runId: "run-1", content: "喜欢简洁回复" });
+    const tenantWithWork = await tenantStore.createTenant("sweep-tenant-pending");
+    await tenantStore.createTenant("sweep-tenant-idle");
 
-    const provider = fakeConsolidationProvider(
-      '{"add": [{"type": "preference", "title": "回复偏好", "content": "喜欢简洁回复"}], "update": [], "delete": []}',
-    );
-    await runMemoryConsolidationSweep(pool, provider, tenantStore);
+    const consolidateCalls: string[] = [];
+    const server = createServer((req, res) => {
+      let body = "";
+      req.on("data", (chunk) => (body += chunk));
+      req.on("end", () => {
+        if (req.url?.startsWith("/memory/tenants-with-pending")) {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ tenant_ids: [tenantWithWork.id] }));
+          return;
+        }
+        if (req.url === "/memory/consolidate" && req.method === "POST") {
+          consolidateCalls.push((JSON.parse(body) as { tenant_id: string }).tenant_id);
+          res.writeHead(204);
+          res.end();
+          return;
+        }
+        res.writeHead(404);
+        res.end();
+      });
+    });
+    await new Promise<void>((resolvePromise) => server.listen(0, resolvePromise));
+    const address = server.address();
+    if (address === null || typeof address === "string") throw new Error("expected a bound TCP port");
+    process.env.MEMORY_SERVICE_URL = `http://localhost:${address.port}`;
 
-    const memories = await listMemoriesForTenant(pool, tenant.id);
-    expect(memories).toMatchObject([{ type: "preference", title: "回复偏好", content: "喜欢简洁回复" }]);
-    expect(await listRawMemoriesForTenant(pool, tenant.id)).toEqual([]);
+    try {
+      await runMemoryConsolidationSweep(pool, tenantStore);
+    } finally {
+      await new Promise<void>((resolvePromise) => server.close(() => resolvePromise()));
+    }
+
+    expect(consolidateCalls).toEqual([tenantWithWork.id]);
   });
 
   it("does not let one tenant's consolidation failure block another tenant's sweep", async () => {
     const tenantStore = new TenantStore(pool);
     const failingTenant = await tenantStore.createTenant("sweep-tenant-failing");
     const okTenant = await tenantStore.createTenant("sweep-tenant-ok");
-    await insertRawMemory(pool, { tenantId: failingTenant.id, sessionId: "s1", runId: "run-2", content: "will fail" });
-    await insertRawMemory(pool, { tenantId: okTenant.id, sessionId: "s1", runId: "run-3", content: "住在北京" });
 
-    const provider: ModelProvider = {
-      complete: (request) => {
-        // No tenantId on ModelRequest, so distinguish which tenant's consolidation call this is
-        // by the raw observation text baked into the user prompt (set up above, per tenant).
-        const userPrompt = request.messages.find((m) => m.role === "user")?.content ?? "";
-        if (userPrompt.includes("will fail")) throw new Error("simulated provider failure");
-        return fakeConsolidationProvider(
-          '{"add": [{"type": "profile", "title": "居住地", "content": "住在北京"}], "update": [], "delete": []}',
-        ).complete(request);
-      },
-    };
-    await runMemoryConsolidationSweep(pool, provider, tenantStore);
+    const consolidateCalls: string[] = [];
+    const server = createServer((req, res) => {
+      let body = "";
+      req.on("data", (chunk) => (body += chunk));
+      req.on("end", () => {
+        if (req.url?.startsWith("/memory/tenants-with-pending")) {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ tenant_ids: [failingTenant.id, okTenant.id] }));
+          return;
+        }
+        if (req.url === "/memory/consolidate" && req.method === "POST") {
+          const tenantId = (JSON.parse(body) as { tenant_id: string }).tenant_id;
+          consolidateCalls.push(tenantId);
+          res.writeHead(tenantId === failingTenant.id ? 500 : 204);
+          res.end();
+          return;
+        }
+        res.writeHead(404);
+        res.end();
+      });
+    });
+    await new Promise<void>((resolvePromise) => server.listen(0, resolvePromise));
+    const address = server.address();
+    if (address === null || typeof address === "string") throw new Error("expected a bound TCP port");
+    process.env.MEMORY_SERVICE_URL = `http://localhost:${address.port}`;
 
-    expect(await listMemoriesForTenant(pool, okTenant.id)).toMatchObject([{ type: "profile", title: "居住地", content: "住在北京" }]);
+    try {
+      await expect(runMemoryConsolidationSweep(pool, tenantStore)).resolves.toBeUndefined();
+    } finally {
+      await new Promise<void>((resolvePromise) => server.close(() => resolvePromise()));
+    }
+
+    expect(consolidateCalls).toContain(failingTenant.id);
+    expect(consolidateCalls).toContain(okTenant.id);
   });
 });
