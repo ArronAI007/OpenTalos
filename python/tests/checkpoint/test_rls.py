@@ -3,7 +3,7 @@ from sqlalchemy import text
 
 from opentalos.checkpoint.postgres import PostgresCheckpointStore
 from opentalos.checkpoint.schema import metadata
-from opentalos.core_types import Checkpoint
+from opentalos.core_types import Checkpoint, CheckpointQuery
 from opentalos.db import create_engine
 
 
@@ -92,3 +92,22 @@ async def test_save_works_against_rls_restricted_pool_and_is_tenant_scoped(rls_s
     await app_store.save(make_checkpoint(run_id="r1", tenant_id="tenant-a"))
     assert await app_store.load_for_tenant("r1", "tenant-b") is None
     assert await app_store.load_for_tenant("r1", "tenant-a") is not None
+
+
+@pytest.mark.asyncio
+async def test_unscoped_methods_are_incompatible_with_the_restricted_role(rls_setup):
+    admin_engine, app_engine = rls_setup
+    admin_store = PostgresCheckpointStore(admin_engine)
+    await admin_store.save(make_checkpoint(run_id="r1", tenant_id="tenant-a"))
+
+    app_store = PostgresCheckpointStore(app_engine)
+    # None of these set app.tenant_id, so the RLS policy's current_setting(...) is NULL,
+    # and `tenant_id = NULL` is never true -- every one of these silently sees/changes nothing,
+    # without raising. This is the documented, deliberate trusted-caller boundary (see
+    # core_types.CheckpointStore's docstring) -- Phase 5 must decide whether the worker ever
+    # connects as an RLS-restricted role before using these methods directly.
+    assert await app_store.load("r1") is None
+    assert await app_store.list_checkpoints(CheckpointQuery(tenant_id="tenant-a")) == []
+    await app_store.request_cancel("r1")
+    reloaded = await admin_store.load("r1")
+    assert reloaded.cancel_requested is False  # the request_cancel() above silently did nothing
