@@ -23,7 +23,7 @@ COMPOSE_FILE="$ROOT_DIR/scripts/docker-compose.postgres.yml"
 
 # Restart/start/stop "all" touches only these — postgres is stateful and managed separately via
 # postgres:up/postgres:down, so a routine app restart can never take the database down with it.
-APP_SERVICES=(worker api web admin)
+APP_SERVICES=(worker api web admin memory-service)
 
 mkdir -p "$LOG_DIR"
 
@@ -33,6 +33,7 @@ port_for() {
 	api) echo 3001 ;;
 	web) echo 5173 ;;
 	admin) echo 5174 ;;
+	memory-service) echo 8001 ;;
 	*)
 		echo "unknown service: $1 (expected one of: ${APP_SERVICES[*]})" >&2
 		exit 1
@@ -86,6 +87,10 @@ start_service() {
 		# --strictPort: 端口被占用时直接报错退出，而不是静默换一个端口——避免脚本以为服务没起来，
 		# 实际上只是绑在了别的端口上。
 		(cd "$ROOT_DIR/apps/$name" && nohup ./node_modules/.bin/vite --port "$port" --strictPort >"$LOG_DIR/$name.log" 2>&1 &)
+		;;
+	memory-service)
+		echo "[$name] 启动中 (日志: logs/$name.log)"
+		(cd "$ROOT_DIR/services/memory-service" && nohup uv run uvicorn app.main:app --host 0.0.0.0 --port "$port" >"$LOG_DIR/$name.log" 2>&1 &)
 		;;
 	esac
 
