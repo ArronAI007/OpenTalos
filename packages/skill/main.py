@@ -14,7 +14,7 @@ from skill.models import (
     SkillListResponse,
     SkillSummary,
 )
-from skill.sandbox import PathValidationError, resolve_interpreter, resolve_script_path, run_sandboxed_script
+from sandbox import PathValidationError, resolve_interpreter, resolve_script_path, run_sandboxed_script
 
 DEFAULT_MAX_CONCURRENCY = 4
 # packages/skill/main.py -> packages/skill -> packages -> 仓库根目录
