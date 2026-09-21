@@ -1,6 +1,6 @@
 """对应 packages/postgres-checkpoint/src/store.ts。"""
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import and_, select, text, update
 from sqlalchemy.dialects.postgresql import insert
@@ -8,6 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from opentalos.checkpoint.schema import checkpoints_table
 from opentalos.core_types import Checkpoint, CheckpointQuery
+
+
+def _to_iso_z(dt: datetime) -> str:
+    """Match InMemoryCheckpointStore's ISO format exactly (a trailing Z, not +00:00) so
+    round-tripping a Checkpoint through either store implementation produces the same string."""
+    return dt.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
 def _row_to_checkpoint(row) -> Checkpoint:
@@ -20,7 +26,7 @@ def _row_to_checkpoint(row) -> Checkpoint:
         state=row.state,
         pending_yields=row.pending_yields,
         status=row.status,
-        created_at=row.created_at.isoformat(),
+        created_at=_to_iso_z(row.created_at),
         cancel_requested=row.cancel_requested,
         steer_message=row.steer_message,
         error=row.error,
