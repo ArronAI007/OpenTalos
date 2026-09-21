@@ -9,3 +9,14 @@ Agent 核心（GraphEngine、持久化层、model provider、chat-agent、schedu
 uv sync
 uv run pytest
 ```
+
+## 进度
+
+- [x] 阶段 1：基础层（core_types、checkpoint、tracing、tool_registry，含 Postgres RLS）
+- [ ] 阶段 2：GraphEngine
+- [ ] 阶段 3：model_providers + sdk
+- [ ] 阶段 4：chat_agent
+- [ ] 阶段 5：scheduler + worker
+- [ ] 阶段 6：api
+- [ ] 阶段 7：apps/web 适配
+- [ ] 阶段 8：整体联调 + 切换
