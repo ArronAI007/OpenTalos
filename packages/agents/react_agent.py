@@ -1,8 +1,7 @@
 import json
 from typing import Any
 
-from context import AssemblyConfig
-from core.agent import Agent
+from core.agent import Agent, AssemblyConfig
 from core.chat_message import ChatMessage
 from core.completion import ToolInvocation
 from core.model_client import ModelClient

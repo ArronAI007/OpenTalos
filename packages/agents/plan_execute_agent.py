@@ -1,7 +1,6 @@
 import json
 
-from context import AssemblyConfig
-from core.agent import Agent
+from core.agent import Agent, AssemblyConfig
 from core.chat_message import ChatMessage
 from core.model_client import ModelClient
 from core.settings import RuntimeSettings
