@@ -4,7 +4,7 @@ from pathlib import Path
 import docker
 import pytest
 
-from app.sandbox import PathValidationError, resolve_interpreter, resolve_script_path, run_sandboxed_script
+from sandbox import PathValidationError, resolve_interpreter, resolve_script_path, run_sandboxed_script
 
 
 @pytest.fixture(scope="session")

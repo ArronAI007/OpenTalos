@@ -16,13 +16,16 @@ dev = [
     "httpx>=0.27",
 ]
 
+# 这是一个直接跑的服务，不是要发布的库——不需要 uv 把它构建/安装成一个 wheel，只需要一个装好
+# 依赖的 venv。跳过构建步骤，避免为了"packages/skill 下全是平铺的 .py 文件、没有子包目录"这种
+# 布局去折腾 hatchling 的打包配置。
+[tool.uv]
+package = false
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["tests"]
-
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
-[tool.hatch.build.targets.wheel]
-packages = ["app"]
+# 测试文件挪到了仓库根目录的 tests/skill/ 下（按目录归类的约定），这里相对 packages/skill/
+# 的路径指过去。pythonpath 把 packages/skill/ 本身加进 sys.path，让测试用平铺的
+# `from discovery import ...` 这种写法就能 import 到，不需要任何包前缀。
+testpaths = ["../../tests/skill"]
+pythonpath = ["."]

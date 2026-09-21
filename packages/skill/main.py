@@ -6,19 +6,19 @@ from pathlib import Path
 import docker
 from fastapi import FastAPI, HTTPException
 
-from app.discovery import discover_skills
-from app.models import (
+from discovery import discover_skills
+from models import (
     RunScriptRequest,
     RunScriptResponse,
     SkillDetailResponse,
     SkillListResponse,
     SkillSummary,
 )
-from app.sandbox import PathValidationError, resolve_interpreter, resolve_script_path, run_sandboxed_script
+from sandbox import PathValidationError, resolve_interpreter, resolve_script_path, run_sandboxed_script
 
 DEFAULT_MAX_CONCURRENCY = 4
-# packages/skill/app/main.py -> packages/skill/app -> packages/skill -> packages -> 仓库根目录
-SKILLS_ROOT = Path(__file__).resolve().parent.parent.parent.parent / "skills"
+# packages/skill/main.py -> packages/skill -> packages -> 仓库根目录
+SKILLS_ROOT = Path(__file__).resolve().parent.parent.parent / "skills"
 
 _docker_client: docker.DockerClient | None = None
 _semaphore: asyncio.Semaphore | None = None
