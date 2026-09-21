@@ -95,3 +95,38 @@ def test_history_snapshot_returns_a_copy(model_client):
     history = agent.history_snapshot()
     history.append(ChatMessage(content="not stored", role="user"))
     assert len(agent.history_snapshot()) == 1
+
+
+def test_build_context_includes_system_prompt_history_and_query(model_client):
+    agent = _EchoAgent(name="echo", model_client=model_client, system_prompt="Be concise.")
+    agent.record_message(ChatMessage(content="hi", role="user"))
+    agent.record_message(ChatMessage(content="hello there", role="assistant"))
+
+    context = agent.build_context("hi again")
+
+    assert "Be concise." in context
+    assert "[user] hi" in context
+    assert "hi again" in context
+
+
+def test_compress_history_folds_old_turns_and_produces_chat_messages(model_client):
+    agent = _EchoAgent(name="echo", model_client=model_client, min_retain_turns=1)
+    for i in range(4):
+        agent.record_message(ChatMessage(content=f"question {i}", role="user"))
+        agent.record_message(ChatMessage(content=f"answer {i}", role="assistant"))
+
+    changed = agent.compress_history("earlier discussion")
+    assert changed is True
+
+    history = agent.history_snapshot()
+    assert isinstance(history[0], ChatMessage)
+    assert history[0].role == "summary"
+    assert "earlier discussion" in history[0].content
+
+
+def test_compress_history_is_a_noop_below_the_retain_threshold(model_client):
+    agent = _EchoAgent(name="echo", model_client=model_client, min_retain_turns=10)
+    agent.record_message(ChatMessage(content="hi", role="user"))
+
+    assert agent.compress_history("summary") is False
+    assert len(agent.history_snapshot()) == 1

@@ -1,20 +1,26 @@
 from datetime import datetime
 from typing import Any
 
-from core.chat_message import ChatMessage
+from .message import MessageLike, Note
 
 
 class TranscriptStore:
-    """只追加的对话历史，按“回合”（一条 user 消息 + 后续消息）压缩为摘要。"""
+    """只追加的对话历史，按“回合”（一条 user 消息 + 后续消息）压缩为摘要。
 
-    def __init__(self, min_retain_turns: int = 10) -> None:
+    message_type 是用来构造/反序列化消息的具体类型（compress 的 summary 消息、restore
+    时都靠它），默认是本包自带的 Note；调用方可以传自己的消息类型（比如 core.ChatMessage），
+    只要它接受 content/role/metadata 关键字参数并提供 from_dict 类方法即可。
+    """
+
+    def __init__(self, min_retain_turns: int = 10, message_type: type[MessageLike] = Note) -> None:
         self.min_retain_turns = min_retain_turns
-        self._messages: list[ChatMessage] = []
+        self._message_type = message_type
+        self._messages: list[MessageLike] = []
 
-    def append(self, message: ChatMessage) -> None:
+    def append(self, message: MessageLike) -> None:
         self._messages.append(message)
 
-    def messages(self) -> list[ChatMessage]:
+    def messages(self) -> list[MessageLike]:
         return list(self._messages)
 
     def clear(self) -> None:
@@ -36,7 +42,7 @@ class TranscriptStore:
             return False
 
         keep_from = starts[-self.min_retain_turns]
-        summary_message = ChatMessage(
+        summary_message = self._message_type(
             content=f"## Archived Session Summary\n{summary}",
             role="summary",
             metadata={"compressed_at": datetime.now().isoformat()},
@@ -52,4 +58,4 @@ class TranscriptStore:
         }
 
     def restore(self, data: dict[str, Any]) -> None:
-        self._messages = [ChatMessage.from_dict(message) for message in data.get("messages", [])]
+        self._messages = [self._message_type.from_dict(message) for message in data.get("messages", [])]

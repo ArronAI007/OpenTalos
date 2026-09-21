@@ -1,6 +1,6 @@
 import tiktoken
 
-from core.chat_message import ChatMessage
+from .message import MessageLike
 
 _FALLBACK_ENCODING = "cl100k_base"
 _ROLE_OVERHEAD_TOKENS = 4  # chat 模板给每条消息加的角色/分隔符开销的粗略估算
@@ -33,7 +33,7 @@ class TokenBudget:
         except Exception:
             return len(text) // 4
 
-    def estimate_message(self, message: ChatMessage) -> int:
+    def estimate_message(self, message: MessageLike) -> int:
         cache_key = f"{message.role}:{message.content}"
         cached = self._cache.get(cache_key)
         if cached is not None:
@@ -42,7 +42,7 @@ class TokenBudget:
         self._cache[cache_key] = tokens
         return tokens
 
-    def estimate_messages(self, messages: list[ChatMessage]) -> int:
+    def estimate_messages(self, messages: list[MessageLike]) -> int:
         return sum(self.estimate_message(message) for message in messages)
 
     def reset_cache(self) -> None:

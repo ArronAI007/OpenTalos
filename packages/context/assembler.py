@@ -3,8 +3,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from core.chat_message import ChatMessage
-
+from .message import MessageLike
 from .tokens import TokenBudget
 
 _RECENCY_HALF_LIFE_SECONDS = 3600.0
@@ -56,7 +55,7 @@ class ContextAssembler:
     def assemble(
         self,
         user_query: str,
-        transcript: list[ChatMessage] | None = None,
+        transcript: list[MessageLike] | None = None,
         system_instructions: str | None = None,
         extra_slices: list[ContextSlice] | None = None,
     ) -> str:
@@ -68,7 +67,7 @@ class ContextAssembler:
     def _collect(
         self,
         user_query: str,
-        transcript: list[ChatMessage],
+        transcript: list[MessageLike],
         system_instructions: str | None,
         extra_slices: list[ContextSlice],
     ) -> list[ContextSlice]:

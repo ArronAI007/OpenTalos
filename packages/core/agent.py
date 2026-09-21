@@ -1,6 +1,8 @@
 import asyncio
 from abc import ABC, abstractmethod
 
+from context import AssemblyConfig, ContextAssembler, ContextSlice, TranscriptStore
+
 from .chat_message import ChatMessage
 from .events import AgentPhase, PhaseCallback, PhaseSignal
 from .model_client import ModelClient
@@ -14,12 +16,15 @@ class Agent(ABC):
         model_client: ModelClient,
         system_prompt: str | None = None,
         settings: RuntimeSettings | None = None,
+        context_config: AssemblyConfig | None = None,
+        min_retain_turns: int = 10,
     ) -> None:
         self.name = name
         self.model_client = model_client
         self.system_prompt = system_prompt
         self.settings = settings or RuntimeSettings()
-        self._transcript: list[ChatMessage] = []
+        self._transcript = TranscriptStore(min_retain_turns=min_retain_turns, message_type=ChatMessage)
+        self._context_assembler = ContextAssembler(context_config)
 
     @abstractmethod
     async def arespond(self, input_text: str, **kwargs: object) -> str: ...
@@ -55,7 +60,20 @@ class Agent(ABC):
         self._transcript.append(message)
 
     def history_snapshot(self) -> list[ChatMessage]:
-        return list(self._transcript)
+        return self._transcript.messages()
 
     def reset_history(self) -> None:
         self._transcript.clear()
+
+    def compress_history(self, summary: str) -> bool:
+        """把 min_retain_turns 之前的历史折叠成一条 summary 消息，回合数不足时是 no-op。"""
+        return self._transcript.compress(summary)
+
+    def build_context(self, user_query: str, extra_slices: list[ContextSlice] | None = None) -> str:
+        """跑一遍 GSSC 流水线，把 system_prompt + 历史 + user_query 组装成结构化上下文。"""
+        return self._context_assembler.assemble(
+            user_query,
+            transcript=self.history_snapshot(),
+            system_instructions=self.system_prompt,
+            extra_slices=extra_slices,
+        )
