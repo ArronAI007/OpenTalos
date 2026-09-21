@@ -6,24 +6,20 @@ dependencies = [
     "pydantic>=2.9",
     "openai>=1.54",
     "anthropic>=0.39",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "docker>=7.1",
 ]
 
 [dependency-groups]
 dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
+    "httpx>=0.27",
 ]
-
-[tool.uv.workspace]
-members = ["packages/skill"]
 
 [tool.uv]
 package = false
-# 根目录有了 [project] 之后，uv 就把它当成"真实项目"——`uv sync`/`uv run` 默认只装根项目自己
-# 的依赖，不再像之前的纯虚拟 workspace（没有 [project] 时）那样自动把所有 workspace member
-# 的依赖也一起装上。所以本仓库任何时候跑 `uv sync` / `uv run ...`，都必须带 `--all-packages`，
-# 否则 packages/skill 的依赖（fastapi/docker/uvicorn 等）会被静默卸载，导致它的测试报
-# ModuleNotFoundError。
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
