@@ -1,205 +1,99 @@
 # OpenTalos
 
-A from-scratch TypeScript monorepo implementing a fully-decoupled agent harness: a graph-based
-agent runtime, durable task scheduling with human-in-the-loop (HITL) pause/resume, a
-Postgres-backed conversational web UI with live tracing, and a multi-tenant platform services
-layer (real API-key auth, tenant/quota management).
+An experimental agent framework in Python: a small, dependency-clean core runtime plus
+building blocks for tool calling, context engineering, sandboxed script execution, four
+reusable agent reasoning patterns, and execution tracing — with a Gradio chat console on top
+to actually use it.
 
-Built as four independent, sequentially-developed subsystems, each with its own design spec,
-implementation plan, and test suite:
-
-1. **Core Agent Runtime Engine** — the graph execution engine agents run on.
-2. **Task Scheduling & Execution Infrastructure** — durable, resumable task execution.
-3. **Conversational Web UI** — a chat frontend with live trace visualization.
-4. **Platform Services Layer** — tenant auth, API keys, and per-tenant quotas.
+Managed as a single `uv` project (not a workspace); `packages/*` are added to `sys.path`
+rather than installed, and imported as top-level modules (`from core.agent import Agent`,
+`from tool.registry import ToolRegistry`, etc.).
 
 ## Architecture
 
-### 1. Core Agent Runtime Engine
-
-The foundation every agent graph runs on. An agent is a directed graph of async-generator
-**nodes**; a node can `yield` to pause execution (e.g. awaiting a tool call or human approval)
-and resume later from exactly where it left off, via a serializable `NodeCursor`.
+`packages/tool`, `packages/context`, `packages/sandbox`, and `packages/observability` are
+leaf packages — none of them import each other or anything else in this repo:
 
 | Package | Responsibility |
 |---|---|
-| `packages/core-types` | Shared interfaces: `TenantContext`, `Message`, `ToolDefinition`, `CheckpointStore`, `EventBus`, `MemoryStore`. |
-| `packages/core-graph` | `GraphEngine` — runs a `GraphDefinition` node-by-node, handling yields, resumption, and state reduction. |
-| `packages/checkpoint` | `InMemoryCheckpointStore` — reference implementation of run-state persistence. |
-| `packages/tracing` | `InMemoryEventBus` — reference implementation of trace-event pub/sub. |
-| `packages/memory` | `InMemoryMemoryStore` — tenant/session-scoped agent memory. |
-| `packages/model-providers` | LLM provider adapters: Anthropic, OpenAI-compatible, Ollama, plus Dashscope/Doubao/Kimi/MiniMax presets over the OpenAI-compatible adapter, and a `mock` provider for tests. `createModelProviderFromEnv()` selects among them — see "Key Environment Variables" below. |
-| `packages/tool-registry` | Tool registration, including an MCP (Model Context Protocol) adapter. |
-| `packages/multi-agent` | Composable multi-agent patterns: supervisor/router and swarm graphs. |
-| `packages/config-loader` | Declarative graph definitions (YAML/JSON) compiled into `GraphDefinition`s. |
-| `packages/sdk` | `defineGraph` — the ergonomic entry point tying the above together for a single-process agent. |
+| `packages/tool` | `Tool`/`ToolParameter` abstract interface, `ToolOutcome`, `ToolRegistry` (registration, function-schema export, per-tool `CircuitBreaker`). |
+| `packages/context` | Context engineering: `TokenBudget` (cached token estimation), `TranscriptStore` (turn-based history with summary compression), `ContextAssembler` (Gather-Select-Structure-Compress pipeline, with MMR-based diverse selection), `OutputTrimmer` (head/tail truncation of large tool output). |
+| `packages/sandbox` | Docker-based sandboxed execution of a single script (`run_sandboxed_script`), with path-traversal-safe script resolution. |
+| `packages/observability` | `RunRecorder`: records a run's events as streaming JSONL plus an incrementally-rendered HTML report, with secret redaction and summary stats. |
 
-### 2. Task Scheduling & Execution Infrastructure
-
-Promotes the runtime engine from in-process/in-memory to a durable, horizontally-scalable system:
-runs are persisted as rows in Postgres and executed by one or more polling `Worker` processes,
-so a paused (HITL) run can be resumed hours later, by a different process, without losing state.
+`packages/core` builds on the leaves above — its `Agent` base class composes a
+`TranscriptStore`/`ContextAssembler` pair unconditionally, and a `RunRecorder` when
+constructed with `trace_dir`:
 
 | Package | Responsibility |
 |---|---|
-| `packages/scheduler` | `GraphRegistry`, `Scheduler` (enqueues/resumes runs as tasks), `Worker` (polls and executes tasks with global + per-tenant concurrency caps). |
-| `packages/postgres-checkpoint` | Drizzle/Postgres-backed `CheckpointStore`. |
-| `packages/postgres-tracing` | Drizzle/Postgres-backed `EventBus`, plus `listEventsSince` for SSE catch-up. |
-| `apps/worker` | The long-running process that polls the `tasks` table and executes claimed runs. |
+| `packages/core` | `Agent` (abstract base: history, context assembly, tracing, phase callbacks), `ModelClient` (async, provider-agnostic: Anthropic / OpenAI-compatible / mock), `ChatMessage`, `Completion`/`ToolCompletion` types. |
+| `packages/skill` | FastAPI service exposing the `skills/` directory over HTTP (`GET /skills`, `GET /skills/{name}`, `POST /skills/{name}/run-script`), running scripts through `packages/sandbox`. |
 
-### 3. Conversational Web UI
+`packages/agents` sits on top, depending only on `core` and `tool`:
 
-A minimal chat app demonstrating the full stack end to end: send a message, watch the agent's
-trace stream in over Server-Sent Events, approve a paused tool call, see the final reply.
+| Package | Responsibility |
+|---|---|
+| `packages/agents` | Four `core.Agent` implementations sharing one tool-calling loop (`dialogue.run_tool_turn`): `ToolCallingAgent` (single-turn, optional tool calling), `ReActAgent` (step-budgeted reason+act loop with an explicit `finish` tool), `ReflectionAgent` (draft → critique → revise), `PlanExecuteAgent` (plan into steps via a forced function call, then execute each with accumulating context). Plus `build_agent`/`default_subagent_builder` to construct one by type name. |
+
+And `apps/` is what you actually run:
 
 | App | Responsibility |
 |---|---|
-| `apps/api` | Fastify REST API: `POST /runs`, `POST /runs/:id/resume`, `GET /runs/:id`, `GET /runs/:id/events` (SSE). |
-| `apps/web` | React + Vite chat UI, with a live trace drawer and human-approval controls. |
-| `packages/chat-agent` | The chat graph served by `apps/api` — calls a real model (with tools), pauses for human approval, replies. |
-| `examples/research-agent` | A second example graph showing the `multi-agent` supervisor pattern (researcher → writer). |
-
-### 4. Platform Services Layer
-
-Replaces a hardcoded single-tenant setup with real multi-tenant operation: API-key
-authentication, tenant management, and per-tenant differentiated concurrency quotas.
-
-| Package/App | Responsibility |
-|---|---|
-| `packages/postgres-tenancy` | `TenantStore` — tenants and hashed API keys (`tk_<hex>`, SHA-256 at rest), with 401 (invalid key) vs. 403 (valid key, disabled tenant) discrimination. |
-| `apps/api` (auth additions) | `createTenantAuthHook` protects every `/runs*` route (`Authorization: Bearer` header or `?apiKey=` query param, for SSE); `/admin/*` routes are separately protected by a bootstrap `ADMIN_API_KEY` secret. |
-| `apps/admin` | React app for tenant and API-key management (create/list/disable tenants, issue/revoke keys, set per-tenant quotas). |
-| `apps/web` (auth additions) | Gated behind a real API key entered once and stored client-side; a revoked/invalid key routes back to re-entry. |
-| `packages/scheduler` (quota additions) | `Worker`'s optional `resolveTenantConcurrency` hook resolves each tenant's cap once per poll cycle, falling back to a static default — omitting it is fully backward-compatible. |
+| `apps/chat_console` | Gradio UI: chat with any of the four agent types (with a demo calculator tool for tool-calling patterns), and a live Trace tab showing that agent's `RunRecorder` events/stats as the conversation happens. |
 
 ## Repository Layout
 
 ```
 opentalos/
-├── packages/        # Core runtime, scheduling, and platform libraries
-├── apps/            # Deployable processes: api, worker, web, admin
-├── examples/        # Example agent graphs served by apps/api
-└── docs/            # Design specs & implementation plans (gitignored, kept local)
+├── packages/         # core, tool, context, sandbox, observability, skill, agents
+├── apps/             # chat_console (Gradio)
+├── skills/           # skill content served by packages/skill (SKILL.md + scripts)
+├── tests/            # pytest, mirrors packages/ and apps/
+└── scripts/          # start.sh
 ```
-
-Managed as a pnpm workspace + Turborepo monorepo (`pnpm-workspace.yaml`: `packages/*`,
-`apps/*`, `examples/*`). Every package is TypeScript, ESM/NodeNext, tested with Vitest;
-Postgres-backed packages use [Testcontainers](https://node.testcontainers.org/) to test against
-a real, ephemeral Postgres instance rather than mocks.
 
 ## Quick Start
 
-**Prerequisites:** Node ≥20, pnpm, Docker (for Postgres and for running tests against real
-Postgres instances via Testcontainers).
+Requires Python ≥3.12 and [`uv`](https://docs.astral.sh/uv/). Docker is only needed for
+`packages/sandbox`/`packages/skill` (and their tests).
 
 ```bash
-pnpm install
+uv sync
+cp .env.example .env   # fill in MODEL_PROVIDER/MODEL_API_KEY/MODEL_NAME, or leave
+                        # MODEL_PROVIDER=mock to run without a real model
 
-# Build, typecheck, and test everything
-pnpm run build
-pnpm run typecheck
-pnpm run test
+uv run pytest tests/
+
+./scripts/start.sh chat    # Gradio chat console at http://127.0.0.1:7860
+./scripts/start.sh skill   # skill FastAPI service (needs Docker running)
 ```
 
-### Running the full stack locally
-
-`scripts/dev.sh` (or `pnpm dev` / `pnpm dev:stop` / `pnpm dev:restart` / `pnpm dev:status` /
-`pnpm dev:logs <service>`) wraps the manual steps below into one command — it builds worker/api
-before starting them, and start/stop/restart accept an optional service name (`worker`, `api`,
-`web`, `admin`; default is all four). Postgres is managed separately via
-`scripts/dev.sh postgres:up` / `postgres:down`, since restarting the app shouldn't take the
-database down with it. Run `scripts/dev.sh` with no arguments for the full command list.
-
-To do the same steps by hand instead:
-
-If you already have a Postgres instance from before 2026-09-14, apply
-`scripts/migrations/2026-09-14-add-checkpoints-cancel-requested.sql` by hand first
-(`psql $DATABASE_URL -f scripts/migrations/2026-09-14-add-checkpoints-cancel-requested.sql`) —
-there is no migration runner in this repo.
-
-```bash
-# 1. Start Postgres (the regular dev database — NOT apps/web/e2e/docker-compose.yml, whose data
-#    is destroyed and reseeded on every Playwright E2E run)
-docker compose -f scripts/docker-compose.postgres.yml up -d
-
-# 2. Build the processes that need a compiled dist/ to run
-pnpm --filter @opentalos/worker build
-pnpm --filter @opentalos/api build
-
-# 3. Start each process (separate terminals)
-# Both processes call createModelProviderFromEnv() at startup and fail fast if MODEL_PROVIDER
-# is unset — see "Key Environment Variables" below for the full set of MODEL_* vars and the
-# built-in provider presets. MODEL_PROVIDER=mock (shown here) needs no API key and makes no
-# network calls; swap in a real provider (e.g. MODEL_PROVIDER=anthropic, MODEL_API_KEY=...,
-# MODEL_NAME=...) to actually call an LLM. apps/worker and apps/api each read these vars
-# independently — set the SAME values for both, or they can silently end up on different
-# providers/models.
-DATABASE_URL=postgres://postgres:postgres@localhost:5433/postgres \
-  MODEL_PROVIDER=mock \
-  pnpm --filter @opentalos/worker start
-
-DATABASE_URL=postgres://postgres:postgres@localhost:5433/postgres \
-  ADMIN_API_KEY=<pick-a-secret> \
-  PORT=3001 \
-  MODEL_PROVIDER=mock \
-  pnpm --filter @opentalos/api start
-
-pnpm --filter @opentalos/web dev      # http://localhost:5173
-pnpm --filter @opentalos/admin dev    # http://localhost:5174
-```
-
-On first run, use the admin UI (`:5174`) with your chosen `ADMIN_API_KEY` to create a tenant and
-issue it an API key, then enter that key in the chat UI (`:5173`) to start using it.
-
-### End-to-end tests
-
-```bash
-pnpm --filter @opentalos/web test:e2e
-```
-
-Playwright's `webServer` config starts `worker`/`api`/`web`/`admin` automatically and seeds a
-default tenant + API key via `globalSetup` — no manual process startup needed for this path.
-`globalSetup` drops and recreates every table on the E2E-only Postgres (port `5434`, started
-automatically from `apps/web/e2e/docker-compose.yml` if not already running) — a separate database
-from regular dev's (port `5433`), so this never touches real tenant/API-key/chat data.
-
-If a real dev stack (`scripts/dev.sh start`) is already running on ports `3001`/`3002`/`5173`/`5174`,
-Playwright's `reuseExistingServer` setting reuses those processes instead of starting fresh ones
-against the E2E database — stop the real stack first
-(`scripts/dev.sh stop worker api web admin`) for a clean, isolated E2E run.
+`scripts/start.sh --help` for details. Nothing needs `--env-file` — `packages/core/model_client.py`
+loads `.env` itself (see next section) the moment it's imported.
 
 ## Key Environment Variables
 
-| Variable | Used by | Default | Notes |
-|---|---|---|---|
-| `DATABASE_URL` | `apps/worker`, `apps/api` | `postgres://postgres:postgres@localhost:5432/opentalos` | |
-| `ADMIN_API_KEY` | `apps/api` | *(required, no default)* | Bootstrap secret for `/admin/*` routes; process fails fast at startup if unset. |
-| `PORT` | `apps/api` | `3001` | |
-| `HEALTH_PORT` | `apps/worker` | `3002` | Plain-text health check endpoint. |
-| `WORKER_GLOBAL_CONCURRENCY` | `apps/worker` | `10` | Cap across all tenants combined. |
-| `WORKER_TENANT_CONCURRENCY` | `apps/worker` | `5` | Static fallback cap per tenant, when a tenant has no configured quota. |
-| `MODEL_PROVIDER` | `apps/worker`, `apps/api` | *(required, no default)* | Selects the LLM backend: `anthropic \| openai-compatible \| ollama \| dashscope \| doubao \| kimi \| minimax \| mock`. Fails fast at startup if unset or unrecognized. `mock` needs no API key/network access and is what the E2E suite and `playwright.config.ts`'s `webServer` entries use — not a production fallback. |
-| `MODEL_API_KEY` | `apps/worker`, `apps/api` | *(required except for `ollama`/`mock`)* | |
-| `MODEL_NAME` | `apps/worker`, `apps/api` | *(required except for `mock`)* | No universal default across 7 providers. |
-| `MODEL_BASE_URL` | `apps/worker`, `apps/api` | Provider-specific preset (see below); required for `ollama` | Overrides the built-in preset. `dashscope`/`doubao`/`kimi`/`minimax` default to their public OpenAI-compatible endpoints (`https://dashscope.aliyuncs.com/compatible-mode/v1`, `https://ark.cn-beijing.volces.com/api/v3`, `https://api.moonshot.cn/v1`, `https://api.minimax.chat/v1` respectively); `anthropic`/`openai-compatible` use their SDK's own default unless set; `ollama` has no safe default (always a local address) and requires this var. |
+Read by `packages/core/model_client.py` (`ModelClient()` with no constructor args), which
+loads `.env` from the repo root automatically; values already in the process environment take
+precedence over it.
 
-**Note:** `apps/worker` and `apps/api` each independently call `createModelProviderFromEnv()` from
-their own process environment — there is no shared/central config. In a real deployment, set the
-same `MODEL_*` values for both processes; if they diverge, `apps/api` merely fails fast at its own
-startup on an invalid value (it never actually calls the model itself — it only builds a
-provider to validate config and to hand to `buildChatAgentGraph`), while `apps/worker` is the
-process that actually executes the `respond`/`researcher`/`writer` nodes and makes the real LLM
-call, under whatever `MODEL_*` values *it* was started with.
+| Variable | Default | Notes |
+|---|---|---|
+| `MODEL_PROVIDER` | *(required)* | `anthropic` \| `openai-compatible` \| `mock`. `mock` needs no key/network access. |
+| `MODEL_API_KEY` | *(required except `mock`)* | |
+| `MODEL_NAME` | *(required except `mock`)* | |
+| `MODEL_BASE_URL` | provider default | Required for `openai-compatible` against a non-OpenAI endpoint (DeepSeek, Kimi/Moonshot, etc.). |
+| `MODEL_TIMEOUT` | `60` | Request timeout, seconds. |
+| `MODEL_TEMPERATURE` | `0.7` | Some models only accept a fixed value (e.g. certain Kimi models reject anything but `1`). |
 
-## Design Principles
+## Testing
 
-- **Decoupling**: each subsystem depends only on `core-types`' interfaces, never on a concrete
-  in-memory or Postgres implementation — swapping `InMemoryCheckpointStore` for
-  `PostgresCheckpointStore` requires no changes to `core-graph` or the agent graphs themselves.
-- **Resumability**: an agent node that `yield`s (for a tool call or human approval) can be
-  resumed by any worker process, at any later time, from a durable `NodeCursor` — this is what
-  makes human-in-the-loop approval workflows practical at scale.
-- **Backward compatibility**: new capabilities (e.g. per-tenant quotas) are added as optional
-  hooks with byte-identical default behavior when omitted, so existing callers never break.
-- **Real dependencies in tests**: Postgres-backed packages are tested against a real, ephemeral
-  Postgres via Testcontainers — never mocked — so tests catch actual SQL/schema issues.
+```bash
+uv run pytest tests/
+```
+
+Every `packages/*` and `apps/*` directory has a matching `tests/` counterpart. Docker-backed
+sandbox tests hit a real container, not a mock — same principle applies wherever it's
+practical (`ModelClient` tests use a scripted fake backend since real LLM calls aren't
+reproducible, but nothing here mocks its own package's collaborators).
