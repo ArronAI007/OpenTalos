@@ -41,6 +41,12 @@ class ContextAssembler:
 
     Select 阶段用相关性 + 新近性打分排序，enable_mmr 时改用最大边际相关性
     （MMR）在候选间做多样性取舍，避免选出的材料互相重复。
+
+    Structure 阶段把入选的 slice 按 kind 分到六个区块：
+    instructions（固定纳入，不参与排序/预算竞争之外的其它 slice） -> [Role & Policies]，
+    state -> [State]，
+    evidence/memory/knowledge/retrieval/tool_result -> [Evidence]，
+    history -> [Context]。
     """
 
     def __init__(self, config: AssemblyConfig | None = None, token_budget: TokenBudget | None = None) -> None:
@@ -161,7 +167,11 @@ class ContextAssembler:
 
         sections.append(f"[Task]\n{user_query}")
 
-        evidence = [s for s in selected if s.kind in {"evidence", "tool_result", "retrieval"}]
+        state = [s for s in selected if s.kind == "state"]
+        if state:
+            sections.append("[State]\n" + "\n".join(s.content for s in state))
+
+        evidence = [s for s in selected if s.kind in {"evidence", "memory", "knowledge", "retrieval", "tool_result"}]
         if evidence:
             sections.append("[Evidence]\n" + "\n\n".join(s.content for s in evidence))
 

@@ -54,6 +54,33 @@ def test_relevant_evidence_slice_is_included():
     assert "the weather forecast says rain" in result
 
 
+def test_memory_and_knowledge_slices_are_grouped_under_evidence():
+    config = AssemblyConfig(min_relevance=0.1, enable_mmr=False)
+    assembler = ContextAssembler(config)
+    slices = [
+        ContextSlice(content="weather note: bring an umbrella", kind="memory"),
+        ContextSlice(content="weather fact: rain is water falling from clouds", kind="knowledge"),
+    ]
+
+    result = assembler.assemble("weather", extra_slices=slices)
+
+    assert "[Evidence]" in result
+    assert "bring an umbrella" in result
+    assert "rain is water falling from clouds" in result
+
+
+def test_state_slice_gets_its_own_section():
+    config = AssemblyConfig(min_relevance=0.1, enable_mmr=False)
+    assembler = ContextAssembler(config)
+    slices = [ContextSlice(content="task progress: step 2 of 3 complete, waiting on approval", kind="state")]
+
+    result = assembler.assemble("task progress", extra_slices=slices)
+
+    assert "[State]" in result
+    assert "step 2 of 3 complete, waiting on approval" in result
+    assert result.index("[State]") < result.index("[Output]")
+
+
 def test_mmr_prefers_diverse_slices_over_near_duplicates():
     config = AssemblyConfig(min_relevance=0.0, enable_mmr=True, mmr_lambda=0.5, max_tokens=60, reserve_ratio=0.0)
     assembler = ContextAssembler(config)
