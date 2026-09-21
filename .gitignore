@@ -28,3 +28,4 @@ apps/web/e2e/.fixture-api-key.json
 __pycache__/
 *.pyc
 .pytest_cache/
+/tool-output
