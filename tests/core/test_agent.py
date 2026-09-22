@@ -219,3 +219,30 @@ def test_phase_signal_to_dict_uses_phase_value():
         "agent_name": "my-agent",
         "data": {"result": "done"},
     }
+
+
+def test_scripted_client_streams_tool_completion_via_astream(scripted_client):
+    """SSE 路径走的是 astream_with_tools：夹具必须也能驱动它（增量吐 text + 返回 completion）。"""
+    import asyncio
+
+    from core.protocol import ToolCompletion, ToolInvocation
+
+    completion = ToolCompletion(
+        text="done",
+        requested_tools=[ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text":"hi"}')],
+        model_id="mock-model",
+    )
+    client = scripted_client(tool_completions=[completion])
+
+    async def run() -> tuple[list[str], ToolCompletion]:
+        deltas: list[str] = []
+
+        async def on_delta(chunk: str) -> None:
+            deltas.append(chunk)
+
+        result = await client.astream_with_tools([], [], on_text_delta=on_delta)
+        return deltas, result
+
+    deltas, result = asyncio.run(run())
+    assert "".join(deltas) == "done"
+    assert result.requested_tools[0].tool_name == "echo"

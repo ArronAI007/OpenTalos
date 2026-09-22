@@ -64,6 +64,14 @@ def scripted_client():
 
             client.acomplete = fake_acomplete  # type: ignore[method-assign]
 
+            text_queue = list(completions)
+
+            async def fake_astream(messages: list[dict[str, Any]], **kwargs: Any):
+                for char in text_queue.pop(0).text:
+                    yield char
+
+            client.astream = fake_astream  # type: ignore[method-assign]
+
         if tool_completions:
             tool_queue = list(tool_completions)
 
@@ -76,6 +84,22 @@ def scripted_client():
                 return tool_queue.pop(0)
 
             client.acomplete_with_tools = fake_acomplete_with_tools  # type: ignore[method-assign]
+
+            stream_queue = list(tool_completions)
+
+            async def fake_astream_with_tools(
+                messages: list[dict[str, Any]],
+                tools: list[dict],
+                on_text_delta=None,
+                **kwargs: Any,
+            ) -> ToolCompletion:
+                completion = stream_queue.pop(0)
+                if on_text_delta is not None:
+                    for char in completion.text or "":
+                        await on_text_delta(char)
+                return completion
+
+            client.astream_with_tools = fake_astream_with_tools  # type: ignore[method-assign]
 
         return client
 
