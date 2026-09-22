@@ -28,7 +28,7 @@ from tool.registry import ToolRegistry
 
 AGENT_NAME = "chat-console"
 TRACE_DIR = Path(__file__).resolve().parent / "traces"
-SKILL_SERVICE_URL = os.environ.get("SKILL_SERVICE_URL", "http://localhost:8000")
+SKILL_SERVICE_URL = os.environ.get("SKILL_SERVICE_URL", "http://localhost:8321")
 
 _model_client: ModelClient | None = None
 _model_client_error: str | None = None
@@ -65,7 +65,7 @@ async def _make_agent(agent_type: str, use_calculator: bool, use_skills: bool) -
         except SkillServiceError as error:
             return None, (
                 f"Cannot reach the skill service at {SKILL_SERVICE_URL}: {error}. "
-                "Start it with ./scripts/start.sh skill, or disable skills."
+                "Start everything with ./scripts/start.sh (it brings the service up), or disable skills."
             )
         tool_registry.register(ReadSkillTool(skill_client))
         tool_registry.register(RunSkillScriptTool(skill_client))
@@ -143,7 +143,7 @@ with gr.Blocks(title="OpenTalos Chat Console") as demo:
     with gr.Row():
         agent_type = gr.Dropdown(choices=list(AGENT_TYPES), value="toolcall", label="Agent type")
         use_calculator = gr.Checkbox(value=True, label="Enable demo calculator tool")
-        use_skills = gr.Checkbox(value=False, label="Enable skills (requires the skill service)")
+        use_skills = gr.Checkbox(value=False, label="Enable skills")
         new_conversation_btn = gr.Button("New conversation")
 
     status = gr.Markdown("No active trace session.")

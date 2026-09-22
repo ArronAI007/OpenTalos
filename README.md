@@ -64,16 +64,17 @@ cp .env.example .env   # fill in MODEL_PROVIDER/MODEL_API_KEY/MODEL_NAME, or lea
 
 uv run pytest tests/
 
-./scripts/start.sh chat    # Gradio chat console at http://127.0.0.1:7860
-./scripts/start.sh skill   # skill FastAPI service
+./scripts/start.sh   # skill service (:8321) + Gradio chat console (http://127.0.0.1:7860),
+                     # one command starts both, Ctrl-C stops both
 ```
 
-`scripts/start.sh --help` for details. Nothing needs `--env-file` — `packages/core/model_client.py`
-loads `.env` itself (see next section) the moment it's imported.
+`scripts/start.sh --help` for details (nothing needs `--env-file` — `packages/core/model.py`
+loads `.env` itself, see next section). To debug the skill service in isolation:
+`env PYTHONPATH=packages uv run uvicorn skill.main:app --port 8321`.
 
 ## Key Environment Variables
 
-Read by `packages/core/model_client.py` (`ModelClient()` with no constructor args), which
+Read by `packages/core/model.py` (`ModelClient()` with no constructor args), which
 loads `.env` from the repo root automatically; values already in the process environment take
 precedence over it.
 
@@ -90,7 +91,7 @@ Read by `apps/chat_console/app.py` directly:
 
 | Variable | Default | Notes |
 |---|---|---|
-| `SKILL_SERVICE_URL` | `http://localhost:8000` | Where the chat console reaches the skill service when the skills toggle is on. |
+| `SKILL_SERVICE_URL` | `http://localhost:8321` | Where the chat console reaches the skill service when the skills toggle is on. |
 
 ## Testing
 
