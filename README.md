@@ -39,14 +39,16 @@ And `apps/` is what you actually run:
 
 | App | Responsibility |
 |---|---|
-| `apps/chat_console` | Gradio UI: chat with any of the four agent types (with a demo calculator tool for tool-calling patterns, and an opt-in skills toggle that wires the skill service's `read_skill`/`run_skill_script` tools plus an `<available_skills>` prompt section), and a live Trace tab showing that agent's `RunRecorder` events/stats as the conversation happens. |
+| `apps/api` | FastAPI chat API: `config`/`tasks`/`messages` REST endpoints plus SSE streaming replies, with SQLite persistence (`.data/chat.db`) for tasks and messages. This is the sole backend for the web frontend `apps/web`. |
+| `apps/web` | Next.js frontend: two-pane shell with a sidebar (new task / Agent / skills / task history), a top bar with an agent-type dropdown and the model name, and a streaming chat view driven by the API's SSE replies. |
+| `apps/chat_console` | Gradio 版，保留为零依赖演示/次要入口: chat with any of the four agent types (with a demo calculator tool for tool-calling patterns, and an opt-in skills toggle that wires the skill service's `read_skill`/`run_skill_script` tools plus an `<available_skills>` prompt section), and a live Trace tab showing that agent's `RunRecorder` events/stats as the conversation happens. |
 
 ## Repository Layout
 
 ```
 opentalos/
 ├── packages/         # core, tool, context, observability, skill, agents
-├── apps/             # chat_console (Gradio)
+├── apps/             # api (FastAPI), web (Next.js), chat_console (Gradio)
 ├── skills/           # skill content served by packages/skill (SKILL.md + scripts)
 ├── tests/            # pytest, mirrors packages/ and apps/
 └── scripts/          # start.sh

@@ -4,6 +4,7 @@
 #   ./scripts/start.sh        拉起三个进程；Ctrl-C 全部停止
 #   已有健康（返回 {"status":"ok"}）的 skill/api 会被复用，不重复拉起。
 # 调试既有服务：先手动启动，再跑 ./scripts/start.sh 验证复用路径。
+# 脚本化停止请对脚本进程组发 TERM（kill -TERM -- -<PGID>）；交互 Ctrl-C 即发组信号，天然覆盖。
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
