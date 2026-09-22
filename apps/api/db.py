@@ -1,0 +1,88 @@
+"""SQLite 会话/消息仓储。同步实现——FastAPI 的 def/async 端点内用 asyncio.to_thread
+或直接调用（操作均为毫秒级）；不引第三方 ORM。"""
+import datetime
+import sqlite3
+import uuid
+from pathlib import Path
+
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS tasks (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL DEFAULT '',
+  agent_type TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,           -- 'user' | 'assistant' | 'tool'
+  content TEXT NOT NULL,        -- tool 行存 JSON: {"name","arguments","result","ok"}
+  created_at TEXT NOT NULL
+);
+"""
+
+
+def _now() -> str:
+    return datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%f")
+
+
+class ChatStore:
+    def __init__(self, path: Path) -> None:
+        self._path = Path(path)
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        with self._connect() as conn:
+            conn.executescript(_SCHEMA)
+
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self._path)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        return conn
+
+    def create_task(self, agent_type: str) -> dict:
+        task_id = uuid.uuid4().hex
+        now = _now()
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO tasks (id, title, agent_type, created_at, updated_at) VALUES (?, '', ?, ?, ?)",
+                (task_id, agent_type, now, now),
+            )
+        return self.get_task(task_id)
+
+    def get_task(self, task_id: str) -> dict | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+        return dict(row) if row else None
+
+    def list_tasks(self) -> list[dict]:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT * FROM tasks ORDER BY updated_at DESC, rowid DESC").fetchall()
+        return [dict(row) for row in rows]
+
+    def delete_task(self, task_id: str) -> bool:
+        with self._connect() as conn:
+            cursor = conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+            return cursor.rowcount > 0
+
+    def append_message(self, task_id: str, kind: str, content: str) -> dict:
+        if kind not in ("user", "assistant", "tool"):
+            raise ValueError(f"unknown message kind: {kind}")
+        now = _now()
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "INSERT INTO messages (task_id, kind, content, created_at) VALUES (?, ?, ?, ?)",
+                (task_id, kind, content, now),
+            )
+            conn.execute("UPDATE tasks SET updated_at = ? WHERE id = ?", (now, task_id))
+            row = conn.execute("SELECT * FROM messages WHERE id = ?", (cursor.lastrowid,)).fetchone()
+        return dict(row)
+
+    def list_messages(self, task_id: str) -> list[dict]:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT * FROM messages WHERE task_id = ? ORDER BY id", (task_id,)).fetchall()
+        return [dict(row) for row in rows]
+
+    def set_title_if_empty(self, task_id: str, title: str) -> None:
+        with self._connect() as conn:
+            conn.execute("UPDATE tasks SET title = ? WHERE id = ? AND title = ''", (title, task_id))
