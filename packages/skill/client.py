@@ -14,7 +14,7 @@ class SkillClient:
     """skill 服务（skill.main:app）的异步 HTTP 客户端。
 
     测试可以通过 client 参数注入一个自定义 httpx.AsyncClient（如 MockTransport），
-    不依赖真实服务和 Docker。
+    不依赖真实服务。
     """
 
     def __init__(
@@ -26,7 +26,7 @@ class SkillClient:
     ) -> None:
         # base_url 始终由本类持有并拼出绝对 URL：注入的 client 只当传输层用
         # （比如测试里的 MockTransport 客户端没有 base_url，相对路径会直接报错）。
-        # 超时要盖过服务端脚本的默认执行时限（10s）加容器冷启动开销，不能用 httpx 默认的 5s。
+        # 超时要盖过服务端脚本的默认执行时限（10s）加进程启动开销，不能用 httpx 默认的 5s。
         self._base_url = base_url.rstrip("/")
         self._client = client or httpx.AsyncClient(base_url=self._base_url, timeout=timeout)
 

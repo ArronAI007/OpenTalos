@@ -16,9 +16,8 @@ class RunScriptRequest(BaseModel):
             byte_length = len(value.encode("utf-8"))
             if byte_length > MAX_INPUT_TEXT_BYTES:
                 raise ValueError(
-                    f"Sandbox input text is too large: {byte_length} bytes exceeds "
-                    f"the {MAX_INPUT_TEXT_BYTES}-byte limit. Provide a smaller input — this "
-                    f"sandbox transport cannot support arbitrarily large payloads."
+                    f"Skill input text is too large: {byte_length} bytes exceeds "
+                    f"the {MAX_INPUT_TEXT_BYTES}-byte limit. Provide a smaller input."
                 )
         return value
 

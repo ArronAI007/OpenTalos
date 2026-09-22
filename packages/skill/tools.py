@@ -31,13 +31,13 @@ class ReadSkillTool(Tool):
 
 
 class RunSkillScriptTool(Tool):
-    """在服务端沙箱里执行技能脚本，回传 stdout/stderr/退出码。"""
+    """在 skill 服务上执行技能脚本，回传 stdout/stderr/退出码。"""
 
     def __init__(self, client: SkillClient) -> None:
         super().__init__(
             name="run_skill_script",
             description=(
-                "Execute a script belonging to a skill in a sandbox and return its output. "
+                "Execute a script belonging to a skill and return its output. "
                 "Use read_skill first to learn the correct script_relative_path and args."
             ),
         )

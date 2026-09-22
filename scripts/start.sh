@@ -9,8 +9,8 @@ Usage: scripts/start.sh [chat|skill]
 
   chat   Start the Gradio chat console (apps/chat_console/app.py). Default.
   skill  Start the skill FastAPI service (packages/skill) via uvicorn.
-         Requires Docker running (it sandboxes skill-script execution
-         in containers).
+         Skill scripts run as local subprocesses (a proper sandbox will
+         be reintroduced separately later).
 
 packages/core/model_client.py loads MODEL_PROVIDER/MODEL_API_KEY/MODEL_NAME/...
 from .env itself (see .env.example) — values already in your shell
@@ -44,9 +44,4 @@ if [ "$target" = "chat" ]; then
 fi
 
 # target == skill
-if ! docker info >/dev/null 2>&1; then
-  echo "error: docker isn't running — the skill service needs it to sandbox script execution" >&2
-  exit 1
-fi
-
 exec env PYTHONPATH=packages uv run uvicorn skill.main:app --host 0.0.0.0 --port 8000

@@ -1,10 +1,9 @@
 const fs = require("node:fs");
 
 function main() {
-  let content = "";
-  try {
-    content = fs.readFileSync("/scratch/input.txt", "utf-8");
-  } catch {
+  // 输入契约：要转换的文本从 stdin 读（由 run-script 接口的 input_text 字段喂进来）。
+  const content = fs.readFileSync(0, "utf-8");
+  if (!content.trim()) {
     console.log("no input provided");
     return;
   }

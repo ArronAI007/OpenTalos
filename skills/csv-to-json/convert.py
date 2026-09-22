@@ -5,10 +5,9 @@ import sys
 
 
 def main() -> None:
-    try:
-        with open("/scratch/input.txt", "r", encoding="utf-8") as f:
-            content = f.read()
-    except FileNotFoundError:
+    # 输入契约：要转换的 CSV 内容从 stdin 读（由 run-script 接口的 input_text 字段喂进来）。
+    content = sys.stdin.read()
+    if not content.strip():
         print(json.dumps({"error": "no input provided"}))
         sys.exit(1)
 
