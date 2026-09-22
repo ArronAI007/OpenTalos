@@ -1,3 +1,4 @@
+import asyncio
 from typing import Any
 from unittest.mock import Mock
 
@@ -16,6 +17,18 @@ class _EchoTool(Tool):
 
     async def acall(self, arguments: dict[str, Any]) -> ToolOutcome:
         return ToolOutcome.ok(arguments["text"])
+
+
+class _SlowTool(Tool):
+    def __init__(self) -> None:
+        super().__init__(name="slow", description="Never returns before the timeout.")
+
+    def parameters(self) -> list[ToolParameter]:
+        return []
+
+    async def acall(self, arguments: dict[str, Any]) -> ToolOutcome:
+        await asyncio.sleep(10)
+        return ToolOutcome.ok("too late")
 
 
 class _BrokenTool(Tool):
@@ -126,3 +139,24 @@ async def test_acall_does_not_record_on_the_circuit_breaker_for_validation_failu
     await registry.acall("echo", {})
 
     breaker.record.assert_not_called()
+
+
+async def test_acall_times_out_a_tool_that_exceeds_the_configured_timeout():
+    registry = ToolRegistry(timeout_seconds=0.01)
+    registry.register(_SlowTool())
+
+    outcome = await registry.acall("slow", {})
+
+    assert outcome.succeeded is False
+    assert outcome.failure_code == FailureCode.TIMEOUT
+
+
+async def test_acall_does_not_record_timeout_failures_as_circuit_breaker_successes():
+    breaker = Mock(spec=CircuitBreaker)
+    breaker.allow.return_value = True
+    registry = ToolRegistry(circuit_breaker=breaker, timeout_seconds=0.01)
+    registry.register(_SlowTool())
+
+    await registry.acall("slow", {})
+
+    breaker.record.assert_called_once_with("slow", success=False)

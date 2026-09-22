@@ -1,3 +1,4 @@
+import asyncio
 import time
 from typing import Any
 
@@ -7,9 +8,10 @@ from .tool import Tool
 
 
 class ToolRegistry:
-    def __init__(self, circuit_breaker: CircuitBreaker | None = None) -> None:
+    def __init__(self, circuit_breaker: CircuitBreaker | None = None, timeout_seconds: float | None = None) -> None:
         self._tools: dict[str, Tool] = {}
         self._circuit_breaker = circuit_breaker
+        self._timeout_seconds = timeout_seconds
 
     def register(self, tool: Tool) -> None:
         self._tools[tool.name] = tool
@@ -40,7 +42,16 @@ class ToolRegistry:
 
         start = time.monotonic()
         try:
-            outcome = await tool.acall(arguments)
+            if self._timeout_seconds is not None:
+                outcome = await asyncio.wait_for(tool.acall(arguments), timeout=self._timeout_seconds)
+            else:
+                outcome = await tool.acall(arguments)
+        except asyncio.TimeoutError:
+            outcome = ToolOutcome.error(
+                f'Tool "{name}" timed out after {self._timeout_seconds}s',
+                code=FailureCode.TIMEOUT,
+                duration_ms=int((time.monotonic() - start) * 1000),
+            )
         except Exception as error:
             outcome = ToolOutcome.error(str(error), duration_ms=int((time.monotonic() - start) * 1000))
         else:

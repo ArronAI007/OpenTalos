@@ -23,6 +23,7 @@ class ToolCallingAgent(Agent):
         context_config: AssemblyConfig | None = None,
         min_retain_turns: int = 10,
         trace_dir: str | None = None,
+        compaction_token_limit: int | None = None,
     ) -> None:
         super().__init__(
             name,
@@ -32,6 +33,7 @@ class ToolCallingAgent(Agent):
             context_config,
             min_retain_turns,
             trace_dir,
+            compaction_token_limit,
         )
         self.tool_registry = tool_registry
         self.max_tool_iterations = max_tool_iterations
@@ -44,4 +46,5 @@ class ToolCallingAgent(Agent):
 
         self.record_message(ChatMessage(content=input_text, role="user"))
         self.record_message(ChatMessage(content=answer, role="assistant"))
+        await self.maybe_compress_history()
         return answer

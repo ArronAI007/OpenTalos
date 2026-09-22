@@ -1,5 +1,6 @@
 import asyncio
 import os
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, AsyncIterator, Iterator
 
@@ -80,6 +81,18 @@ class ModelClient:
         call_kwargs = self._build_call_kwargs(kwargs)
         call_kwargs["tool_choice"] = tool_choice
         return await self._backend.acomplete_with_tools(messages, tools, **call_kwargs)
+
+    async def astream_with_tools(
+        self,
+        messages: list[dict],
+        tools: list[dict],
+        tool_choice: str | dict = "auto",
+        on_text_delta: Callable[[str], Awaitable[None]] | None = None,
+        **kwargs: Any,
+    ) -> ToolCompletion:
+        call_kwargs = self._build_call_kwargs(kwargs)
+        call_kwargs["tool_choice"] = tool_choice
+        return await self._backend.astream_with_tools(messages, tools, on_text_delta=on_text_delta, **call_kwargs)
 
     def complete(self, messages: list[dict], **kwargs: Any) -> Completion:
         return asyncio.run(self.acomplete(messages, **kwargs))

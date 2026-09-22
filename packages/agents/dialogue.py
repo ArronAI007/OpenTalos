@@ -1,10 +1,15 @@
+import asyncio
 import json
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from core.agent import RunRecorder
-from core.completion import ToolInvocation
+from core.cancellation import CancellationToken
+from core.completion import ToolCompletion, ToolInvocation
 from core.model_client import ModelClient
 from tool.registry import ToolRegistry
+
+ToolInvocationHandler = Callable[[ToolInvocation], Awaitable[dict[str, str]]]
 
 
 def seed_messages(system_prompt: str | None, history: list[Any], user_text: str) -> list[dict[str, Any]]:
@@ -53,46 +58,127 @@ async def resolve_tool_call(
     return message
 
 
+def _record_usage(cancellation: CancellationToken | None, usage: dict[str, int]) -> None:
+    if cancellation is not None:
+        cancellation.record_tokens(usage.get("total_tokens", 0))
+
+
+async def _complete_text(
+    model_client: ModelClient,
+    messages: list[dict[str, Any]],
+    on_text_delta: Callable[[str], Awaitable[None]] | None,
+    **kwargs: Any,
+) -> tuple[str, dict[str, int]]:
+    """纯文本补全（不带工具schema）。on_text_delta 为空时走原来的 acomplete；给了回调就换成
+    astream 逐块转发，再拼回完整文本——两条路径对调用方都返回同样的 (text, token_usage)。"""
+    if on_text_delta is None:
+        completion = await model_client.acomplete(messages, **kwargs)
+        return completion.text, completion.token_usage
+
+    parts: list[str] = []
+    async for chunk in model_client.astream(messages, **kwargs):
+        parts.append(chunk)
+        await on_text_delta(chunk)
+    usage = model_client.last_stream_summary.token_usage if model_client.last_stream_summary else {}
+    return "".join(parts), usage
+
+
+async def execute_model_step(
+    model_client: ModelClient,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    *,
+    recorder: RunRecorder | None = None,
+    step: int | None = None,
+    on_text_delta: Callable[[str], Awaitable[None]] | None = None,
+    cancellation: CancellationToken | None = None,
+    handle_invocation: ToolInvocationHandler,
+    **kwargs: Any,
+) -> ToolCompletion:
+    """带工具 schema 的单步：调一次模型 -> 有工具请求就并行执行并把结果追加回 messages。
+
+    是 run_tool_turn 和 ReActAgent 共用的最小单元——两者的循环终止条件不同（前者是"没有
+    工具调用了"，后者还多一个"模型调了 finish"），但每一步"调模型 -> 记录 -> 并行跑工具 ->
+    回填消息"的动作完全一样，抽成这一个函数避免两边各写一遍。handle_invocation 由调用方给，
+    run_tool_turn 传 resolve_tool_call，ReActAgent 传自己的版本以拦截 finish 调用。
+
+    每次拿到模型响应都会把它的 token_usage 喂给 cancellation.record_tokens——如果 token 传的
+    是带 timeout_seconds/token_budget 的 CancellationToken，下一次检查点就会因为超时/超预算
+    而自然终止整个循环，不需要调用方另外传参数。
+    """
+    if cancellation is not None:
+        cancellation.raise_if_cancelled()
+
+    if on_text_delta is not None:
+        completion = await model_client.astream_with_tools(messages, tools, on_text_delta=on_text_delta, **kwargs)
+    else:
+        completion = await model_client.acomplete_with_tools(messages, tools, **kwargs)
+    _record_usage(cancellation, completion.token_usage)
+    if recorder:
+        recorder.log_event(
+            "model_output",
+            {"content": completion.text, "tool_calls": len(completion.requested_tools), "usage": completion.token_usage},
+            step=step,
+        )
+    if not completion.requested_tools:
+        return completion
+
+    messages.append(build_reply_message(completion.text, completion.requested_tools))
+    if cancellation is not None:
+        cancellation.raise_if_cancelled()
+    results = await asyncio.gather(*(handle_invocation(invocation) for invocation in completion.requested_tools))
+    messages.extend(results)
+    return completion
+
+
 async def run_tool_turn(
     model_client: ModelClient,
     messages: list[dict[str, Any]],
     tool_registry: ToolRegistry | None,
     max_iterations: int,
     recorder: RunRecorder | None = None,
+    on_text_delta: Callable[[str], Awaitable[None]] | None = None,
+    cancellation: CancellationToken | None = None,
     **kwargs: Any,
 ) -> str:
     """调用 LLM -> 按需执行工具 -> 把结果喂回去，直到模型不再请求工具或用光 max_iterations。
 
     messages 会被原地追加 assistant/tool 消息，调用方可以在返回后继续复用它。recorder 不为空
-    时，每次模型调用和每次工具调用/结果都会记一条 trace 事件。
+    时，每次模型调用和每次工具调用/结果都会记一条 trace 事件。on_text_delta 不为空时用流式
+    调用逐块转发文本增量。cancellation 不为空时，每次发起下一次模型调用/工具批次之前检查一次
+    ——已经在执行的工具调用不会被腰斩，只影响"是否发起下一步"。
     """
     if tool_registry is None:
-        completion = await model_client.acomplete(messages, **kwargs)
+        if cancellation is not None:
+            cancellation.raise_if_cancelled()
+        text, usage = await _complete_text(model_client, messages, on_text_delta, **kwargs)
+        _record_usage(cancellation, usage)
         if recorder:
-            recorder.log_event("model_output", {"content": completion.text, "usage": completion.token_usage})
-        return completion.text
+            recorder.log_event("model_output", {"content": text, "usage": usage})
+        return text
 
     tools = tool_registry.function_schemas()
+
+    async def handle_invocation(invocation: ToolInvocation) -> dict[str, str]:
+        return await resolve_tool_call(tool_registry, invocation, recorder, step)
+
     for step in range(1, max_iterations + 1):
-        completion = await model_client.acomplete_with_tools(messages, tools, **kwargs)
-        if recorder:
-            recorder.log_event(
-                "model_output",
-                {
-                    "content": completion.text,
-                    "tool_calls": len(completion.requested_tools),
-                    "usage": completion.token_usage,
-                },
-                step=step,
-            )
+        completion = await execute_model_step(
+            model_client,
+            messages,
+            tools,
+            recorder=recorder,
+            step=step,
+            on_text_delta=on_text_delta,
+            cancellation=cancellation,
+            handle_invocation=handle_invocation,
+            **kwargs,
+        )
         if not completion.requested_tools:
             return completion.text or ""
 
-        messages.append(build_reply_message(completion.text, completion.requested_tools))
-        for invocation in completion.requested_tools:
-            messages.append(await resolve_tool_call(tool_registry, invocation, recorder, step))
-
-    fallback = await model_client.acomplete(messages, **kwargs)
+    fallback_text, fallback_usage = await _complete_text(model_client, messages, on_text_delta, **kwargs)
+    _record_usage(cancellation, fallback_usage)
     if recorder:
-        recorder.log_event("model_output", {"content": fallback.text, "note": "fallback after max_iterations"})
-    return fallback.text
+        recorder.log_event("model_output", {"content": fallback_text, "note": "fallback after max_iterations"})
+    return fallback_text

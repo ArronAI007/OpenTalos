@@ -12,3 +12,7 @@ class ModelError(CoreError):
 
 class AgentRuntimeError(CoreError):
     pass
+
+
+class OperationCancelled(AgentRuntimeError):
+    pass

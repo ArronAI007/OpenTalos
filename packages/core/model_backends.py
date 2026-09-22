@@ -1,7 +1,7 @@
 import json
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any, AsyncIterator
 
 from anthropic import AsyncAnthropic
@@ -27,6 +27,16 @@ class ModelBackend(ABC):
 
     @abstractmethod
     async def acomplete_with_tools(self, messages: list[dict], tools: list[dict], **kwargs: Any) -> ToolCompletion: ...
+
+    @abstractmethod
+    async def astream_with_tools(
+        self,
+        messages: list[dict],
+        tools: list[dict],
+        *,
+        on_text_delta: Callable[[str], Awaitable[None]] | None = None,
+        **kwargs: Any,
+    ) -> ToolCompletion: ...
 
 
 class FakeModelBackend(ModelBackend):
@@ -67,6 +77,26 @@ class FakeModelBackend(ModelBackend):
 
     async def acomplete_with_tools(self, messages: list[dict], tools: list[dict], **kwargs: Any) -> ToolCompletion:
         response = self._resolve_response(messages)
+        return ToolCompletion(
+            text=response.text,
+            requested_tools=[],
+            model_id=response.model_id,
+            token_usage=response.token_usage,
+            duration_ms=response.duration_ms,
+        )
+
+    async def astream_with_tools(
+        self,
+        messages: list[dict],
+        tools: list[dict],
+        *,
+        on_text_delta: Callable[[str], Awaitable[None]] | None = None,
+        **kwargs: Any,
+    ) -> ToolCompletion:
+        response = self._resolve_response(messages)
+        if on_text_delta is not None:
+            for char in response.text:
+                await on_text_delta(char)
         return ToolCompletion(
             text=response.text,
             requested_tools=[],
@@ -140,6 +170,61 @@ class OpenAICompatibleBackend(ModelBackend):
             requested_tools=requested_tools,
             model_id=self.model_name,
             token_usage=self._extract_usage(response.usage),
+            duration_ms=duration_ms,
+        )
+
+    async def astream_with_tools(
+        self,
+        messages: list[dict],
+        tools: list[dict],
+        *,
+        tool_choice: str | dict = "auto",
+        on_text_delta: Callable[[str], Awaitable[None]] | None = None,
+        **kwargs: Any,
+    ) -> ToolCompletion:
+        # 逐 chunk 累积文本增量和按 index 分片的 tool_call 增量（OpenAI 流式协议里，一次 tool_call
+        # 的 name/arguments 会拆成多个 delta 陆续吐出，要按 index 拼回一个完整调用）。没有
+        # stream_options={"include_usage": True}，因为不是所有 openai-compatible 供应商都支持它；
+        # 跟现有的 astream() 一样，流式路径下 token_usage 留空。
+        start = time.monotonic()
+        stream = await self._client.chat.completions.create(
+            model=self.model_name, messages=messages, tools=tools, tool_choice=tool_choice, stream=True, **kwargs
+        )
+        text_parts: list[str] = []
+        pending_calls: dict[int, dict[str, str | None]] = {}
+        async for chunk in stream:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            content = getattr(delta, "content", None)
+            if content:
+                text_parts.append(content)
+                if on_text_delta is not None:
+                    await on_text_delta(content)
+            for call_delta in getattr(delta, "tool_calls", None) or []:
+                entry = pending_calls.setdefault(call_delta.index, {"id": None, "name": None, "arguments": ""})
+                if call_delta.id:
+                    entry["id"] = call_delta.id
+                function = call_delta.function
+                if function is not None:
+                    if function.name:
+                        entry["name"] = function.name
+                    if function.arguments:
+                        entry["arguments"] = (entry["arguments"] or "") + function.arguments
+        duration_ms = int((time.monotonic() - start) * 1000)
+        requested_tools = [
+            ToolInvocation(
+                call_id=pending_calls[index]["id"],
+                tool_name=pending_calls[index]["name"],
+                arguments_json=pending_calls[index]["arguments"] or "{}",
+            )
+            for index in sorted(pending_calls)
+        ]
+        return ToolCompletion(
+            text="".join(text_parts) or None,
+            requested_tools=requested_tools,
+            model_id=self.model_name,
+            token_usage={},
             duration_ms=duration_ms,
         )
 
@@ -235,6 +320,48 @@ class ClaudeBackend(ModelBackend):
             requested_tools=requested_tools,
             model_id=self.model_name,
             token_usage=self._extract_usage(response.usage),
+            duration_ms=duration_ms,
+        )
+
+    async def astream_with_tools(
+        self,
+        messages: list[dict],
+        tools: list[dict],
+        *,
+        max_tokens: int = 4096,
+        tool_choice: str | dict = "auto",
+        on_text_delta: Callable[[str], Awaitable[None]] | None = None,
+        **kwargs: Any,
+    ) -> ToolCompletion:
+        # Anthropic 的流式 SDK 已经把 tool_use 块的增量 JSON 拼好了，get_final_message() 拿到的
+        # content 数组跟非流式 acomplete_with_tools 的响应形状一致，直接复用同一套解析逻辑即可。
+        start = time.monotonic()
+        system_prompt, rest = self._extract_system_prompt(messages)
+        async with self._client.messages.stream(
+            model=self.model_name,
+            max_tokens=max_tokens,
+            system=system_prompt,
+            messages=rest,
+            tools=tools,
+            tool_choice=self._to_backend_tool_choice(tool_choice),
+            **kwargs,
+        ) as stream:
+            async for text in stream.text_stream:
+                if on_text_delta is not None:
+                    await on_text_delta(text)
+            final = await stream.get_final_message()
+        duration_ms = int((time.monotonic() - start) * 1000)
+        text = "".join(block.text for block in final.content if block.type == "text") or None
+        requested_tools = [
+            ToolInvocation(call_id=block.id, tool_name=block.name, arguments_json=json.dumps(block.input))
+            for block in final.content
+            if block.type == "tool_use"
+        ]
+        return ToolCompletion(
+            text=text,
+            requested_tools=requested_tools,
+            model_id=self.model_name,
+            token_usage=self._extract_usage(final.usage),
             duration_ms=duration_ms,
         )
 

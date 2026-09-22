@@ -1,6 +1,17 @@
+import asyncio
+
+import pytest
+
+from core.cancellation import CancellationToken
 from core.chat_message import ChatMessage
 from core.completion import Completion, ToolCompletion, ToolInvocation
-from agents.dialogue import build_reply_message, run_tool_turn, seed_messages
+from core.errors import OperationCancelled
+from core.model_backends import FakeModelBackend
+from core.model_client import ModelClient
+from tool.outcome import ToolOutcome
+from tool.registry import ToolRegistry
+from tool.tool import Tool, ToolParameter
+from agents.dialogue import build_reply_message, execute_model_step, run_tool_turn, seed_messages
 
 
 def test_seed_messages_includes_system_history_and_query():
@@ -90,3 +101,224 @@ async def test_run_tool_turn_reports_invalid_tool_arguments(scripted_client, ech
     tool_message = messages[-1]
     assert tool_message["role"] == "tool"
     assert "Invalid arguments" in tool_message["content"]
+
+
+async def test_execute_model_step_returns_completion_without_touching_messages_when_no_tools_requested(scripted_client):
+    client = scripted_client(tool_completions=[ToolCompletion(text="direct answer", requested_tools=[], model_id="mock")])
+    messages = [{"role": "user", "content": "hi"}]
+
+    async def handle_invocation(invocation):
+        raise AssertionError("should not be called when no tools were requested")
+
+    completion = await execute_model_step(client, messages, [], handle_invocation=handle_invocation)
+
+    assert completion.text == "direct answer"
+    assert messages == [{"role": "user", "content": "hi"}]
+
+
+async def test_execute_model_step_appends_assistant_and_tool_messages_via_the_given_handler():
+    client = ModelClient(provider="mock")
+
+    async def fake_acomplete_with_tools(messages, tools, tool_choice="auto", **kwargs):
+        return ToolCompletion(
+            text=None,
+            requested_tools=[ToolInvocation(call_id="c1", tool_name="custom", arguments_json="{}")],
+            model_id="mock",
+        )
+
+    client.acomplete_with_tools = fake_acomplete_with_tools
+    messages: list[dict] = [{"role": "user", "content": "hi"}]
+    handled: list[str] = []
+
+    async def handle_invocation(invocation):
+        handled.append(invocation.call_id)
+        return {"role": "tool", "tool_call_id": invocation.call_id, "content": "handled"}
+
+    completion = await execute_model_step(client, messages, [], handle_invocation=handle_invocation)
+
+    assert handled == ["c1"]
+    assert len(completion.requested_tools) == 1
+    assert messages[-2]["role"] == "assistant"
+    assert messages[-1] == {"role": "tool", "tool_call_id": "c1", "content": "handled"}
+
+
+async def test_execute_model_step_raises_when_already_cancelled():
+    client = ModelClient(provider="mock")
+    token = CancellationToken()
+    token.cancel()
+
+    async def handle_invocation(invocation):
+        raise AssertionError("should not be reached")
+
+    with pytest.raises(OperationCancelled):
+        await execute_model_step(
+            client, [{"role": "user", "content": "hi"}], [], cancellation=token, handle_invocation=handle_invocation
+        )
+
+
+async def test_run_tool_turn_streams_text_when_no_registry_and_on_text_delta_is_given():
+    client = ModelClient(provider="mock")
+    client._backend = FakeModelBackend(model_name="mock-model", response=Completion(text="hello world", model_id="mock"))
+    seen: list[str] = []
+
+    async def collect(chunk: str) -> None:
+        seen.append(chunk)
+
+    answer = await run_tool_turn(client, [{"role": "user", "content": "hi"}], None, 3, on_text_delta=collect)
+
+    assert answer == "hello world"
+    assert "".join(seen) == "hello world"
+
+
+async def test_run_tool_turn_uses_streaming_backend_call_when_tools_and_on_text_delta_are_given(echo_tool_registry):
+    client = ModelClient(provider="mock")
+
+    async def fake_astream_with_tools(messages, tools, tool_choice="auto", on_text_delta=None, **kwargs):
+        if on_text_delta is not None:
+            await on_text_delta("partial")
+        return ToolCompletion(text="partial", requested_tools=[], model_id="mock")
+
+    client.astream_with_tools = fake_astream_with_tools
+
+    seen: list[str] = []
+
+    async def collect(chunk: str) -> None:
+        seen.append(chunk)
+
+    answer = await run_tool_turn(
+        client, [{"role": "user", "content": "hi"}], echo_tool_registry, 3, on_text_delta=collect
+    )
+
+    assert answer == "partial"
+    assert seen == ["partial"]
+
+
+async def test_run_tool_turn_raises_when_already_cancelled_without_a_registry():
+    client = ModelClient(provider="mock")
+    token = CancellationToken()
+    token.cancel()
+
+    with pytest.raises(OperationCancelled):
+        await run_tool_turn(client, [{"role": "user", "content": "hi"}], None, 3, cancellation=token)
+
+
+async def test_run_tool_turn_raises_when_already_cancelled_with_a_registry(echo_tool_registry):
+    client = ModelClient(provider="mock")
+    token = CancellationToken()
+    token.cancel()
+
+    with pytest.raises(OperationCancelled):
+        await run_tool_turn(client, [{"role": "user", "content": "hi"}], echo_tool_registry, 3, cancellation=token)
+
+
+async def test_run_tool_turn_executes_multiple_tool_calls_from_one_batch_concurrently(scripted_client, echo_tool_registry):
+    client = scripted_client(
+        tool_completions=[
+            ToolCompletion(
+                text=None,
+                requested_tools=[
+                    ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text": "one"}'),
+                    ToolInvocation(call_id="c2", tool_name="echo", arguments_json='{"text": "two"}'),
+                ],
+                model_id="mock",
+            ),
+            ToolCompletion(text="done", requested_tools=[], model_id="mock"),
+        ]
+    )
+    messages: list[dict] = [{"role": "user", "content": "echo both"}]
+
+    answer = await run_tool_turn(client, messages, echo_tool_registry, 3)
+
+    assert answer == "done"
+    tool_messages = [m for m in messages if m["role"] == "tool"]
+    assert [m["tool_call_id"] for m in tool_messages] == ["c1", "c2"]
+    assert [m["content"] for m in tool_messages] == ["echoed: one", "echoed: two"]
+
+
+async def test_run_tool_turn_stops_once_the_shared_token_budget_is_exceeded(echo_tool_registry):
+    client = ModelClient(provider="mock")
+    call_count = {"n": 0}
+
+    async def fake_acomplete_with_tools(messages, tools, tool_choice="auto", **kwargs):
+        call_count["n"] += 1
+        return ToolCompletion(
+            text=None,
+            requested_tools=[
+                ToolInvocation(call_id=f"c{call_count['n']}", tool_name="echo", arguments_json='{"text": "hi"}')
+            ],
+            model_id="mock",
+            token_usage={"total_tokens": 60},
+        )
+
+    client.acomplete_with_tools = fake_acomplete_with_tools
+    token = CancellationToken(token_budget=100)
+
+    with pytest.raises(OperationCancelled, match="token budget"):
+        await run_tool_turn(client, [{"role": "user", "content": "hi"}], echo_tool_registry, 10, cancellation=token)
+
+    # 第一步花掉 60 token（未超预算，那批工具正常执行），第二步再花 60（累计 120 > 100）——
+    # 应该在发起第三次模型调用、或者跑第二批工具之前就被挡住，而不是无限循环到 max_iterations。
+    assert call_count["n"] == 2
+
+
+async def test_run_tool_turn_stops_once_the_shared_timeout_elapses(echo_tool_registry):
+    client = ModelClient(provider="mock")
+
+    async def fake_acomplete_with_tools(messages, tools, tool_choice="auto", **kwargs):
+        await asyncio.sleep(0.02)
+        return ToolCompletion(
+            text=None,
+            requested_tools=[ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text": "hi"}')],
+            model_id="mock",
+        )
+
+    client.acomplete_with_tools = fake_acomplete_with_tools
+    token = CancellationToken(timeout_seconds=0.01)
+
+    with pytest.raises(OperationCancelled, match="timeout"):
+        await run_tool_turn(client, [{"role": "user", "content": "hi"}], echo_tool_registry, 10, cancellation=token)
+
+
+async def test_run_tool_turn_runs_tool_calls_concurrently_not_sequentially():
+    started_order: list[str] = []
+    finished_order: list[str] = []
+
+    class _SlowTool(Tool):
+        def __init__(self) -> None:
+            super().__init__(name="slow", description="Sleeps for a variable amount of time.")
+
+        def parameters(self) -> list[ToolParameter]:
+            return [ToolParameter(name="name", type="string", description="Which invocation this is")]
+
+        async def acall(self, arguments):
+            name = arguments["name"]
+            started_order.append(name)
+            await asyncio.sleep(0.05 if name == "first" else 0.01)
+            finished_order.append(name)
+            return ToolOutcome.ok(name)
+
+    registry = ToolRegistry()
+    registry.register(_SlowTool())
+
+    client = ModelClient(provider="mock")
+
+    async def fake_acomplete_with_tools(messages, tools, tool_choice="auto", **kwargs):
+        if any(m.get("role") == "tool" for m in messages):
+            return ToolCompletion(text="done", requested_tools=[], model_id="mock")
+        return ToolCompletion(
+            text=None,
+            requested_tools=[
+                ToolInvocation(call_id="c1", tool_name="slow", arguments_json='{"name": "first"}'),
+                ToolInvocation(call_id="c2", tool_name="slow", arguments_json='{"name": "second"}'),
+            ],
+            model_id="mock",
+        )
+
+    client.acomplete_with_tools = fake_acomplete_with_tools
+
+    await run_tool_turn(client, [{"role": "user", "content": "go"}], registry, 3)
+
+    # 如果是串行执行，先启动、睡得更久的 "first" 会先结束；并行执行时后启动、睡得更短的
+    # "second" 反而先结束——用完成顺序反证两个工具调用确实是并发跑的。
+    assert started_order == ["first", "second"]
+    assert finished_order == ["second", "first"]

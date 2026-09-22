@@ -63,6 +63,20 @@ async def test_model_client_astream_updates_last_stream_summary():
     assert client.last_stream_summary is not None
 
 
+async def test_model_client_astream_with_tools_delegates_to_backend_and_forwards_deltas():
+    client = ModelClient(provider="mock")
+    client._backend = FakeModelBackend(model_name="mock-model", response=Completion(text="ab", model_id="mock-model"))
+    seen: list[str] = []
+
+    async def on_text_delta(chunk: str) -> None:
+        seen.append(chunk)
+
+    result = await client.astream_with_tools([{"role": "user", "content": "hi"}], tools=[], on_text_delta=on_text_delta)
+
+    assert seen == ["a", "b"]
+    assert result.text == "ab"
+
+
 def test_model_client_complete_sync_wrapper_matches_async_result():
     client = ModelClient(provider="mock")
     client._backend = FakeModelBackend(model_name="mock-model", response=Completion(text="hi", model_id="mock-model"))

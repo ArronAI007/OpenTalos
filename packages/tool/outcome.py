@@ -12,6 +12,7 @@ class FailureCode(Enum):
     EXECUTION_FAILED = "execution_failed"
     NOT_FOUND = "not_found"
     CIRCUIT_OPEN = "circuit_open"
+    TIMEOUT = "timeout"
 
 
 @dataclass

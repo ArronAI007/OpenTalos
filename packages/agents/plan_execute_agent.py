@@ -46,6 +46,7 @@ class PlanExecuteAgent(Agent):
         context_config: AssemblyConfig | None = None,
         min_retain_turns: int = 10,
         trace_dir: str | None = None,
+        compaction_token_limit: int | None = None,
     ) -> None:
         super().__init__(
             name,
@@ -55,6 +56,7 @@ class PlanExecuteAgent(Agent):
             context_config,
             min_retain_turns,
             trace_dir,
+            compaction_token_limit,
         )
         self.tool_registry = tool_registry
         self.max_tool_iterations = max_tool_iterations
@@ -66,9 +68,17 @@ class PlanExecuteAgent(Agent):
 
         self.record_message(ChatMessage(content=input_text, role="user"))
         self.record_message(ChatMessage(content=answer, role="assistant"))
+        await self.maybe_compress_history()
         return answer
 
     async def _plan(self, question: str, **kwargs: object) -> list[str]:
+        cancellation = kwargs.get("cancellation")
+        if cancellation is not None:
+            cancellation.raise_if_cancelled()
+
+        # propose_steps 是强制 function-call、无文本可流的规划阶段，cancellation/on_text_delta
+        # 只对后面 _run_steps 里的 run_tool_turn 调用有意义，这里要先摘掉再转发给后端。
+        backend_kwargs = {k: v for k, v in kwargs.items() if k not in ("cancellation", "on_text_delta")}
         messages = [
             {"role": "system", "content": self.system_prompt},
             {"role": "user", "content": f"Produce a step-by-step plan for:\n\n{question}"},
@@ -77,8 +87,10 @@ class PlanExecuteAgent(Agent):
             messages,
             [PROPOSE_STEPS_TOOL],
             tool_choice={"type": "function", "function": {"name": "propose_steps"}},
-            **kwargs,
+            **backend_kwargs,
         )
+        if cancellation is not None:
+            cancellation.record_tokens(completion.token_usage.get("total_tokens", 0))
         if not completion.requested_tools:
             steps = [question]
         else:

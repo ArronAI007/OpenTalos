@@ -44,6 +44,20 @@ async def test_fake_backend_acomplete_with_tools_returns_no_requested_tools():
     assert result.text == "hi"
 
 
+async def test_fake_backend_astream_with_tools_forwards_deltas_and_returns_full_text():
+    backend = FakeModelBackend(model_name="mock-model", response=Completion(text="ab", model_id="mock-model"))
+    seen: list[str] = []
+
+    async def on_text_delta(chunk: str) -> None:
+        seen.append(chunk)
+
+    result = await backend.astream_with_tools([{"role": "user", "content": "hi"}], tools=[], on_text_delta=on_text_delta)
+
+    assert seen == ["a", "b"]
+    assert result.text == "ab"
+    assert result.requested_tools == []
+
+
 def test_create_model_backend_returns_fake_backend_for_mock_provider():
     backend = create_model_backend("mock", api_key="mock", base_url=None, timeout=60, model_name="mock-model")
     assert isinstance(backend, FakeModelBackend)
@@ -108,6 +122,56 @@ async def test_openai_compatible_backend_astream_yields_delta_text(monkeypatch):
     chunks = [chunk async for chunk in backend.astream([{"role": "user", "content": "hi"}])]
     assert chunks == ["hel", "lo"]
     assert backend.last_stream_summary is not None
+
+
+async def test_openai_compatible_backend_astream_with_tools_forwards_text_and_accumulates_tool_calls(monkeypatch):
+    def _tool_call_delta(*, index, call_id=None, name=None, arguments=None):
+        function = SimpleNamespace(name=name, arguments=arguments) if (name or arguments) else None
+        return SimpleNamespace(index=index, id=call_id, function=function)
+
+    async def fake_stream():
+        yield SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="hel", tool_calls=None))])
+        yield SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    delta=SimpleNamespace(
+                        content=None,
+                        tool_calls=[_tool_call_delta(index=0, call_id="call_1", name="search", arguments='{"q":')],
+                    )
+                )
+            ]
+        )
+        yield SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    delta=SimpleNamespace(content=None, tool_calls=[_tool_call_delta(index=0, arguments='"x"}')])
+                )
+            ]
+        )
+
+    fake_client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=AsyncMock(return_value=fake_stream())))
+    )
+    monkeypatch.setattr("core.model_backends.AsyncOpenAI", lambda **kwargs: fake_client)
+
+    backend = OpenAICompatibleBackend(api_key="k", base_url=None, timeout=60, model_name="gpt-test")
+    seen: list[str] = []
+
+    async def on_text_delta(chunk: str) -> None:
+        seen.append(chunk)
+
+    result = await backend.astream_with_tools(
+        [{"role": "user", "content": "hi"}],
+        tools=[{"type": "function", "function": {"name": "search"}}],
+        on_text_delta=on_text_delta,
+    )
+
+    assert seen == ["hel"]
+    assert result.text == "hel"
+    assert len(result.requested_tools) == 1
+    assert result.requested_tools[0].call_id == "call_1"
+    assert result.requested_tools[0].tool_name == "search"
+    assert result.requested_tools[0].arguments_json == '{"q":"x"}'
 
 
 def test_create_model_backend_returns_openai_compatible_backend_for_that_provider(monkeypatch):
@@ -187,6 +251,31 @@ async def test_claude_backend_astream_yields_text_chunks(monkeypatch):
 
     assert chunks == ["he", "llo"]
     assert backend.last_stream_summary.token_usage == {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3}
+
+
+async def test_claude_backend_astream_with_tools_forwards_text_and_parses_tool_use_from_final_message(monkeypatch):
+    tool_block = SimpleNamespace(type="tool_use", id="call_1", name="search", input={"q": "x"})
+    final_message = _fake_claude_message("hello", tool_use_blocks=[tool_block])
+    fake_stream = _FakeClaudeStream(["he", "llo"], final_message.usage)
+    fake_stream.get_final_message = AsyncMock(return_value=final_message)
+    fake_client = SimpleNamespace(messages=SimpleNamespace(stream=Mock(return_value=fake_stream)))
+    monkeypatch.setattr("core.model_backends.AsyncAnthropic", lambda **kwargs: fake_client)
+
+    backend = ClaudeBackend(api_key="k", base_url=None, timeout=60, model_name="claude-test")
+    seen: list[str] = []
+
+    async def on_text_delta(chunk: str) -> None:
+        seen.append(chunk)
+
+    result = await backend.astream_with_tools(
+        [{"role": "user", "content": "hi"}], tools=[{"name": "search"}], on_text_delta=on_text_delta
+    )
+
+    assert seen == ["he", "llo"]
+    assert result.text == "hello"
+    assert len(result.requested_tools) == 1
+    assert result.requested_tools[0].tool_name == "search"
+    assert json.loads(result.requested_tools[0].arguments_json) == {"q": "x"}
 
 
 def test_create_model_backend_returns_claude_backend_for_anthropic_provider(monkeypatch):

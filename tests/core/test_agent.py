@@ -4,7 +4,9 @@ import pytest
 
 from core.agent import Agent
 from core.chat_message import ChatMessage
+from core.completion import Completion
 from core.events import PhaseSignal
+from core.model_backends import FakeModelBackend
 from core.model_client import ModelClient
 from core.settings import RuntimeSettings
 
@@ -142,3 +144,44 @@ def test_recorder_is_created_when_trace_dir_is_given(model_client, tmp_path):
     assert agent.recorder is not None
     agent.recorder.finalize()
     assert agent.recorder.jsonl_path.parent == tmp_path
+
+
+async def test_maybe_compress_history_is_a_noop_when_compaction_is_disabled(model_client):
+    agent = _EchoAgent(name="echo", model_client=model_client, min_retain_turns=1)
+    for i in range(4):
+        agent.record_message(ChatMessage(content=f"question {i}", role="user"))
+        agent.record_message(ChatMessage(content=f"answer {i}", role="assistant"))
+
+    changed = await agent.maybe_compress_history()
+
+    assert changed is False
+    assert len(agent.history_snapshot()) == 8
+
+
+async def test_maybe_compress_history_is_a_noop_below_the_token_limit(model_client):
+    agent = _EchoAgent(name="echo", model_client=model_client, min_retain_turns=1, compaction_token_limit=100_000)
+    agent.record_message(ChatMessage(content="hi", role="user"))
+    agent.record_message(ChatMessage(content="hello", role="assistant"))
+
+    changed = await agent.maybe_compress_history()
+
+    assert changed is False
+    assert len(agent.history_snapshot()) == 2
+
+
+async def test_maybe_compress_history_summarizes_and_folds_history_once_over_the_limit():
+    client = ModelClient(provider="mock")
+    client._backend = FakeModelBackend(
+        model_name="mock-model", response=Completion(text="condensed summary", model_id="mock-model")
+    )
+    agent = _EchoAgent(name="echo", model_client=client, min_retain_turns=1, compaction_token_limit=5)
+    for i in range(4):
+        agent.record_message(ChatMessage(content=f"question {i}", role="user"))
+        agent.record_message(ChatMessage(content=f"answer {i}", role="assistant"))
+
+    changed = await agent.maybe_compress_history()
+
+    assert changed is True
+    history = agent.history_snapshot()
+    assert history[0].role == "summary"
+    assert "condensed summary" in history[0].content

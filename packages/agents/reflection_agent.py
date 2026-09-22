@@ -29,6 +29,7 @@ class ReflectionAgent(Agent):
         context_config: AssemblyConfig | None = None,
         min_retain_turns: int = 10,
         trace_dir: str | None = None,
+        compaction_token_limit: int | None = None,
     ) -> None:
         super().__init__(
             name,
@@ -38,6 +39,7 @@ class ReflectionAgent(Agent):
             context_config,
             min_retain_turns,
             trace_dir,
+            compaction_token_limit,
         )
         self.tool_registry = tool_registry
         self.max_rounds = max_rounds
@@ -59,6 +61,7 @@ class ReflectionAgent(Agent):
 
         self.record_message(ChatMessage(content=input_text, role="user"))
         self.record_message(ChatMessage(content=attempt, role="assistant"))
+        await self.maybe_compress_history()
         return attempt
 
     async def _call(self, phase: str, user_text: str, **kwargs: object) -> str:

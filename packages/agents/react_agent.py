@@ -1,14 +1,16 @@
 import json
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from core.agent import Agent, AssemblyConfig
+from core.cancellation import CancellationToken
 from core.chat_message import ChatMessage
 from core.completion import ToolInvocation
 from core.model_client import ModelClient
 from core.settings import RuntimeSettings
 from tool.registry import ToolRegistry
 
-from .dialogue import build_reply_message, resolve_tool_call, seed_messages
+from .dialogue import execute_model_step, resolve_tool_call, seed_messages
 
 FINISH_TOOL_NAME = "finish"
 
@@ -47,6 +49,7 @@ class ReActAgent(Agent):
         context_config: AssemblyConfig | None = None,
         min_retain_turns: int = 10,
         trace_dir: str | None = None,
+        compaction_token_limit: int | None = None,
     ) -> None:
         super().__init__(
             name,
@@ -56,6 +59,7 @@ class ReActAgent(Agent):
             context_config,
             min_retain_turns,
             trace_dir,
+            compaction_token_limit,
         )
         self.tool_registry = tool_registry
         self.max_steps = max_steps
@@ -65,34 +69,37 @@ class ReActAgent(Agent):
         return [FINISH_TOOL_SCHEMA, *extra]
 
     async def arespond(self, input_text: str, **kwargs: object) -> str:
+        cancellation: CancellationToken | None = kwargs.pop("cancellation", None)
+        on_text_delta: Callable[[str], Awaitable[None]] | None = kwargs.pop("on_text_delta", None)
         messages = seed_messages(self.system_prompt, self.history_snapshot(), input_text)
         tools = self._tool_schemas()
         answer: str | None = None
 
         for step in range(1, self.max_steps + 1):
-            completion = await self.model_client.acomplete_with_tools(messages, tools, **kwargs)
-            if self.recorder:
-                self.recorder.log_event(
-                    "model_output",
-                    {"content": completion.text, "tool_calls": len(completion.requested_tools), "usage": completion.token_usage},
-                    step=step,
-                )
+
+            async def handle_invocation(invocation: ToolInvocation, step: int = step) -> dict[str, str]:
+                return await self._handle(invocation, step)
+
+            completion = await execute_model_step(
+                self.model_client,
+                messages,
+                tools,
+                recorder=self.recorder,
+                step=step,
+                on_text_delta=on_text_delta,
+                cancellation=cancellation,
+                handle_invocation=handle_invocation,
+                **kwargs,
+            )
             if not completion.requested_tools:
                 answer = completion.text or ""
                 break
 
-            messages.append(build_reply_message(completion.text, completion.requested_tools))
-            finished = False
-            for invocation in completion.requested_tools:
-                if invocation.tool_name == FINISH_TOOL_NAME:
-                    answer = _read_final_answer(invocation)
-                    if self.recorder:
-                        self.recorder.log_event("finish", {"final_answer": answer}, step=step)
-                    messages.append({"role": "tool", "tool_call_id": invocation.call_id, "content": "acknowledged"})
-                    finished = True
-                    continue
-                messages.append(await self._resolve(invocation, step))
-            if finished:
+            finish_calls = [inv for inv in completion.requested_tools if inv.tool_name == FINISH_TOOL_NAME]
+            if finish_calls:
+                answer = _read_final_answer(finish_calls[-1])
+                if self.recorder:
+                    self.recorder.log_event("finish", {"final_answer": answer}, step=step)
                 break
 
         if answer is None:
@@ -100,7 +107,13 @@ class ReActAgent(Agent):
 
         self.record_message(ChatMessage(content=input_text, role="user"))
         self.record_message(ChatMessage(content=answer, role="assistant"))
+        await self.maybe_compress_history()
         return answer
+
+    async def _handle(self, invocation: ToolInvocation, step: int) -> dict[str, str]:
+        if invocation.tool_name == FINISH_TOOL_NAME:
+            return {"role": "tool", "tool_call_id": invocation.call_id, "content": "acknowledged"}
+        return await self._resolve(invocation, step)
 
     async def _resolve(self, invocation: ToolInvocation, step: int) -> dict[str, str]:
         if self.tool_registry is None:
