@@ -1,0 +1,18 @@
+@import "tailwindcss";
+
+@theme {
+  --color-surface: #ffffff;
+  --color-sidebar: #f7f7f5;
+  --color-border: #e5e5e1;
+  --color-text: #1a1a18;
+  --color-text-secondary: #6f6f6a;
+  --color-accent: #4f46e5;
+  --color-user-bubble: #1a1a18;
+  --radius-composer: 16px;
+}
+
+body {
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-family: ui-sans-serif, system-ui, "PingFang SC", "Helvetica Neue", sans-serif;
+}
