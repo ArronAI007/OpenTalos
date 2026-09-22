@@ -1,13 +1,20 @@
+"""核心 Agent 运行时的执行原语：调模型 -> 解析文本/工具调用 -> 执行工具 -> 回填结果 ->
+再次调用模型，直到最终输出/取消/预算耗尽。这是四种 agents/*.py 具体策略共用的引擎部分——
+它们各自的差别只在"怎么拼下一轮 prompt"和"什么时候算结束"，不在这一层。
+"""
+
 import asyncio
 import json
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from core.agent import RunRecorder
-from core.cancellation import CancellationToken
-from core.completion import ToolCompletion, ToolInvocation
-from core.model_client import ModelClient
+from context import OutputTrimmer
+from observability import RunRecorder
 from tool.registry import ToolRegistry
+
+from .cancellation import CancellationToken
+from .protocol import ToolCompletion, ToolInvocation
+from .model import ModelClient
 
 ToolInvocationHandler = Callable[[ToolInvocation], Awaitable[dict[str, str]]]
 
@@ -37,8 +44,27 @@ def build_reply_message(text: str | None, requested_tools: list[ToolInvocation])
     }
 
 
+def _trim_output(trimmer: OutputTrimmer | None, tool_name: str, output: str) -> str:
+    """工具输出过长时只把预览回填给模型，并告诉它完整输出落在哪个文件里。"""
+    if trimmer is None:
+        return output
+
+    result = trimmer.trim(tool_name, output)
+    if not result.trimmed:
+        return result.preview
+    return (
+        f"{result.preview}\n\n"
+        f"[output truncated: {result.stats['original_lines']} lines / {result.stats['original_bytes']} bytes "
+        f"-> kept {result.stats['kept_lines']} lines. Full output saved to {result.full_output_path}]"
+    )
+
+
 async def resolve_tool_call(
-    tool_registry: ToolRegistry, invocation: ToolInvocation, recorder: RunRecorder | None = None, step: int | None = None
+    tool_registry: ToolRegistry,
+    invocation: ToolInvocation,
+    recorder: RunRecorder | None = None,
+    step: int | None = None,
+    trimmer: OutputTrimmer | None = None,
 ) -> dict[str, str]:
     if recorder:
         recorder.log_event("tool_call", {"tool_name": invocation.tool_name, "arguments": invocation.arguments_json}, step=step)
@@ -52,9 +78,10 @@ async def resolve_tool_call(
         return message
 
     outcome = await tool_registry.acall(invocation.tool_name, arguments)
-    message = {"role": "tool", "tool_call_id": invocation.call_id, "content": outcome.output}
+    content = _trim_output(trimmer, invocation.tool_name, outcome.output)
+    message = {"role": "tool", "tool_call_id": invocation.call_id, "content": content}
     if recorder:
-        recorder.log_event("tool_result", {"tool_name": invocation.tool_name, "result": outcome.output}, step=step)
+        recorder.log_event("tool_result", {"tool_name": invocation.tool_name, "result": content}, step=step)
     return message
 
 
@@ -139,6 +166,7 @@ async def run_tool_turn(
     recorder: RunRecorder | None = None,
     on_text_delta: Callable[[str], Awaitable[None]] | None = None,
     cancellation: CancellationToken | None = None,
+    trimmer: OutputTrimmer | None = None,
     **kwargs: Any,
 ) -> str:
     """调用 LLM -> 按需执行工具 -> 把结果喂回去，直到模型不再请求工具或用光 max_iterations。
@@ -146,7 +174,8 @@ async def run_tool_turn(
     messages 会被原地追加 assistant/tool 消息，调用方可以在返回后继续复用它。recorder 不为空
     时，每次模型调用和每次工具调用/结果都会记一条 trace 事件。on_text_delta 不为空时用流式
     调用逐块转发文本增量。cancellation 不为空时，每次发起下一次模型调用/工具批次之前检查一次
-    ——已经在执行的工具调用不会被腰斩，只影响"是否发起下一步"。
+    ——已经在执行的工具调用不会被腰斩，只影响"是否发起下一步"。trimmer 不为空时，超限的工具
+    输出只把预览回填给模型，完整内容落盘。
     """
     if tool_registry is None:
         if cancellation is not None:
@@ -160,7 +189,7 @@ async def run_tool_turn(
     tools = tool_registry.function_schemas()
 
     async def handle_invocation(invocation: ToolInvocation) -> dict[str, str]:
-        return await resolve_tool_call(tool_registry, invocation, recorder, step)
+        return await resolve_tool_call(tool_registry, invocation, recorder, step, trimmer)
 
     for step in range(1, max_iterations + 1):
         completion = await execute_model_step(

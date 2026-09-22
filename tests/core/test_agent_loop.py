@@ -2,16 +2,15 @@ import asyncio
 
 import pytest
 
+from context import OutputTrimmer
 from core.cancellation import CancellationToken
-from core.chat_message import ChatMessage
-from core.completion import Completion, ToolCompletion, ToolInvocation
+from core.protocol import ChatMessage, Completion, ToolCompletion, ToolInvocation
 from core.errors import OperationCancelled
-from core.model_backends import FakeModelBackend
-from core.model_client import ModelClient
+from core.model import FakeModelBackend, ModelClient
 from tool.outcome import ToolOutcome
 from tool.registry import ToolRegistry
 from tool.tool import Tool, ToolParameter
-from agents.dialogue import build_reply_message, execute_model_step, run_tool_turn, seed_messages
+from core.agent_loop import build_reply_message, execute_model_step, run_tool_turn, seed_messages
 
 
 def test_seed_messages_includes_system_history_and_query():
@@ -101,6 +100,72 @@ async def test_run_tool_turn_reports_invalid_tool_arguments(scripted_client, ech
     tool_message = messages[-1]
     assert tool_message["role"] == "tool"
     assert "Invalid arguments" in tool_message["content"]
+
+
+def _long_output_registry(line_count: int) -> ToolRegistry:
+    class _LongOutputTool(Tool):
+        def __init__(self) -> None:
+            super().__init__(name="long", description="Returns a lot of lines.")
+
+        def parameters(self) -> list[ToolParameter]:
+            return []
+
+        async def acall(self, arguments):
+            return ToolOutcome.ok("\n".join(f"line {i}" for i in range(line_count)))
+
+    registry = ToolRegistry()
+    registry.register(_LongOutputTool())
+    return registry
+
+
+def _one_long_tool_call() -> list[ToolCompletion]:
+    return [
+        ToolCompletion(
+            text=None,
+            requested_tools=[ToolInvocation(call_id="c1", tool_name="long", arguments_json="{}")],
+            model_id="mock",
+        ),
+        ToolCompletion(text="done", requested_tools=[], model_id="mock"),
+    ]
+
+
+async def test_run_tool_turn_feeds_back_the_full_tool_output_without_a_trimmer(scripted_client):
+    client = scripted_client(tool_completions=_one_long_tool_call())
+    messages: list[dict] = [{"role": "user", "content": "go"}]
+
+    await run_tool_turn(client, messages, _long_output_registry(50), 3)
+
+    tool_message = next(m for m in messages if m["role"] == "tool")
+    assert tool_message["content"].count("\n") == 49
+    assert "truncated" not in tool_message["content"]
+
+
+async def test_run_tool_turn_trims_oversized_tool_output_and_points_at_the_saved_file(scripted_client, tmp_path):
+    client = scripted_client(tool_completions=_one_long_tool_call())
+    trimmer = OutputTrimmer(max_lines=5, max_bytes=1_000_000, output_dir=str(tmp_path))
+    messages: list[dict] = [{"role": "user", "content": "go"}]
+
+    await run_tool_turn(client, messages, _long_output_registry(50), 3, trimmer=trimmer)
+
+    content = next(m for m in messages if m["role"] == "tool")["content"]
+    assert content.startswith("line 0\nline 1")
+    assert "line 40" not in content
+    assert "output truncated: 50 lines" in content
+    saved = list(tmp_path.glob("long_*.json"))
+    assert len(saved) == 1
+    assert "line 49" in saved[0].read_text(encoding="utf-8")
+
+
+async def test_run_tool_turn_leaves_short_tool_output_untouched_even_with_a_trimmer(scripted_client, tmp_path):
+    client = scripted_client(tool_completions=_one_long_tool_call())
+    trimmer = OutputTrimmer(max_lines=100, max_bytes=1_000_000, output_dir=str(tmp_path))
+    messages: list[dict] = [{"role": "user", "content": "go"}]
+
+    await run_tool_turn(client, messages, _long_output_registry(3), 3, trimmer=trimmer)
+
+    content = next(m for m in messages if m["role"] == "tool")["content"]
+    assert content == "line 0\nline 1\nline 2"
+    assert list(tmp_path.glob("*.json")) == []
 
 
 async def test_execute_model_step_returns_completion_without_touching_messages_when_no_tools_requested(scripted_client):

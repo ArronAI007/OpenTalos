@@ -1,5 +1,5 @@
-from .chat_message import ChatMessage
-from .model_client import ModelClient
+from .protocol import ChatMessage
+from .model import ModelClient
 
 _SUMMARY_PROMPT = """You are compacting a long conversation so older turns can be safely dropped from context.
 Summarize the conversation below into a structured note with these sections:

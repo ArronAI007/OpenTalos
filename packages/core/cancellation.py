@@ -11,7 +11,7 @@ class CancellationToken:
 
     timeout_seconds / token_budget 是挂在同一套检查点上的两种自动触发条件：整轮循环的墙钟
     超时，和跨步累计的 token 用量上限（由调用方在每次拿到模型响应后用 record_tokens 喂用量，
-    dialogue.execute_model_step/run_tool_turn 已经这么做了）。想让预算跨多轮 arespond() 共享，
+    agent_loop.execute_model_step/run_tool_turn 已经这么做了）。想让预算跨多轮 arespond() 共享，
     把同一个 token 实例继续传下去即可——它不会在每轮开始时重置。
     """
 

@@ -1,7 +1,11 @@
 import json
+from typing import Any
 
-from core.chat_message import ChatMessage
-from core.completion import Completion, ToolCompletion, ToolInvocation
+from context import OutputTrimmer
+from core.protocol import ChatMessage, Completion, ToolCompletion, ToolInvocation
+from tool.outcome import ToolOutcome
+from tool.registry import ToolRegistry
+from tool.tool import Tool, ToolParameter
 from agents.toolcall_agent import ToolCallingAgent
 
 
@@ -70,3 +74,39 @@ async def test_arespond_logs_model_and_tool_events_when_tracing_is_enabled(scrip
     event_types = [line["event"] for line in lines]
     assert event_types == ["model_output", "tool_call", "tool_result", "model_output"]
     assert stats["tool_calls"] == {"echo": 1}
+
+
+class _ChattyTool(Tool):
+    def __init__(self) -> None:
+        super().__init__(name="chatty", description="Returns 50 lines.")
+
+    def parameters(self) -> list[ToolParameter]:
+        return []
+
+    async def acall(self, arguments: dict[str, Any]) -> ToolOutcome:
+        return ToolOutcome.ok("\n".join(f"line {i}" for i in range(50)))
+
+
+async def test_output_trimmer_passed_to_the_agent_reaches_the_tool_call_path(scripted_client, tmp_path):
+    registry = ToolRegistry()
+    registry.register(_ChattyTool())
+    client = scripted_client(
+        tool_completions=[
+            ToolCompletion(
+                text=None,
+                requested_tools=[ToolInvocation(call_id="c1", tool_name="chatty", arguments_json="{}")],
+                model_id="mock",
+            ),
+            ToolCompletion(text="all done", requested_tools=[], model_id="mock"),
+        ]
+    )
+    agent = ToolCallingAgent(
+        name="bot",
+        model_client=client,
+        tool_registry=registry,
+        output_trimmer=OutputTrimmer(max_lines=5, max_bytes=1_000_000, output_dir=str(tmp_path)),
+    )
+
+    await agent.arespond("call the chatty tool")
+
+    assert len(list(tmp_path.glob("chatty_*.json"))) == 1

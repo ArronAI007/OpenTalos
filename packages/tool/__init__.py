@@ -1,6 +1,5 @@
-from .circuit_breaker import CircuitBreaker
 from .outcome import FailureCode, OutcomeStatus, ToolOutcome
-from .registry import ToolRegistry
+from .registry import CircuitBreaker, ToolRegistry
 from .tool import Tool, ToolParameter
 
 __all__ = [

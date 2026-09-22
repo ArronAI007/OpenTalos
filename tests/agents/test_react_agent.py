@@ -3,9 +3,9 @@ import asyncio
 import pytest
 
 from core.cancellation import CancellationToken
-from core.completion import ToolCompletion, ToolInvocation
+from core.protocol import ToolCompletion, ToolInvocation
 from core.errors import OperationCancelled
-from core.model_client import ModelClient
+from core.model import ModelClient
 from tool.outcome import ToolOutcome
 from tool.tool import Tool, ToolParameter
 from agents.react_agent import FINISH_TOOL_NAME, STEP_LIMIT_MESSAGE, ReActAgent

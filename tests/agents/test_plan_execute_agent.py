@@ -1,4 +1,4 @@
-from core.completion import Completion, ToolCompletion, ToolInvocation
+from core.protocol import Completion, ToolCompletion, ToolInvocation
 from agents.plan_execute_agent import PlanExecuteAgent
 
 

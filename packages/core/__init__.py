@@ -1,10 +1,9 @@
-from .agent import Agent
-from .chat_message import ChatMessage, SpeakerRole
-from .completion import Completion, StreamSummary, ToolCompletion, ToolInvocation
-from .errors import AgentRuntimeError, CoreError, ModelError, SettingsError
-from .events import AgentPhase, PhaseCallback, PhaseSignal
-from .model_client import ModelClient
-from .settings import RuntimeSettings
+from .agent import Agent, AgentPhase, PhaseCallback, PhaseSignal, RuntimeSettings
+from .agent_loop import build_reply_message, execute_model_step, resolve_tool_call, run_tool_turn, seed_messages
+from .cancellation import CancellationToken
+from .errors import AgentRuntimeError, CoreError, ModelError, OperationCancelled, SettingsError
+from .model import ModelClient
+from .protocol import ChatMessage, Completion, SpeakerRole, StreamSummary, ToolCompletion, ToolInvocation
 
 __all__ = [
     "Agent",
@@ -13,6 +12,8 @@ __all__ = [
     "SettingsError",
     "ModelError",
     "AgentRuntimeError",
+    "OperationCancelled",
+    "CancellationToken",
     "PhaseSignal",
     "AgentPhase",
     "PhaseCallback",
@@ -23,4 +24,9 @@ __all__ = [
     "ToolInvocation",
     "ChatMessage",
     "SpeakerRole",
+    "run_tool_turn",
+    "execute_model_step",
+    "resolve_tool_call",
+    "seed_messages",
+    "build_reply_message",
 ]

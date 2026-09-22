@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 
-from core.chat_message import ChatMessage
+from core.protocol import ChatMessage
 from context.assembler import AssemblyConfig, ContextAssembler, ContextSlice
 
 

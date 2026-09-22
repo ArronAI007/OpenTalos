@@ -2,15 +2,12 @@ import json
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from core.agent import Agent, AssemblyConfig
+from core.agent import Agent, AssemblyConfig, OutputTrimmer, RuntimeSettings
+from core.agent_loop import execute_model_step, resolve_tool_call, seed_messages
 from core.cancellation import CancellationToken
-from core.chat_message import ChatMessage
-from core.completion import ToolInvocation
-from core.model_client import ModelClient
-from core.settings import RuntimeSettings
+from core.protocol import ChatMessage, ToolInvocation
+from core.model import ModelClient
 from tool.registry import ToolRegistry
-
-from .dialogue import execute_model_step, resolve_tool_call, seed_messages
 
 FINISH_TOOL_NAME = "finish"
 
@@ -50,6 +47,7 @@ class ReActAgent(Agent):
         min_retain_turns: int = 10,
         trace_dir: str | None = None,
         compaction_token_limit: int | None = None,
+        output_trimmer: OutputTrimmer | None = None,
     ) -> None:
         super().__init__(
             name,
@@ -60,6 +58,7 @@ class ReActAgent(Agent):
             min_retain_turns,
             trace_dir,
             compaction_token_limit,
+            output_trimmer,
         )
         self.tool_registry = tool_registry
         self.max_steps = max_steps
@@ -118,7 +117,7 @@ class ReActAgent(Agent):
     async def _resolve(self, invocation: ToolInvocation, step: int) -> dict[str, str]:
         if self.tool_registry is None:
             return {"role": "tool", "tool_call_id": invocation.call_id, "content": "No tools are available."}
-        return await resolve_tool_call(self.tool_registry, invocation, self.recorder, step)
+        return await resolve_tool_call(self.tool_registry, invocation, self.recorder, step, self.output_trimmer)
 
 
 def _read_final_answer(invocation: ToolInvocation) -> str:

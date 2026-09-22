@@ -1,4 +1,4 @@
-from core.completion import Completion
+from core.protocol import Completion
 from agents.reflection_agent import SATISFIED_MARKER, ReflectionAgent
 
 

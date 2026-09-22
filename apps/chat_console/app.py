@@ -1,6 +1,6 @@
 """Gradio 前端：跟 packages/agents 里的四种 Agent 聊天，同时能看每一轮的调用轨迹。
 
-跑之前配好模型环境变量（跟 packages/core/model_client.py 读的一样）：
+跑之前配好模型环境变量（跟 packages/core/model.py 读的一样）：
     MODEL_PROVIDER=anthropic MODEL_API_KEY=... MODEL_NAME=... uv run python apps/chat_console/app.py
 没配置也能启动，聊天时会在界面上提示需要设置什么。
 """
@@ -18,7 +18,7 @@ from demo_tools import CalculatorTool
 from agents.builder import AGENT_TYPES, build_agent
 from core.agent import Agent
 from core.errors import SettingsError
-from core.model_client import ModelClient
+from core.model import ModelClient
 from observability.stats import summarize
 from tool.registry import ToolRegistry
 

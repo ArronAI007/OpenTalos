@@ -1,4 +1,4 @@
-from core.chat_message import ChatMessage
+from core.protocol import ChatMessage
 from context.tokens import TokenBudget
 
 

@@ -1,10 +1,8 @@
-from core.agent import Agent, AssemblyConfig
-from core.chat_message import ChatMessage
-from core.model_client import ModelClient
-from core.settings import RuntimeSettings
+from core.agent import Agent, AssemblyConfig, OutputTrimmer, RuntimeSettings
+from core.agent_loop import run_tool_turn, seed_messages
+from core.protocol import ChatMessage
+from core.model import ModelClient
 from tool.registry import ToolRegistry
-
-from .dialogue import run_tool_turn, seed_messages
 
 DEFAULT_SYSTEM_PROMPT = "You are a helpful, concise assistant."
 
@@ -24,6 +22,7 @@ class ToolCallingAgent(Agent):
         min_retain_turns: int = 10,
         trace_dir: str | None = None,
         compaction_token_limit: int | None = None,
+        output_trimmer: OutputTrimmer | None = None,
     ) -> None:
         super().__init__(
             name,
@@ -34,6 +33,7 @@ class ToolCallingAgent(Agent):
             min_retain_turns,
             trace_dir,
             compaction_token_limit,
+            output_trimmer,
         )
         self.tool_registry = tool_registry
         self.max_tool_iterations = max_tool_iterations
@@ -41,7 +41,13 @@ class ToolCallingAgent(Agent):
     async def arespond(self, input_text: str, **kwargs: object) -> str:
         messages = seed_messages(self.system_prompt, self.history_snapshot(), input_text)
         answer = await run_tool_turn(
-            self.model_client, messages, self.tool_registry, self.max_tool_iterations, self.recorder, **kwargs
+            self.model_client,
+            messages,
+            self.tool_registry,
+            self.max_tool_iterations,
+            self.recorder,
+            trimmer=self.output_trimmer,
+            **kwargs,
         )
 
         self.record_message(ChatMessage(content=input_text, role="user"))

@@ -5,7 +5,7 @@ from agents.plan_execute_agent import PlanExecuteAgent
 from agents.react_agent import ReActAgent
 from agents.reflection_agent import ReflectionAgent
 from agents.toolcall_agent import ToolCallingAgent
-from core.model_client import ModelClient
+from core.model import ModelClient
 
 
 @pytest.fixture

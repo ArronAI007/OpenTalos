@@ -1,14 +1,50 @@
 import asyncio
+import time
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any
 
-from context import AssemblyConfig, ContextAssembler, ContextSlice, TokenBudget, TranscriptStore
+from context import AssemblyConfig, ContextAssembler, ContextSlice, OutputTrimmer, TokenBudget, TranscriptStore
 from observability import RunRecorder
+from pydantic import BaseModel
 
-from .chat_message import ChatMessage
 from .compaction import summarize_history
-from .events import AgentPhase, PhaseCallback, PhaseSignal
-from .model_client import ModelClient
-from .settings import RuntimeSettings
+from .model import ModelClient
+from .protocol import ChatMessage
+
+
+class RuntimeSettings(BaseModel):
+    temperature: float = 0.7
+    max_tokens: int | None = None
+    debug: bool = False
+    log_level: str = "INFO"
+    callback_timeout_seconds: float = 5.0
+
+
+class AgentPhase(Enum):
+    STARTED = "started"
+    FINISHED = "finished"
+    FAILED = "failed"
+
+
+@dataclass
+class PhaseSignal:
+    phase: AgentPhase
+    timestamp: float
+    agent_name: str
+    data: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def emit(cls, phase: AgentPhase, agent_name: str, **data: Any) -> "PhaseSignal":
+        return cls(phase=phase, timestamp=time.time(), agent_name=agent_name, data=data)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"phase": self.phase.value, "timestamp": self.timestamp, "agent_name": self.agent_name, "data": self.data}
+
+
+PhaseCallback = Callable[[PhaseSignal], Awaitable[None]] | None
 
 
 class Agent(ABC):
@@ -22,6 +58,7 @@ class Agent(ABC):
         min_retain_turns: int = 10,
         trace_dir: str | None = None,
         compaction_token_limit: int | None = None,
+        output_trimmer: OutputTrimmer | None = None,
     ) -> None:
         self.name = name
         self.model_client = model_client
@@ -31,6 +68,8 @@ class Agent(ABC):
         self._context_assembler = ContextAssembler(context_config)
         self.recorder: RunRecorder | None = RunRecorder(output_dir=trace_dir) if trace_dir else None
         self.compaction_token_limit = compaction_token_limit
+        # 不为空时，工具输出超限会被截断、完整内容落盘（OutputTrimmer 构造即建目录，所以默认不建）。
+        self.output_trimmer = output_trimmer
         self._tokens = TokenBudget()
 
     @abstractmethod

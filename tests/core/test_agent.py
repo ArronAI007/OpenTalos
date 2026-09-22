@@ -2,13 +2,9 @@ import asyncio
 
 import pytest
 
-from core.agent import Agent
-from core.chat_message import ChatMessage
-from core.completion import Completion
-from core.events import PhaseSignal
-from core.model_backends import FakeModelBackend
-from core.model_client import ModelClient
-from core.settings import RuntimeSettings
+from core.agent import Agent, AgentPhase, PhaseSignal, RuntimeSettings
+from core.protocol import ChatMessage, Completion
+from core.model import FakeModelBackend, ModelClient
 
 
 class _EchoAgent(Agent):
@@ -185,3 +181,41 @@ async def test_maybe_compress_history_summarizes_and_folds_history_once_over_the
     history = agent.history_snapshot()
     assert history[0].role == "summary"
     assert "condensed summary" in history[0].content
+
+
+def test_runtime_settings_has_expected_defaults():
+    settings = RuntimeSettings()
+    assert settings.temperature == 0.7
+    assert settings.max_tokens is None
+    assert settings.debug is False
+    assert settings.log_level == "INFO"
+    assert settings.callback_timeout_seconds == 5.0
+
+
+def test_runtime_settings_accepts_overrides():
+    settings = RuntimeSettings(
+        temperature=0.2, max_tokens=100, debug=True, log_level="DEBUG", callback_timeout_seconds=1.0
+    )
+    assert settings.temperature == 0.2
+    assert settings.max_tokens == 100
+    assert settings.debug is True
+    assert settings.log_level == "DEBUG"
+    assert settings.callback_timeout_seconds == 1.0
+
+def test_phase_signal_emit_sets_timestamp_and_data():
+    signal = PhaseSignal.emit(AgentPhase.STARTED, "my-agent", input_text="hi")
+    assert signal.phase == AgentPhase.STARTED
+    assert signal.agent_name == "my-agent"
+    assert signal.data == {"input_text": "hi"}
+    assert signal.timestamp > 0
+
+
+def test_phase_signal_to_dict_uses_phase_value():
+    signal = PhaseSignal.emit(AgentPhase.FINISHED, "my-agent", result="done")
+    data = signal.to_dict()
+    assert data == {
+        "phase": "finished",
+        "timestamp": signal.timestamp,
+        "agent_name": "my-agent",
+        "data": {"result": "done"},
+    }
