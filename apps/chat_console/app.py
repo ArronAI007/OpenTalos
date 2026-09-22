@@ -5,6 +5,7 @@
 没配置也能启动，聊天时会在界面上提示需要设置什么。
 """
 
+import os
 import sys
 from pathlib import Path
 
@@ -20,10 +21,14 @@ from core.agent import Agent
 from core.errors import SettingsError
 from core.model import ModelClient
 from observability.stats import summarize
+from skill.client import SkillClient, SkillServiceError
+from skill.prompt import format_skills_for_system_prompt
+from skill.tools import ReadSkillTool, RunSkillScriptTool
 from tool.registry import ToolRegistry
 
 AGENT_NAME = "chat-console"
 TRACE_DIR = Path(__file__).resolve().parent / "traces"
+SKILL_SERVICE_URL = os.environ.get("SKILL_SERVICE_URL", "http://localhost:8000")
 
 _model_client: ModelClient | None = None
 _model_client_error: str | None = None
@@ -40,17 +45,40 @@ def _get_model_client() -> tuple[ModelClient | None, str | None]:
     return _model_client, _model_client_error
 
 
-def _make_agent(agent_type: str, use_calculator: bool) -> tuple[Agent | None, str | None]:
+async def _make_agent(agent_type: str, use_calculator: bool, use_skills: bool) -> tuple[Agent | None, str | None]:
     client, error = _get_model_client()
     if client is None:
         return None, error
 
-    tool_registry = None
-    if use_calculator:
+    tool_registry: ToolRegistry | None = None
+    system_prompt_suffix: str | None = None
+    if use_calculator or use_skills:
         tool_registry = ToolRegistry()
+    if use_calculator:
         tool_registry.register(CalculatorTool())
+    if use_skills:
+        skill_client = SkillClient(SKILL_SERVICE_URL)
+        try:
+            # 技能清单在构造 agent 时取一次、渲染成 pi 风格的 <available_skills> 段拼进系统提示词；
+            # 服务运行期间清单不变，不需要每轮请求都拉。
+            skills = await skill_client.list_skills()
+        except SkillServiceError as error:
+            return None, (
+                f"Cannot reach the skill service at {SKILL_SERVICE_URL}: {error}. "
+                "Start it with ./scripts/start.sh skill (needs Docker), or disable skills."
+            )
+        tool_registry.register(ReadSkillTool(skill_client))
+        tool_registry.register(RunSkillScriptTool(skill_client))
+        system_prompt_suffix = format_skills_for_system_prompt(skills) or None
 
-    agent = build_agent(agent_type, AGENT_NAME, client, tool_registry=tool_registry, trace_dir=str(TRACE_DIR))
+    agent = build_agent(
+        agent_type,
+        AGENT_NAME,
+        client,
+        tool_registry=tool_registry,
+        system_prompt_suffix=system_prompt_suffix,
+        trace_dir=str(TRACE_DIR),
+    )
     return agent, None
 
 
@@ -60,7 +88,14 @@ def _status_text(agent: Agent | None, agent_type: str) -> str:
     return f"Agent type: **{agent_type}** · trace session `{agent.recorder.session_id}`"
 
 
-async def respond(message: str, chat_history: list[dict], agent_state: Agent | None, agent_type: str, use_calculator: bool):
+async def respond(
+    message: str,
+    chat_history: list[dict],
+    agent_state: Agent | None,
+    agent_type: str,
+    use_calculator: bool,
+    use_skills: bool,
+):
     chat_history = list(chat_history or [])
     message = (message or "").strip()
     if not message:
@@ -68,7 +103,7 @@ async def respond(message: str, chat_history: list[dict], agent_state: Agent | N
 
     agent = agent_state
     if agent is None or not isinstance(agent, AGENT_TYPES[agent_type]):
-        agent, error = _make_agent(agent_type, use_calculator)
+        agent, error = await _make_agent(agent_type, use_calculator, use_skills)
         if agent is None:
             chat_history.append({"role": "user", "content": message})
             chat_history.append(
@@ -108,6 +143,7 @@ with gr.Blocks(title="OpenTalos Chat Console") as demo:
     with gr.Row():
         agent_type = gr.Dropdown(choices=list(AGENT_TYPES), value="toolcall", label="Agent type")
         use_calculator = gr.Checkbox(value=True, label="Enable demo calculator tool")
+        use_skills = gr.Checkbox(value=False, label="Enable skills (requires the skill service + Docker)")
         new_conversation_btn = gr.Button("New conversation")
 
     status = gr.Markdown("No active trace session.")
@@ -130,13 +166,13 @@ with gr.Blocks(title="OpenTalos Chat Console") as demo:
 
     send_btn.click(
         respond,
-        inputs=[msg, chatbot, agent_state, agent_type, use_calculator],
+        inputs=[msg, chatbot, agent_state, agent_type, use_calculator, use_skills],
         outputs=[chatbot, msg, agent_state, status],
     ).then(refresh_trace, inputs=[agent_state], outputs=trace_outputs)
 
     msg.submit(
         respond,
-        inputs=[msg, chatbot, agent_state, agent_type, use_calculator],
+        inputs=[msg, chatbot, agent_state, agent_type, use_calculator, use_skills],
         outputs=[chatbot, msg, agent_state, status],
     ).then(refresh_trace, inputs=[agent_state], outputs=trace_outputs)
 
@@ -146,6 +182,7 @@ with gr.Blocks(title="OpenTalos Chat Console") as demo:
     new_conversation_btn.click(reset_conversation, inputs=[agent_state], outputs=reset_outputs)
     agent_type.change(reset_conversation, inputs=[agent_state], outputs=reset_outputs)
     use_calculator.change(reset_conversation, inputs=[agent_state], outputs=reset_outputs)
+    use_skills.change(reset_conversation, inputs=[agent_state], outputs=reset_outputs)
 
 
 if __name__ == "__main__":

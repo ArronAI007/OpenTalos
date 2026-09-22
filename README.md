@@ -21,14 +21,14 @@ leaf packages — none of them import each other or anything else in this repo:
 | `packages/sandbox` | Docker-based sandboxed execution of a single script (`run_sandboxed_script`), with path-traversal-safe script resolution. |
 | `packages/observability` | `RunRecorder`: records a run's events as streaming JSONL plus an incrementally-rendered HTML report, with secret redaction and summary stats. |
 
-`packages/core` builds on the leaves above — its `Agent` base class composes a
-`TranscriptStore`/`ContextAssembler` pair unconditionally, and a `RunRecorder` when
-constructed with `trace_dir`:
+`packages/core` and `packages/skill` build on the leaves above — `core`'s `Agent` base class
+composes a `TranscriptStore`/`ContextAssembler` pair unconditionally, and a `RunRecorder` when
+constructed with `trace_dir`; `skill`'s agent-facing tools implement the `tool.Tool` interface:
 
 | Package | Responsibility |
 |---|---|
 | `packages/core` | `Agent` (abstract base: history, context assembly, tracing, phase callbacks), `ModelClient` (async, provider-agnostic: Anthropic / OpenAI-compatible / mock), `ChatMessage`, `Completion`/`ToolCompletion` types. |
-| `packages/skill` | FastAPI service exposing the `skills/` directory over HTTP (`GET /skills`, `GET /skills/{name}`, `POST /skills/{name}/run-script`), running scripts through `packages/sandbox`. |
+| `packages/skill` | FastAPI service exposing the `skills/` directory over HTTP (`GET /skills`, `GET /skills/{name}`, `POST /skills/{name}/run-script`), running scripts through `packages/sandbox`. Plus the agent-facing side: `SkillClient` (async HTTP client), `read_skill`/`run_skill_script` tools for any `ToolRegistry`, and `format_skills_for_system_prompt` (pi-style `<available_skills>` prompt section). |
 
 `packages/agents` sits on top, depending only on `core` and `tool`:
 
@@ -40,7 +40,7 @@ And `apps/` is what you actually run:
 
 | App | Responsibility |
 |---|---|
-| `apps/chat_console` | Gradio UI: chat with any of the four agent types (with a demo calculator tool for tool-calling patterns), and a live Trace tab showing that agent's `RunRecorder` events/stats as the conversation happens. |
+| `apps/chat_console` | Gradio UI: chat with any of the four agent types (with a demo calculator tool for tool-calling patterns, and an opt-in skills toggle that wires the skill service's `read_skill`/`run_skill_script` tools plus an `<available_skills>` prompt section), and a live Trace tab showing that agent's `RunRecorder` events/stats as the conversation happens. |
 
 ## Repository Layout
 
@@ -86,6 +86,12 @@ precedence over it.
 | `MODEL_BASE_URL` | provider default | Required for `openai-compatible` against a non-OpenAI endpoint (DeepSeek, Kimi/Moonshot, etc.). |
 | `MODEL_TIMEOUT` | `60` | Request timeout, seconds. |
 | `MODEL_TEMPERATURE` | *(not sent)* | Left unset, the request carries no `temperature` and the provider's own default applies — required for models that only accept a fixed value (o-series, kimi-k3). Set a number to pin it. |
+
+Read by `apps/chat_console/app.py` directly:
+
+| Variable | Default | Notes |
+|---|---|---|
+| `SKILL_SERVICE_URL` | `http://localhost:8000` | Where the chat console reaches the skill service when the skills toggle is on. |
 
 ## Testing
 

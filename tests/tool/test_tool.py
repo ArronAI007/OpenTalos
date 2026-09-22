@@ -76,3 +76,19 @@ def test_to_function_schema_includes_enum_when_present():
 
     schema = _ChoiceTool().to_function_schema()
     assert schema["function"]["parameters"]["properties"]["option"]["enum"] == ["a", "b"]
+
+
+def test_to_function_schema_renders_items_for_array_parameters():
+    class _BatchTool(Tool):
+        def __init__(self) -> None:
+            super().__init__(name="batch", description="Run on many.")
+
+        def parameters(self) -> list[ToolParameter]:
+            return [ToolParameter(name="items_to_run", type="array", description="Values", items="string")]
+
+        async def acall(self, arguments: dict[str, Any]) -> ToolOutcome:
+            return ToolOutcome.ok("ok")
+
+    schema = _BatchTool().to_function_schema()
+    prop = schema["function"]["parameters"]["properties"]["items_to_run"]
+    assert prop == {"type": "array", "description": "Values", "items": {"type": "string"}}

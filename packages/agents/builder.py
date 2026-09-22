@@ -23,13 +23,14 @@ def build_agent(
     tool_registry: ToolRegistry | None = None,
     settings: RuntimeSettings | None = None,
     system_prompt: str | None = None,
+    system_prompt_suffix: str | None = None,
     **kwargs: object,
 ) -> Agent:
     key = agent_type.lower()
     agent_cls = AGENT_TYPES.get(key)
     if agent_cls is None:
         raise ValueError(f'Unsupported agent_type "{agent_type}". Supported: {", ".join(AGENT_TYPES)}.')
-    return agent_cls(
+    agent = agent_cls(
         name=name,
         model_client=model_client,
         tool_registry=tool_registry,
@@ -37,6 +38,17 @@ def build_agent(
         system_prompt=system_prompt,
         **kwargs,
     )
+    if system_prompt_suffix:
+        # 追加（而不是替换）是为了保住各类型的默认提示词——比如 ReAct 的 finish 工具约定。
+        # PlanExecuteAgent 的执行阶段用独立的 runner prompt，同样需要知道能力清单。
+        agent.system_prompt = _append_suffix(agent.system_prompt, system_prompt_suffix)
+        if isinstance(agent, PlanExecuteAgent):
+            agent.runner_system_prompt = _append_suffix(agent.runner_system_prompt, system_prompt_suffix)
+    return agent
+
+
+def _append_suffix(prompt: str | None, suffix: str) -> str:
+    return f"{prompt}\n\n{suffix}" if prompt else suffix
 
 
 SUBAGENT_SYSTEM_PROMPTS: dict[str, str] = {

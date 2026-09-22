@@ -12,6 +12,7 @@ class ToolParameter:
     description: str
     required: bool = True
     enum: list[str] | None = None
+    items: str | None = None  # type 为 "array" 时的元素类型（JSON Schema 的 items 必填）
 
 
 class Tool(ABC):
@@ -38,6 +39,8 @@ class Tool(ABC):
             prop: dict[str, Any] = {"type": param.type, "description": param.description}
             if param.enum:
                 prop["enum"] = param.enum
+            if param.items is not None:
+                prop["items"] = {"type": param.items}
             properties[param.name] = prop
             if param.required:
                 required.append(param.name)

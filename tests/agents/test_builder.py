@@ -44,3 +44,25 @@ def test_default_subagent_builder_names_and_prompts_the_agent(model_client):
     agent = default_subagent_builder("reflection", model_client)
     assert agent.name == "subagent-reflection"
     assert "quality-focused" in agent.system_prompt
+
+
+def test_build_agent_appends_system_prompt_suffix_after_the_default_prompt(model_client):
+    agent = build_agent("react", "bot", model_client, system_prompt_suffix="<available_skills>...</available_skills>")
+
+    assert agent.system_prompt.endswith("<available_skills>...</available_skills>")
+    assert "finish" in agent.system_prompt  # ReAct 自带的 finish 工具约定不能被顶掉
+
+
+def test_build_agent_appends_the_suffix_to_the_plan_execute_runner_prompt_too(model_client):
+    agent = build_agent("plan_execute", "bot", model_client, system_prompt_suffix="SKILLS HERE")
+
+    assert agent.system_prompt.endswith("SKILLS HERE")
+    assert isinstance(agent, PlanExecuteAgent)
+    assert agent.runner_system_prompt.endswith("SKILLS HERE")
+
+
+def test_build_agent_without_a_suffix_leaves_prompts_untouched(model_client):
+    agent = build_agent("plan_execute", "bot", model_client)
+
+    assert "SKILLS HERE" not in agent.system_prompt
+    assert agent.runner_system_prompt  # runner prompt 仍然存在
