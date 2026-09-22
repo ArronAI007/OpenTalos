@@ -85,7 +85,7 @@ precedence over it.
 | `MODEL_NAME` | *(required except `mock`)* | |
 | `MODEL_BASE_URL` | provider default | Required for `openai-compatible` against a non-OpenAI endpoint (DeepSeek, Kimi/Moonshot, etc.). |
 | `MODEL_TIMEOUT` | `60` | Request timeout, seconds. |
-| `MODEL_TEMPERATURE` | `0.7` | Some models only accept a fixed value (e.g. certain Kimi models reject anything but `1`). |
+| `MODEL_TEMPERATURE` | *(not sent)* | Left unset, the request carries no `temperature` and the provider's own default applies — required for models that only accept a fixed value (o-series, kimi-k3). Set a number to pin it. |
 
 ## Testing
 

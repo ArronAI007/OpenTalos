@@ -314,10 +314,10 @@ def test_model_client_defaults_timeout_to_60_seconds(monkeypatch):
     assert client.timeout == 60
 
 
-def test_model_client_defaults_temperature_to_0_7(monkeypatch):
+def test_model_client_leaves_temperature_unset_when_not_configured(monkeypatch):
     monkeypatch.delenv("MODEL_TEMPERATURE", raising=False)
     client = ModelClient(provider="mock")
-    assert client.temperature == 0.7
+    assert client.temperature is None
 
 
 def test_model_client_reads_temperature_from_env(monkeypatch):
@@ -330,6 +330,24 @@ def test_model_client_explicit_temperature_overrides_env(monkeypatch):
     monkeypatch.setenv("MODEL_TEMPERATURE", "1")
     client = ModelClient(provider="mock", temperature=0.2)
     assert client.temperature == 0.2
+
+
+def test_unset_temperature_and_max_tokens_are_omitted_from_the_request(monkeypatch):
+    monkeypatch.delenv("MODEL_TEMPERATURE", raising=False)
+    client = ModelClient(provider="mock")
+    assert client._build_call_kwargs({}) == {}
+
+
+def test_configured_temperature_and_max_tokens_are_sent(monkeypatch):
+    monkeypatch.delenv("MODEL_TEMPERATURE", raising=False)
+    client = ModelClient(provider="mock", temperature=0.3, max_tokens=256)
+    assert client._build_call_kwargs({}) == {"temperature": 0.3, "max_tokens": 256}
+
+
+def test_per_call_overrides_win_over_the_client_defaults(monkeypatch):
+    monkeypatch.delenv("MODEL_TEMPERATURE", raising=False)
+    client = ModelClient(provider="mock", temperature=0.3)
+    assert client._build_call_kwargs({"temperature": 0.9, "max_tokens": 16}) == {"temperature": 0.9, "max_tokens": 16}
 
 
 async def test_model_client_acomplete_delegates_to_backend():

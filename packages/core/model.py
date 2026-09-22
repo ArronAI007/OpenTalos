@@ -21,7 +21,6 @@ from .errors import SettingsError
 from .protocol import Completion, StreamSummary, ToolCompletion, ToolInvocation
 
 DEFAULT_TIMEOUT_SECONDS = 60
-DEFAULT_TEMPERATURE = 0.7
 
 # 任何构造 ModelClient 的脚本都经过这个模块，所以在这里统一加载一次 .env 里的模型配置，而不是
 # 指望每个脚本自己记得 --env-file/load_dotenv。已存在于进程环境里的变量优先级更高（override
@@ -426,10 +425,11 @@ class ModelClient:
         timeout_env = os.getenv("MODEL_TIMEOUT")
         self.timeout = timeout if timeout is not None else (int(timeout_env) if timeout_env else DEFAULT_TIMEOUT_SECONDS)
 
+        # 没显式配置就是 None——请求里干脆不带 temperature，用服务端自己的默认值。框架不替用户
+        # 挑一个采样温度：越来越多的模型（o 系列、kimi-k3 等）只接受它们自己的固定值，硬塞一个
+        # 会被 400 拒掉。
         temperature_env = os.getenv("MODEL_TEMPERATURE")
-        self.temperature = (
-            temperature if temperature is not None else (float(temperature_env) if temperature_env else DEFAULT_TEMPERATURE)
-        )
+        self.temperature = temperature if temperature is not None else (float(temperature_env) if temperature_env else None)
         self.max_tokens = max_tokens
 
         self._backend: ModelBackend = create_model_backend(
@@ -438,9 +438,14 @@ class ModelClient:
         self.last_stream_summary: StreamSummary | None = None
 
     def _build_call_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        call_kwargs = {"temperature": kwargs.pop("temperature", self.temperature)}
-        if self.max_tokens is not None:
-            call_kwargs["max_tokens"] = kwargs.pop("max_tokens", self.max_tokens)
+        """把实例上的采样配置和单次调用的覆盖值合成一份请求参数——值为 None 的一律不发。"""
+        call_kwargs: dict[str, Any] = {}
+        temperature = kwargs.pop("temperature", self.temperature)
+        if temperature is not None:
+            call_kwargs["temperature"] = temperature
+        max_tokens = kwargs.pop("max_tokens", self.max_tokens)
+        if max_tokens is not None:
+            call_kwargs["max_tokens"] = max_tokens
         call_kwargs.update(kwargs)
         return call_kwargs
 
