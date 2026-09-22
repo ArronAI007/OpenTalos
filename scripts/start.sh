@@ -60,7 +60,7 @@ ensure_service "skill service" 8321 "$SKILL_URL/health" \
 ensure_service "chat API" 8400 "$API_URL/health" \
   env PYTHONPATH=packages uv run uvicorn main:app --app-dir apps/api --host 0.0.0.0 --port 8400
 
-echo "starting web frontend on :3000 ..."
+echo "starting web frontend on :${PORT:-3000} ..."
 cd apps/web
 [ -d node_modules ] || pnpm install
-NEXT_PUBLIC_API_URL="$API_URL" pnpm dev   # 前台运行但不用 exec（exec 会让 EXIT trap 失效）
+NEXT_PUBLIC_API_URL="$API_URL" pnpm dev -p "${PORT:-3000}"   # 前台不用 exec（exec 使 EXIT trap 失效）；-p 固定端口，被占即 fail-fast 防 CORS 漂移
