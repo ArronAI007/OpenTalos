@@ -54,8 +54,8 @@ opentalos/
 
 ## Quick Start
 
-Requires Python ≥3.12 and [`uv`](https://docs.astral.sh/uv/). Node.js is only needed to run
-JS skills (`skills/text-to-table`).
+Requires Python ≥3.12, [`uv`](https://docs.astral.sh/uv/), and Node.js (with
+[pnpm](https://pnpm.io/)) for the web frontend.
 
 ```bash
 uv sync
@@ -64,13 +64,16 @@ cp .env.example .env   # fill in MODEL_PROVIDER/MODEL_API_KEY/MODEL_NAME, or lea
 
 uv run pytest tests/
 
-./scripts/start.sh   # skill service (:8321) + Gradio chat console (http://127.0.0.1:7860),
-                     # one command starts both, Ctrl-C stops both
+./scripts/start.sh   # skill service (:8321) + chat API (:8400) + web frontend
+                     # (http://localhost:3000) — one command starts all three,
+                     # Ctrl-C stops them all
 ```
 
-`scripts/start.sh --help` for details (nothing needs `--env-file` — `packages/core/model.py`
-loads `.env` itself, see next section). To debug the skill service in isolation:
-`env PYTHONPATH=packages uv run uvicorn skill.main:app --port 8321`.
+Then open http://localhost:3000. `./scripts/start.sh` starts the skill service (:8321), the
+chat API (:8400), and the web frontend (:3000); a service already answering
+`{"status":"ok"}` on its port is reused rather than restarted. Nothing needs `--env-file` —
+`packages/core/model.py` loads `.env` itself, see next section. To debug the skill service in
+isolation: `env PYTHONPATH=packages uv run uvicorn skill.main:app --port 8321`.
 
 ## Key Environment Variables
 
@@ -87,11 +90,15 @@ precedence over it.
 | `MODEL_TIMEOUT` | `60` | Request timeout, seconds. |
 | `MODEL_TEMPERATURE` | *(not sent)* | Left unset, the request carries no `temperature` and the provider's own default applies — required for models that only accept a fixed value (o-series, kimi-k3). Set a number to pin it. |
 
-Read by `apps/chat_console/app.py` directly:
+Read by the chat API (`apps/api/main.py`) and the web frontend (`apps/web`) directly:
 
 | Variable | Default | Notes |
 |---|---|---|
-| `SKILL_SERVICE_URL` | `http://localhost:8321` | Where the chat console reaches the skill service when the skills toggle is on. |
+| `SKILL_SERVICE_URL` | `http://localhost:8321` | Where the chat API reaches the skill service. |
+| `NEXT_PUBLIC_API_URL` | `http://localhost:8400` | Chat API address the web frontend calls; `start.sh` injects it automatically, set it yourself only when running web standalone. |
+
+The web frontend must run on `:3000` — if you change its port, update `allow_origins` in
+`apps/api/main.py` (CORS) to match.
 
 ## Testing
 
