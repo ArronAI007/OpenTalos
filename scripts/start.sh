@@ -11,6 +11,10 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 SKILL_URL="http://localhost:8321"
 API_URL="http://localhost:8400"
 
+# CORS 白名单默认跟随 web 端口（API 端按 Origin 精确匹配）：裸跑 ./scripts/start.sh 即自洽；
+# 需要别的来源时显式传 CORS_ORIGINS 覆盖。注意：若复用已在跑的旧 API 进程，CORS 以旧进程启动时的值为准。
+export CORS_ORIGINS="${CORS_ORIGINS:-http://localhost:${PORT:-3010}}"
+
 spawned_ports=()
 spawned_pids=()
 cleanup() {
