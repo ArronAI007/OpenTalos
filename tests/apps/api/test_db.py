@@ -86,6 +86,11 @@ def test_task_defaults_to_unpinned_and_unstarred(store: ChatStore) -> None:
     assert task["starred"] == 0
 
 
+def test_task_defaults_to_unarchived(store: ChatStore) -> None:
+    task = store.create_task("react")
+    assert task["archived"] == 0
+
+
 def test_pin_and_unpin_task_persists(store: ChatStore) -> None:
     task = store.create_task("react")
     pinned = store.update_task(task["id"], pinned=1)
@@ -135,9 +140,39 @@ def test_list_tasks_pinned_then_starred_then_plain(store: ChatStore) -> None:
     assert ids == [pinned["id"], starred_new["id"], starred_old["id"], plain_new["id"], plain_old["id"]]
 
 
+def test_archive_and_unarchive_task_persists(store: ChatStore) -> None:
+    task = store.create_task("react")
+    archived = store.update_task(task["id"], archived=1)
+    assert archived is not None
+    assert archived["archived"] == 1
+    assert store.get_task(task["id"])["archived"] == 1  # 持久化：重新读取仍已归档
+    restored = store.update_task(task["id"], archived=0)
+    assert restored is not None
+    assert restored["archived"] == 0
+    assert store.get_task(task["id"])["archived"] == 0
+
+
+def test_list_tasks_excludes_archived(store: ChatStore) -> None:
+    alive = store.create_task("react")
+    gone = store.create_task("toolcall")
+    store.update_task(gone["id"], archived=1)
+    assert [t["id"] for t in store.list_tasks()] == [alive["id"]]
+    assert [t["id"] for t in store.list_archived_tasks()] == [gone["id"]]
+
+
+def test_list_archived_tasks_orders_by_updated_at_desc(store: ChatStore) -> None:
+    old = store.create_task("react")
+    store.update_task(old["id"], archived=1)
+    new = store.create_task("toolcall")
+    store.update_task(new["id"], archived=1)
+    store.create_task("react")  # 未归档任务不进归档列表
+    # 后归档的 new updated_at 更新，排在最前
+    assert [t["id"] for t in store.list_archived_tasks()] == [new["id"], old["id"]]
+
+
 def test_legacy_db_without_flag_columns_migrates(tmp_path: Path) -> None:
     db_path = tmp_path / "legacy.db"
-    # 构造旧 schema 库：tasks 表无 pinned/starred 列且带一行旧数据
+    # 构造旧 schema 库：tasks 表无 pinned/starred/archived 列且带一行旧数据
     conn = sqlite3.connect(db_path)
     conn.execute(
         "CREATE TABLE tasks (id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '',"
@@ -155,5 +190,7 @@ def test_legacy_db_without_flag_columns_migrates(tmp_path: Path) -> None:
     assert task is not None
     assert task["pinned"] == 0  # 旧数据补默认值
     assert task["starred"] == 0
+    assert task["archived"] == 0
     assert store.update_task("t1", pinned=1)["pinned"] == 1  # 迁移后可正常固定
     assert store.update_task("t1", starred=1)["starred"] == 1  # 迁移后可正常收藏
+    assert store.update_task("t1", archived=1)["archived"] == 1  # 迁移后可正常归档

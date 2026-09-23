@@ -3,12 +3,13 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { createTask, deleteTask, listTasks, updateTask, type Task } from "@/lib/api";
+import { createTask, deleteTask, listTasks, updateTask, type Task, type TaskPatch } from "@/lib/api";
 import { readAgentType } from "@/lib/agent-type";
 import { sortTasks } from "@/lib/task-sort";
 import { ClockIcon, PencilSquareIcon, PinIcon, PuzzleIcon, SearchIcon, SparklesIcon, StarIcon } from "@/components/ui/icons";
 import { LogoMark } from "./Logo";
 import { TaskListMenu } from "./TaskListMenu";
+import { ArchivedSection } from "./ArchivedSection";
 
 // 新建任务逻辑抽成 hook：窄栏图标与展开态按钮共用同一份 busy/error 状态，
 // 失败时行内报错由展开后的 NewTaskButton 展示（窄栏触发失败会自动展开）。
@@ -103,6 +104,8 @@ export function TaskList() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const [editError, setEditError] = useState<string | null>(null);
+  const [archOpen, setArchOpen] = useState(false);
+  const [archived, setArchived] = useState<Task[] | null>(null); // null = 归档区尚未拉取
   const committingRef = useRef(false);
   const pathname = usePathname();
   const router = useRouter();
@@ -135,24 +138,54 @@ export function TaskList() {
     if (pathname === `/t/${taskId}`) router.push("/");
   };
 
-  // 固定/取消固定：用接口返回的任务本地 patch 并按 sortTasks 重排，不重拉列表；失败静默。
-  const handleTogglePin = async (task: Task) => {
+  // 固定/收藏翻转：两件同构逻辑按 key 复用。用接口返回的任务本地 patch 并按 sortTasks 重排，不重拉列表。
+  const handleToggleFlag = async (task: Task, key: "pinned" | "starred") => {
     try {
-      const updated = await updateTask(task.id, { pinned: !task.pinned });
+      // 计算属性键被 TS 推断为 string，对不上 TaskPatch 的具名字段，单行断言收窄。
+      const updated = await updateTask(task.id, { [key]: !task[key] } as TaskPatch);
       setTasks((prev) => sortTasks(prev.map((t) => (t.id === task.id ? updated : t))));
     } catch {
       // 与项目现状一致：不引入错误 UI 体系
     }
   };
 
-  // 收藏/取消收藏：与 handleTogglePin 同构，本地 patch 后重排。
-  const handleToggleStar = async (task: Task) => {
+  const refreshArchived = () => {
+    void listTasks({ archived: true }).then(setArchived).catch(() => undefined);
+  };
+
+  // 归档语义与固定/收藏不同：成功后任务从主列表消失而非原地重排；归档区已展开则同步刷新。
+  const handleArchive = async (task: Task) => {
     try {
-      const updated = await updateTask(task.id, { starred: !task.starred });
-      setTasks((prev) => sortTasks(prev.map((t) => (t.id === task.id ? updated : t))));
+      await updateTask(task.id, { archived: true });
+      setTasks((prev) => prev.filter((t) => t.id !== task.id));
+      if (archOpen) refreshArchived();
     } catch {
       // 与项目现状一致：不引入错误 UI 体系
     }
+  };
+
+  // 恢复：从归档列表本地移除，主列表整体重拉（update 会刷新 updated_at，重拉最省事且保序）。
+  // 两个请求都成功后才落状态，避免半途失败造成两端列表不一致。
+  const handleRestore = async (task: Task) => {
+    try {
+      await updateTask(task.id, { archived: false });
+      const fresh = await listTasks();
+      setArchived((prev) => (prev ? prev.filter((t) => t.id !== task.id) : prev));
+      setTasks(fresh);
+    } catch {
+      // 与项目现状一致：不引入错误 UI 体系
+    }
+  };
+
+  const handleDeleteArchived = async (task: Task) => {
+    await deleteTask(task.id);
+    setArchived((prev) => (prev ? prev.filter((t) => t.id !== task.id) : prev));
+    if (pathname === `/t/${task.id}`) router.push("/");
+  };
+
+  const toggleArchivedSection = () => {
+    if (!archOpen) refreshArchived(); // 首次及每次展开都拉取最新归档列表
+    setArchOpen(!archOpen);
   };
 
   const startEdit = (task: Task) => {
@@ -258,11 +291,15 @@ export function TaskList() {
                       }}
                       onTogglePin={() => {
                         setOpenMenuId(null);
-                        void handleTogglePin(task);
+                        void handleToggleFlag(task, "pinned");
                       }}
                       onToggleStar={() => {
                         setOpenMenuId(null);
-                        void handleToggleStar(task);
+                        void handleToggleFlag(task, "starred");
+                      }}
+                      onArchive={() => {
+                        setOpenMenuId(null);
+                        void handleArchive(task);
                       }}
                       onDelete={() => {
                         setOpenMenuId(null);
@@ -276,6 +313,13 @@ export function TaskList() {
           );
         })}
       </ul>
+      <ArchivedSection
+        expanded={archOpen}
+        tasks={archived}
+        onToggle={toggleArchivedSection}
+        onRestore={(task) => void handleRestore(task)}
+        onDelete={(task) => void handleDeleteArchived(task)}
+      />
     </section>
   );
 }

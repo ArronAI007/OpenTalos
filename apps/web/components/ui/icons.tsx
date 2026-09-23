@@ -117,3 +117,40 @@ export function StarIcon(props: IconProps) {
     </Icon>
   );
 }
+
+export function ArchiveIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x={2} y={3} width={20} height={5} rx={1} />
+      <path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8" />
+      <path d="M10 12h4" />
+    </Icon>
+  );
+}
+
+export function ArchiveRestoreIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x={2} y={3} width={20} height={5} rx={1} />
+      <path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8" />
+      <path d="m9.5 14 2.5-2.5 2.5 2.5" />
+      <path d="M12 11.5V17" />
+    </Icon>
+  );
+}
+
+export function ChevronDownIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="m6 9 6 6 6-6" />
+    </Icon>
+  );
+}
+
+export function ChevronRightIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="m9 18 6-6-6-6" />
+    </Icon>
+  );
+}

@@ -4,7 +4,7 @@ import os
 import sys
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -28,11 +28,15 @@ class PostMessageRequest(BaseModel):
 
 
 class UpdateTaskRequest(BaseModel):
-    # 字段均可选但至少要有一个；后续 archived 字段加进此处并经
-    # store.update_task 的通用通道落地。
+    # 字段均可选但至少要有一个；布尔 flag 与 _FLAG_FIELDS 一一对应，PATCH 端点统一循环装配。
     title: str | None = None
     pinned: bool | None = None
     starred: bool | None = None
+    archived: bool | None = None
+
+
+# 任务的布尔 flag 字段：PATCH 端点按下表统一装配，新增 flag 只需在此处与模型各加一行。
+_FLAG_FIELDS = ("pinned", "starred", "archived")
 
 
 def _sse(event: dict) -> str:
@@ -77,8 +81,12 @@ def create_app(runtime: ChatRuntime | None = None) -> FastAPI:
         }
 
     @app.get("/api/tasks")
-    async def list_tasks() -> dict:
-        return {"tasks": store.list_tasks()}
+    async def list_tasks(archived: int = Query(0, ge=0, le=1)) -> dict:
+        # archived 用 query 而非子路径：避开与 /api/tasks/{task_id} 的路径歧义。
+        # int + 范围约束 0..1：query 字符串能正常强转，非 0/1 一律 422。
+        # （不用 Literal[0, 1]——pydantic v2 的字面量校验不做字符串强转，"1" 会被误判 422。）
+        tasks = store.list_archived_tasks() if archived else store.list_tasks()
+        return {"tasks": tasks}
 
     @app.post("/api/tasks", status_code=201)
     async def create_task(request: CreateTaskRequest) -> dict:
@@ -88,19 +96,22 @@ def create_app(runtime: ChatRuntime | None = None) -> FastAPI:
 
     @app.patch("/api/tasks/{task_id}")
     async def update_task(task_id: str, request: UpdateTaskRequest) -> dict:
-        if request.title is None and request.pinned is None and request.starred is None:
+        # 校验顺序保持 422（全 None）→ 400（title 空白）→ 404（任务不存在）。
+        if request.title is None and all(
+            getattr(request, field) is None for field in _FLAG_FIELDS
+        ):
             raise HTTPException(422, "no updatable field provided")
-        # 收集式装配待更新字段：title 去首尾空白，pinned/starred 布尔转 SQLite 0/1。
+        # 收集式装配待更新字段：title 去首尾空白，flag 布尔统一转 SQLite 0/1。
         fields: dict[str, str | int] = {}
         if request.title is not None:
             title = request.title.strip()
             if not title:
                 raise HTTPException(400, "title must not be blank")
             fields["title"] = title
-        if request.pinned is not None:
-            fields["pinned"] = 1 if request.pinned else 0
-        if request.starred is not None:
-            fields["starred"] = 1 if request.starred else 0
+        for field in _FLAG_FIELDS:
+            value = getattr(request, field)
+            if value is not None:
+                fields[field] = 1 if value else 0
         updated = store.update_task(task_id, **fields)
         if updated is None:
             raise HTTPException(404, "task not found")

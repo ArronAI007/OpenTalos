@@ -118,6 +118,32 @@ async def test_list_tasks_orders_pinned_starred_plain(api) -> None:
     assert ids == [pinned["id"], starred["id"], plain["id"]]
 
 
+async def test_patch_task_archive_hides_from_main_list(api) -> None:
+    task = (await api.post("/api/tasks", json={"agent_type": "react"})).json()
+    resp = await api.patch(f"/api/tasks/{task['id']}", json={"archived": True})
+    assert resp.status_code == 200
+    assert resp.json()["archived"] == 1
+    # 主列表消失，归档列表出现
+    assert (await api.get("/api/tasks")).json()["tasks"] == []
+    archived = (await api.get("/api/tasks", params={"archived": 1})).json()["tasks"]
+    assert [t["id"] for t in archived] == [task["id"]]
+    assert archived[0]["archived"] == 1
+
+
+async def test_patch_task_unarchive_restores_to_main_list(api) -> None:
+    task = (await api.post("/api/tasks", json={"agent_type": "react"})).json()
+    await api.patch(f"/api/tasks/{task['id']}", json={"archived": True})
+    resp = await api.patch(f"/api/tasks/{task['id']}", json={"archived": False})
+    assert resp.status_code == 200
+    assert resp.json()["archived"] == 0
+    assert [t["id"] for t in (await api.get("/api/tasks")).json()["tasks"]] == [task["id"]]
+    assert (await api.get("/api/tasks", params={"archived": 1})).json()["tasks"] == []
+
+
+async def test_list_tasks_archived_param_rejects_invalid_value(api) -> None:
+    assert (await api.get("/api/tasks", params={"archived": 2})).status_code == 422
+
+
 async def test_post_invalid_agent_type_422(api) -> None:
     resp = await api.post("/api/tasks", json={"agent_type": "nope"})
     assert resp.status_code == 422

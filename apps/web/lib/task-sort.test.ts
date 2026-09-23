@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { sortTasks } from "./task-sort";
 import type { Task } from "./api";
 
+// 归档任务不进主列表（服务端已过滤），sortTasks 无需感知 archived——故工厂固定 archived: false。
 const task = (id: string, updatedAt: string, pinned = false, starred = false): Task => ({
   id,
   title: `任务 ${id}`,
@@ -9,6 +10,7 @@ const task = (id: string, updatedAt: string, pinned = false, starred = false): T
   updated_at: updatedAt,
   pinned,
   starred,
+  archived: false,
 });
 
 describe("sortTasks", () => {

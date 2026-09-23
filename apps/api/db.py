@@ -13,7 +13,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   pinned INTEGER NOT NULL DEFAULT 0,  -- SQLite 布尔：0 未固定 / 1 已固定
-  starred INTEGER NOT NULL DEFAULT 0  -- SQLite 布尔：0 未收藏 / 1 已收藏
+  starred INTEGER NOT NULL DEFAULT 0,  -- SQLite 布尔：0 未收藏 / 1 已收藏
+  archived INTEGER NOT NULL DEFAULT 0  -- SQLite 布尔：0 未归档 / 1 已归档
 );
 CREATE TABLE IF NOT EXISTS messages (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -41,6 +42,7 @@ class ChatStore:
     _MIGRATIONS = (
         ("pinned", "ALTER TABLE tasks ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0"),
         ("starred", "ALTER TABLE tasks ADD COLUMN starred INTEGER NOT NULL DEFAULT 0"),
+        ("archived", "ALTER TABLE tasks ADD COLUMN archived INTEGER NOT NULL DEFAULT 0"),
     )
 
     @staticmethod
@@ -72,9 +74,18 @@ class ChatStore:
         return dict(row) if row else None
 
     def list_tasks(self) -> list[dict]:
+        # 主列表只含未归档任务
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM tasks ORDER BY pinned DESC, starred DESC, updated_at DESC, rowid DESC"
+                "SELECT * FROM tasks WHERE archived = 0"
+                " ORDER BY pinned DESC, starred DESC, updated_at DESC, rowid DESC"
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def list_archived_tasks(self) -> list[dict]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM tasks WHERE archived = 1 ORDER BY updated_at DESC, rowid DESC"
             ).fetchall()
         return [dict(row) for row in rows]
 
@@ -104,11 +115,11 @@ class ChatStore:
     def update_task(self, task_id: str, **fields: str | int) -> dict | None:
         """通用字段更新通道，返回更新后的任务；任务不存在返回 None。
 
-        落地 title / pinned / starred 列；后续 archived 等字段经同一通道扩展：
+        落地 title / pinned / starred / archived 列；后续新字段经同一通道扩展：
         在 _UPDATABLE_COLUMNS 白名单中加列名即可（列名须已存在于 schema）。白名单同时
         保证 SQL 列名不可注入。
         """
-        _UPDATABLE_COLUMNS = {"title", "pinned", "starred"}
+        _UPDATABLE_COLUMNS = {"title", "pinned", "starred", "archived"}
         updates = {k: v for k, v in fields.items() if k in _UPDATABLE_COLUMNS}
         if not updates:
             return self.get_task(task_id)
