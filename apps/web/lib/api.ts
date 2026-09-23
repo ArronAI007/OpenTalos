@@ -25,6 +25,13 @@ export async function createTask(agentType: string): Promise<Task> {
     body: JSON.stringify({ agent_type: agentType }),
   });
 }
+export async function updateTask(id: string, patch: { title?: string }): Promise<Task> {
+  return fetchJson<Task>(`${API_URL}/api/tasks/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+}
 export async function deleteTask(id: string): Promise<void> {
   // 204 无响应体，不能走 fetchJson 的 res.json()，仅校验状态码。
   const res = await fetch(`${API_URL}/api/tasks/${id}`, { method: "DELETE" });

@@ -44,6 +44,28 @@ async def test_task_lifecycle(api) -> None:
     assert (await api.get("/api/tasks")).json()["tasks"] == []
 
 
+async def test_patch_task_rename_persists(api) -> None:
+    task = (await api.post("/api/tasks", json={"agent_type": "react"})).json()
+    resp = await api.patch(f"/api/tasks/{task['id']}", json={"title": "  重命名任务  "})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["id"] == task["id"]
+    assert body["title"] == "重命名任务"  # 已去首尾空白
+    # 持久化：列表里仍是新标题
+    assert (await api.get("/api/tasks")).json()["tasks"][0]["title"] == "重命名任务"
+
+
+async def test_patch_task_missing_404(api) -> None:
+    resp = await api.patch("/api/tasks/no-such-id", json={"title": "x"})
+    assert resp.status_code == 404
+
+
+async def test_patch_task_blank_title_400(api) -> None:
+    task = (await api.post("/api/tasks", json={"agent_type": "react"})).json()
+    assert (await api.patch(f"/api/tasks/{task['id']}", json={"title": ""})).status_code == 400
+    assert (await api.patch(f"/api/tasks/{task['id']}", json={"title": "   "})).status_code == 400
+
+
 async def test_post_invalid_agent_type_422(api) -> None:
     resp = await api.post("/api/tasks", json={"agent_type": "nope"})
     assert resp.status_code == 422

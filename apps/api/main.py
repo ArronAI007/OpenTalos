@@ -27,6 +27,12 @@ class PostMessageRequest(BaseModel):
     content: str
 
 
+class UpdateTaskRequest(BaseModel):
+    # 字段可选：本轮仅支持 title；后续 pinned/starred/archived 字段加进此处并经
+    # store.update_task 的通用通道落地。
+    title: str | None = None
+
+
 def _sse(event: dict) -> str:
     return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
@@ -77,6 +83,18 @@ def create_app(runtime: ChatRuntime | None = None) -> FastAPI:
         if request.agent_type not in AGENT_TYPES:
             raise HTTPException(422, f"unknown agent_type: {request.agent_type}")
         return store.create_task(request.agent_type)
+
+    @app.patch("/api/tasks/{task_id}")
+    async def update_task(task_id: str, request: UpdateTaskRequest) -> dict:
+        if request.title is None:
+            raise HTTPException(422, "no updatable field provided")
+        title = request.title.strip()
+        if not title:
+            raise HTTPException(400, "title must not be blank")
+        updated = store.update_task(task_id, title=title)
+        if updated is None:
+            raise HTTPException(404, "task not found")
+        return updated
 
     @app.delete("/api/tasks/{task_id}", status_code=204)
     async def delete_task(task_id: str) -> None:

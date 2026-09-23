@@ -45,6 +45,19 @@ def test_title_set_only_once(store: ChatStore) -> None:
     assert store.get_task(task["id"])["title"] == "第一句话"
 
 
+def test_update_task_renames_and_persists(store: ChatStore) -> None:
+    task = store.create_task("react")
+    updated = store.update_task(task["id"], title="新名字")
+    assert updated is not None
+    assert updated["title"] == "新名字"
+    # 持久化：重新读取仍是新标题
+    assert store.get_task(task["id"])["title"] == "新名字"
+
+
+def test_update_task_missing_returns_none(store: ChatStore) -> None:
+    assert store.update_task("no-such-id", title="x") is None
+
+
 def test_append_unknown_kind_raises(store: ChatStore) -> None:
     task = store.create_task("react")
     with pytest.raises(ValueError):

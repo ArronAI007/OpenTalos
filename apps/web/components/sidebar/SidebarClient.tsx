@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
-import { createTask, deleteTask, listTasks, type Task } from "@/lib/api";
+import { useEffect, useRef, useState } from "react";
+import { createTask, deleteTask, listTasks, updateTask, type Task } from "@/lib/api";
 import { readAgentType } from "@/lib/agent-type";
 import { ClockIcon, PencilSquareIcon, PuzzleIcon, SearchIcon, SparklesIcon } from "@/components/ui/icons";
 import { LogoMark } from "./Logo";
+import { TaskListMenu } from "./TaskListMenu";
 
 // 新建任务逻辑抽成 hook：窄栏图标与展开态按钮共用同一份 busy/error 状态，
 // 失败时行内报错由展开后的 NewTaskButton 展示（窄栏触发失败会自动展开）。
@@ -97,6 +98,11 @@ export function SidebarRail({ busy, onCreate, onExpand, onOpenSearch }: SidebarR
 
 export function TaskList() {
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState("");
+  const [editError, setEditError] = useState<string | null>(null);
+  const committingRef = useRef(false);
   const pathname = usePathname();
   const router = useRouter();
 
@@ -104,10 +110,60 @@ export function TaskList() {
     void listTasks().then(setTasks).catch(() => undefined);
   }, [pathname]); // 路由变化（新建/删除导航）触发刷新
 
+  // 点击菜单外或 Esc 关闭当前唯一打开的菜单。
+  useEffect(() => {
+    if (openMenuId === null) return;
+    const onDown = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && !target.closest(`[data-task-row="${openMenuId}"]`)) setOpenMenuId(null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpenMenuId(null);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [openMenuId]);
+
   const handleDelete = async (taskId: string) => {
     await deleteTask(taskId);
     setTasks((prev) => prev.filter((t) => t.id !== taskId));
     if (pathname === `/t/${taskId}`) router.push("/");
+  };
+
+  const startEdit = (task: Task) => {
+    setEditingId(task.id);
+    setEditValue(task.title);
+    setEditError(null);
+    committingRef.current = false;
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditError(null);
+  };
+
+  const commitEdit = async (task: Task) => {
+    if (committingRef.current) return; // 防 Enter 提交后 blur 二次触发
+    const trimmed = editValue.trim();
+    if (!trimmed) {
+      cancelEdit(); // 空标题前端先挡，不提交
+      return;
+    }
+    committingRef.current = true;
+    try {
+      const updated = await updateTask(task.id, { title: trimmed });
+      setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, ...updated } : t)));
+      setEditingId(null);
+    } catch {
+      setEditError("重命名失败，请重试");
+      setEditValue(task.title); // 回退原值
+    } finally {
+      committingRef.current = false;
+    }
   };
 
   return (
@@ -116,22 +172,68 @@ export function TaskList() {
       <ul>
         {tasks.map((task) => {
           const active = pathname === `/t/${task.id}`;
+          const editing = editingId === task.id;
           return (
-            <li key={task.id} className="group relative">
-              <a
-                href={`/t/${task.id}`}
-                className={`block rounded-lg px-3 py-2 text-sm hover:bg-white ${active ? "bg-white font-medium" : ""}`}
-              >
-                <span className="block truncate">{task.title || "（未命名任务）"}</span>
-                <span className="text-xs text-text-secondary">{task.agent_type}</span>
-              </a>
-              <button
-                aria-label={`删除 ${task.title}`}
-                onClick={() => void handleDelete(task.id)}
-                className="absolute right-2 top-2 hidden rounded px-1 text-xs text-text-secondary hover:text-red-500 group-hover:block"
-              >
-                ✕
-              </button>
+            <li key={task.id} className="group relative" data-task-row={task.id}>
+              {editing ? (
+                <div className="px-3 py-2">
+                  <input
+                    value={editValue}
+                    onChange={(e) => setEditValue(e.target.value)}
+                    onBlur={() => void commitEdit(task)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        void commitEdit(task);
+                      } else if (e.key === "Escape") {
+                        cancelEdit();
+                      }
+                    }}
+                    autoFocus
+                    onFocus={(e) => e.target.select()}
+                    aria-label="重命名任务"
+                    className="w-full rounded border border-border bg-white px-2 py-1 text-sm outline-none focus:border-accent"
+                  />
+                  {editError && <p className="mt-1 text-xs text-red-500">{editError}</p>}
+                </div>
+              ) : (
+                <>
+                  <a
+                    href={`/t/${task.id}`}
+                    className={`block rounded-lg px-3 py-2 text-sm hover:bg-white ${active ? "bg-white font-medium" : ""}`}
+                  >
+                    <span className="block truncate">{task.title || "（未命名任务）"}</span>
+                    <span className="text-xs text-text-secondary">{task.agent_type}</span>
+                  </a>
+                  <button
+                    type="button"
+                    aria-label="更多选项"
+                    aria-haspopup="menu"
+                    aria-expanded={openMenuId === task.id}
+                    onClick={() => setOpenMenuId(openMenuId === task.id ? null : task.id)}
+                    className="absolute right-2 top-2 hidden rounded px-1.5 text-text-secondary hover:bg-sidebar hover:text-text group-hover:block"
+                  >
+                    ⋯
+                  </button>
+                  {openMenuId === task.id && (
+                    <TaskListMenu
+                      task={task}
+                      onRename={() => {
+                        setOpenMenuId(null);
+                        startEdit(task);
+                      }}
+                      onOpenInNewTab={() => {
+                        window.open(`/t/${task.id}`, "_blank", "noopener,noreferrer");
+                        setOpenMenuId(null);
+                      }}
+                      onDelete={() => {
+                        setOpenMenuId(null);
+                        void handleDelete(task.id);
+                      }}
+                    />
+                  )}
+                </>
+              )}
             </li>
           );
         })}

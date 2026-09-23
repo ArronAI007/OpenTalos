@@ -83,6 +83,28 @@ class ChatStore:
             rows = conn.execute("SELECT * FROM messages WHERE task_id = ? ORDER BY id", (task_id,)).fetchall()
         return [dict(row) for row in rows]
 
+    def update_task(self, task_id: str, **fields: str) -> dict | None:
+        """通用字段更新通道，返回更新后的任务；任务不存在返回 None。
+
+        本轮仅落地 title 列；后续 pinned / starred / archived 等字段经同一通道扩展：
+        在 _UPDATABLE_COLUMNS 白名单中加列名即可（列名须已存在于 schema）。白名单同时
+        保证 SQL 列名不可注入。
+        """
+        _UPDATABLE_COLUMNS = {"title"}
+        updates = {k: v for k, v in fields.items() if k in _UPDATABLE_COLUMNS}
+        if not updates:
+            return self.get_task(task_id)
+        updates["updated_at"] = _now()
+        assignments = ", ".join(f"{k} = ?" for k in updates)
+        with self._connect() as conn:
+            cursor = conn.execute(
+                f"UPDATE tasks SET {assignments} WHERE id = ?",
+                (*updates.values(), task_id),
+            )
+            if cursor.rowcount == 0:
+                return None
+        return self.get_task(task_id)
+
     def set_title_if_empty(self, task_id: str, title: str) -> None:
         with self._connect() as conn:
             conn.execute("UPDATE tasks SET title = ? WHERE id = ? AND title = ''", (title, task_id))
