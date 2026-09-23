@@ -2,13 +2,28 @@
 
 import { useState } from "react";
 
-export function Composer({ onSend, disabled }: { onSend: (text: string) => void; disabled: boolean }) {
-  const [value, setValue] = useState("");
+export function Composer({
+  onSend,
+  disabled,
+  value: controlledValue,
+  onChange,
+}: {
+  onSend: (text: string) => void;
+  disabled: boolean;
+  value?: string;
+  onChange?: (value: string) => void;
+}) {
+  const [internalValue, setInternalValue] = useState("");
+  const isControlled = onChange !== undefined;
+  const value = isControlled ? (controlledValue ?? "") : internalValue;
+  const setValue = isControlled ? onChange : setInternalValue;
 
   const submit = () => {
     const text = value.trim();
     if (!text || disabled) return;
-    setValue("");
+    // 受控模式由父组件（HomeComposer）决定何时清空，失败时才能保留草稿；
+    // 非受控模式保持“提交即清空”的原有行为（任务页复用）。
+    if (!isControlled) setValue("");
     onSend(text);
   };
 

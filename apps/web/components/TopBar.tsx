@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { fetchConfig, type AppConfig } from "@/lib/api";
-import { AGENT_TYPE_KEY, DEFAULT_AGENT_TYPE } from "@/components/sidebar/SidebarClient";
+import { AGENT_TYPE_KEY, DEFAULT_AGENT_TYPE } from "@/lib/agent-type";
 
 const AGENT_TYPE_LABELS: Record<string, string> = {
   toolcall: "原生函数调用，最快",

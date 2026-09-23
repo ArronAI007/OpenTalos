@@ -3,13 +3,7 @@
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { createTask, deleteTask, listTasks, type Task } from "@/lib/api";
-
-export const AGENT_TYPE_KEY = "opentalos.agentType";
-export const DEFAULT_AGENT_TYPE = "react";
-
-export function currentAgentType(): string {
-  return localStorage.getItem(AGENT_TYPE_KEY) ?? DEFAULT_AGENT_TYPE;
-}
+import { readAgentType } from "@/lib/agent-type";
 
 export function NewTaskButton() {
   const router = useRouter();
@@ -21,7 +15,7 @@ export function NewTaskButton() {
     setBusy(true);
     setError(null);
     try {
-      const task = await createTask(currentAgentType());
+      const task = await createTask(readAgentType());
       router.push(`/t/${task.id}`);
     } catch {
       setError("创建失败，请检查 API 是否启动");
