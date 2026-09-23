@@ -1,4 +1,5 @@
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import type { UiMessage } from "@/lib/chat-events";
 
 function ToolBubble({ message }: { message: Extract<UiMessage, { kind: "tool" }> }) {
@@ -32,8 +33,8 @@ export function MessageList({ messages }: { messages: UiMessage[] }) {
         if (message.kind === "assistant") {
           return (
             <li key={message.id} className="max-w-[85%] self-start text-sm leading-6">
-              <div className="prose prose-sm max-w-none">
-                <ReactMarkdown>{message.content}</ReactMarkdown>
+              <div className="md">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
               </div>
               {message.streaming && <span className="animate-pulse text-text-secondary">▍</span>}
             </li>
