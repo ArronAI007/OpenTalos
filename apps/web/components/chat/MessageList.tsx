@@ -23,6 +23,9 @@ function ToolBubble({ message }: { message: Extract<UiMessage, { kind: "tool" }>
   );
 }
 
+// 消息行行壳：ol 已铺满内容区，列宽与内边距约束收回到行级（与原先 max-w-3xl + px-4 的几何等同）。
+const rowCls = "mx-auto w-full max-w-3xl px-4";
+
 export function MessageList({ messages }: { messages: UiMessage[] }) {
   const listRef = useRef<HTMLOListElement>(null);
   // 跟随滚动开关：初始 true（进入任务/历史加载后落在最新消息）；用户上翻超过阈值即停跟，回到底部恢复。
@@ -47,32 +50,38 @@ export function MessageList({ messages }: { messages: UiMessage[] }) {
       onScroll={(e) => {
         stickRef.current = isNearBottom(e.currentTarget);
       }}
-      className="flex flex-1 flex-col gap-3 overflow-y-auto px-4 py-6"
+      className="flex flex-1 flex-col gap-3 overflow-y-auto py-6"
     >
       {messages.map((message) => {
         if (message.kind === "user") {
           return (
-            <li key={message.id} className="max-w-[75%] self-end rounded-2xl bg-user-bubble px-4 py-2 text-sm text-white">
-              {message.content}
+            <li key={message.id} className={rowCls}>
+              <div className="ml-auto w-fit max-w-[75%] rounded-2xl bg-user-bubble px-4 py-2 text-sm text-white">
+                {message.content}
+              </div>
             </li>
           );
         }
         if (message.kind === "assistant") {
           return (
-            <li key={message.id} className="max-w-[85%] self-start text-sm leading-6">
-              <div className="md">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+            <li key={message.id} className={rowCls}>
+              <div className="max-w-[85%] text-sm leading-6">
+                <div className="md">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+                </div>
+                {message.streaming && <span className="animate-pulse text-text-secondary">▍</span>}
               </div>
-              {message.streaming && <span className="animate-pulse text-text-secondary">▍</span>}
             </li>
           );
         }
         if (message.kind === "tool") {
-          return <li key={message.id}><ToolBubble message={message} /></li>;
+          return <li key={message.id} className={rowCls}><ToolBubble message={message} /></li>;
         }
         return (
-          <li key={message.id} className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
-            出错了：{message.content}
+          <li key={message.id} className={rowCls}>
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+              出错了：{message.content}
+            </div>
           </li>
         );
       })}

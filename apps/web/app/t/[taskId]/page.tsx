@@ -24,9 +24,13 @@ function TaskChat({ taskId }: { taskId: string }) {
   }, [taskId, send]);
 
   return (
-    <section className="mx-auto flex h-full max-w-3xl flex-col">
+    // 滚动容器（MessageList 的 ol）铺满整个内容区：鼠标在右侧区域任意处都能滚动对话。
+    // 列宽约束下放到各消息行与 Composer 外壳，视觉与原先 max-w-3xl 居中完全一致。
+    <section className="flex h-full flex-col">
       <MessageList messages={messages} />
-      <Composer onSend={send} disabled={busy} />
+      <div className="mx-auto w-full max-w-3xl">
+        <Composer onSend={send} disabled={busy} />
+      </div>
     </section>
   );
 }
