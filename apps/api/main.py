@@ -40,8 +40,13 @@ def create_app(runtime: ChatRuntime | None = None) -> FastAPI:
         )
     app = FastAPI(title="OpenTalos Chat API")
     app.state.runtime = runtime
+    cors_origins = [
+        origin.strip()
+        for origin in os.environ.get("CORS_ORIGINS", "http://localhost:3000").split(",")
+        if origin.strip()
+    ]
     app.add_middleware(
-        CORSMiddleware, allow_origins=["http://localhost:3000"],
+        CORSMiddleware, allow_origins=cors_origins,
         allow_methods=["*"], allow_headers=["*"],
     )
     store = runtime.store

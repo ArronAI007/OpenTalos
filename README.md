@@ -99,8 +99,9 @@ Read by the chat API (`apps/api/main.py`) and the web frontend (`apps/web`) dire
 | `SKILL_SERVICE_URL` | `http://localhost:8321` | Where the chat API reaches the skill service. |
 | `NEXT_PUBLIC_API_URL` | `http://localhost:8400` | Chat API address the web frontend calls; `start.sh` injects it automatically, set it yourself only when running web standalone. |
 
-The web frontend must run on `:3000` — if you change its port, update `allow_origins` in
-`apps/api/main.py` (CORS) to match.
+By default the API only allows CORS from `http://localhost:3000`. If the web frontend runs on a
+different port, set `CORS_ORIGINS` (comma-separated; setting it replaces the default) before
+starting the API, e.g. `CORS_ORIGINS=http://localhost:3010 PORT=3010 ./scripts/start.sh`.
 
 ## Testing
 
