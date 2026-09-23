@@ -3,6 +3,7 @@ import { sortTasks } from "./task-sort";
 import type { Task } from "./api";
 
 // 归档任务不进主列表（服务端已过滤），sortTasks 无需感知 archived——故工厂固定 archived: false。
+// project_id 同理：排序不感知归组（partitionTasks 负责分组、组内才调用 sortTasks），固定 null。
 const task = (id: string, updatedAt: string, pinned = false, starred = false): Task => ({
   id,
   title: `任务 ${id}`,
@@ -11,6 +12,7 @@ const task = (id: string, updatedAt: string, pinned = false, starred = false): T
   pinned,
   starred,
   archived: false,
+  project_id: null,
 });
 
 describe("sortTasks", () => {

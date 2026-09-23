@@ -29,10 +29,17 @@ class PostMessageRequest(BaseModel):
 
 class UpdateTaskRequest(BaseModel):
     # 字段均可选但至少要有一个；布尔 flag 与 _FLAG_FIELDS 一一对应，PATCH 端点统一循环装配。
+    # project_id 不走 flag 通道：None 既是"未提供"又是"移出项目"的合法值，端点用
+    # model_fields_set 区分（显式 null → SET NULL）。
     title: str | None = None
     pinned: bool | None = None
     starred: bool | None = None
     archived: bool | None = None
+    project_id: str | None = None
+
+
+class CreateProjectRequest(BaseModel):
+    name: str
 
 
 # 任务的布尔 flag 字段：PATCH 端点按下表统一装配，新增 flag 只需在此处与模型各加一行。
@@ -96,13 +103,16 @@ def create_app(runtime: ChatRuntime | None = None) -> FastAPI:
 
     @app.patch("/api/tasks/{task_id}")
     async def update_task(task_id: str, request: UpdateTaskRequest) -> dict:
-        # 校验顺序保持 422（全 None）→ 400（title 空白）→ 404（任务不存在）。
-        if request.title is None and all(
-            getattr(request, field) is None for field in _FLAG_FIELDS
+        # 校验顺序保持 422（无有效字段）→ 400（title 空白 / 项目不存在）→ 404（任务不存在）。
+        # project_id 例外：显式 null 是合法的"移出项目"操作，不算"未提供"——以 model_fields_set 为准。
+        if (
+            request.title is None
+            and all(getattr(request, field) is None for field in _FLAG_FIELDS)
+            and "project_id" not in request.model_fields_set
         ):
             raise HTTPException(422, "no updatable field provided")
         # 收集式装配待更新字段：title 去首尾空白，flag 布尔统一转 SQLite 0/1。
-        fields: dict[str, str | int] = {}
+        fields: dict[str, str | int | None] = {}
         if request.title is not None:
             title = request.title.strip()
             if not title:
@@ -112,10 +122,26 @@ def create_app(runtime: ChatRuntime | None = None) -> FastAPI:
             value = getattr(request, field)
             if value is not None:
                 fields[field] = 1 if value else 0
+        if "project_id" in request.model_fields_set:
+            # 项目不存在返回 400 而非 404：避免与"任务不存在"的 404 歧义
+            if request.project_id is not None and store.get_project(request.project_id) is None:
+                raise HTTPException(400, "project not found")
+            fields["project_id"] = request.project_id  # 显式 null → 置 NULL 移出项目
         updated = store.update_task(task_id, **fields)
         if updated is None:
             raise HTTPException(404, "task not found")
         return updated
+
+    @app.get("/api/projects")
+    async def list_projects() -> dict:
+        return {"projects": store.list_projects()}
+
+    @app.post("/api/projects")
+    async def create_project(request: CreateProjectRequest) -> dict:
+        name = request.name.strip()
+        if not name:
+            raise HTTPException(400, "name must not be blank")
+        return store.create_project(name)
 
     @app.delete("/api/tasks/{task_id}", status_code=204)
     async def delete_task(task_id: str) -> None:

@@ -3,14 +3,16 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { createTask, deleteTask, listTasks, updateTask, type Task, type TaskPatch } from "@/lib/api";
+import { createProject, createTask, deleteTask, listProjects, listTasks, updateTask, type Project, type Task, type TaskPatch } from "@/lib/api";
 import { readAgentType } from "@/lib/agent-type";
 import { copyText } from "@/lib/clipboard";
 import { sortTasks } from "@/lib/task-sort";
+import { partitionTasks } from "@/lib/task-projects";
 import { ClockIcon, PencilSquareIcon, PinIcon, PuzzleIcon, SearchIcon, SparklesIcon, StarIcon } from "@/components/ui/icons";
 import { LogoMark } from "./Logo";
 import { TaskListMenu } from "./TaskListMenu";
 import { ArchivedSection } from "./ArchivedSection";
+import { ProjectFolder } from "./ProjectFolder";
 
 // 新建任务逻辑抽成 hook：窄栏图标与展开态按钮共用同一份 busy/error 状态，
 // 失败时行内报错由展开后的 NewTaskButton 展示（窄栏触发失败会自动展开）。
@@ -101,6 +103,7 @@ export function SidebarRail({ busy, onCreate, onExpand, onOpenSearch }: SidebarR
 
 export function TaskList() {
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
@@ -113,6 +116,7 @@ export function TaskList() {
 
   useEffect(() => {
     void listTasks().then(setTasks).catch(() => undefined);
+    void listProjects().then(setProjects).catch(() => undefined);
   }, [pathname]); // 路由变化（新建/删除导航）触发刷新
 
   // 点击菜单外或 Esc 关闭当前唯一打开的菜单。
@@ -178,6 +182,29 @@ export function TaskList() {
     }
   };
 
+  // 移动到项目 / 移出项目（projectId=null）：成功后本地 patch project_id 即可
+  // —— partitionTasks 在渲染期重算分组与组内排序，不重拉整个列表。
+  const handleMoveToProject = async (task: Task, projectId: string | null) => {
+    try {
+      const updated = await updateTask(task.id, { project_id: projectId });
+      setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
+    } catch {
+      // 与项目现状一致：不引入错误 UI 体系
+    }
+  };
+
+  // 新建项目并移入任务：先建项目再 PATCH 任务，两步都成功才落状态（对齐 handleRestore 的双请求语义）。
+  const handleCreateProjectAndMove = async (task: Task, name: string) => {
+    try {
+      const project = await createProject(name);
+      const updated = await updateTask(task.id, { project_id: project.id });
+      setProjects((prev) => [project, ...prev]); // list_projects 为 created_at 降序，新项目插最前
+      setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)));
+    } catch {
+      // 与项目现状一致：不引入错误 UI 体系
+    }
+  };
+
   const handleDeleteArchived = async (task: Task) => {
     await deleteTask(task.id);
     setArchived((prev) => (prev ? prev.filter((t) => t.id !== task.id) : prev));
@@ -221,103 +248,126 @@ export function TaskList() {
     }
   };
 
+  // 分组渲染：未归组列表保持原三级排序行为；项目文件夹排在未归组列表之后、已归档区之前，
+  // 组内各自三级排序。行结构在主列表与文件夹内完全同源——同一 renderTaskRow 渲染。
+  const { ungrouped, byProject } = partitionTasks(tasks);
+
+  const renderTaskRow = (task: Task) => {
+    const active = pathname === `/t/${task.id}`;
+    const editing = editingId === task.id;
+    return (
+      <li key={task.id} className="group relative" data-task-row={task.id}>
+        {editing ? (
+          <div className="px-3 py-2">
+            <input
+              value={editValue}
+              onChange={(e) => setEditValue(e.target.value)}
+              onBlur={() => void commitEdit(task)}
+              onKeyDown={(e) => {
+                if (e.nativeEvent.isComposing) return; // IME 候选窗激活时 Enter/Esc 仅作用于输入法，不提交/取消
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void commitEdit(task);
+                } else if (e.key === "Escape") {
+                  cancelEdit();
+                }
+              }}
+              autoFocus
+              onFocus={(e) => e.target.select()}
+              aria-label="重命名任务"
+              className="w-full rounded border border-border bg-white px-2 py-1 text-sm outline-none focus:border-accent"
+            />
+            {editError && <p className="mt-1 text-xs text-red-500">{editError}</p>}
+          </div>
+        ) : (
+          <>
+            <a
+              href={`/t/${task.id}`}
+              className={`block rounded-lg px-3 py-2 text-sm hover:bg-white ${active ? "bg-white font-medium" : ""}`}
+            >
+              <span className="flex items-center gap-1.5">
+                {task.pinned && (
+                  <PinIcon width={12} height={12} className="shrink-0 text-text-secondary" />
+                )}
+                {task.starred && (
+                  <StarIcon width={12} height={12} className="shrink-0 text-text-secondary" />
+                )}
+                <span className="truncate">{task.title || "（未命名任务）"}</span>
+              </span>
+              <span className="text-xs text-text-secondary">{task.agent_type}</span>
+            </a>
+            <button
+              type="button"
+              aria-label="更多选项"
+              aria-haspopup="menu"
+              aria-expanded={openMenuId === task.id}
+              onClick={() => setOpenMenuId(openMenuId === task.id ? null : task.id)}
+              className="absolute right-2 top-2 hidden rounded px-1.5 text-text-secondary hover:bg-sidebar hover:text-text group-hover:block"
+            >
+              ⋯
+            </button>
+            {openMenuId === task.id && (
+              <TaskListMenu
+                task={task}
+                projects={projects}
+                // 分享只负责复制并返回结果，不关菜单：反馈文案与延时关闭由 TaskListMenu 自管，
+                // 延时结束后经 onClose 回传关闭（成功/失败同一路径）。
+                onShare={() => copyText(`${window.location.origin}/t/${task.id}`)}
+                onClose={() => setOpenMenuId(null)}
+                onRename={() => {
+                  setOpenMenuId(null);
+                  startEdit(task);
+                }}
+                onOpenInNewTab={() => {
+                  window.open(`/t/${task.id}`, "_blank", "noopener,noreferrer");
+                  setOpenMenuId(null);
+                }}
+                onTogglePin={() => {
+                  setOpenMenuId(null);
+                  void handleToggleFlag(task, "pinned");
+                }}
+                onToggleStar={() => {
+                  setOpenMenuId(null);
+                  void handleToggleFlag(task, "starred");
+                }}
+                onMoveToProject={(projectId) => {
+                  setOpenMenuId(null);
+                  void handleMoveToProject(task, projectId);
+                }}
+                onCreateProjectAndMove={(name) => {
+                  setOpenMenuId(null);
+                  void handleCreateProjectAndMove(task, name);
+                }}
+                onArchive={() => {
+                  setOpenMenuId(null);
+                  void handleArchive(task);
+                }}
+                onDelete={() => {
+                  setOpenMenuId(null);
+                  void handleDelete(task.id);
+                }}
+              />
+            )}
+          </>
+        )}
+      </li>
+    );
+  };
+
   return (
     <section aria-label="任务历史" className="flex-1 overflow-y-auto">
       <p className="px-3 py-1 text-xs text-text-secondary">任务历史</p>
       <ul>
-        {tasks.map((task) => {
-          const active = pathname === `/t/${task.id}`;
-          const editing = editingId === task.id;
-          return (
-            <li key={task.id} className="group relative" data-task-row={task.id}>
-              {editing ? (
-                <div className="px-3 py-2">
-                  <input
-                    value={editValue}
-                    onChange={(e) => setEditValue(e.target.value)}
-                    onBlur={() => void commitEdit(task)}
-                    onKeyDown={(e) => {
-                      if (e.nativeEvent.isComposing) return; // IME 候选窗激活时 Enter/Esc 仅作用于输入法，不提交/取消
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        void commitEdit(task);
-                      } else if (e.key === "Escape") {
-                        cancelEdit();
-                      }
-                    }}
-                    autoFocus
-                    onFocus={(e) => e.target.select()}
-                    aria-label="重命名任务"
-                    className="w-full rounded border border-border bg-white px-2 py-1 text-sm outline-none focus:border-accent"
-                  />
-                  {editError && <p className="mt-1 text-xs text-red-500">{editError}</p>}
-                </div>
-              ) : (
-                <>
-                  <a
-                    href={`/t/${task.id}`}
-                    className={`block rounded-lg px-3 py-2 text-sm hover:bg-white ${active ? "bg-white font-medium" : ""}`}
-                  >
-                    <span className="flex items-center gap-1.5">
-                      {task.pinned && (
-                        <PinIcon width={12} height={12} className="shrink-0 text-text-secondary" />
-                      )}
-                      {task.starred && (
-                        <StarIcon width={12} height={12} className="shrink-0 text-text-secondary" />
-                      )}
-                      <span className="truncate">{task.title || "（未命名任务）"}</span>
-                    </span>
-                    <span className="text-xs text-text-secondary">{task.agent_type}</span>
-                  </a>
-                  <button
-                    type="button"
-                    aria-label="更多选项"
-                    aria-haspopup="menu"
-                    aria-expanded={openMenuId === task.id}
-                    onClick={() => setOpenMenuId(openMenuId === task.id ? null : task.id)}
-                    className="absolute right-2 top-2 hidden rounded px-1.5 text-text-secondary hover:bg-sidebar hover:text-text group-hover:block"
-                  >
-                    ⋯
-                  </button>
-                  {openMenuId === task.id && (
-                    <TaskListMenu
-                      task={task}
-                      // 分享只负责复制并返回结果，不关菜单：反馈文案与延时关闭由 TaskListMenu 自管，
-                      // 延时结束后经 onClose 回传关闭（成功/失败同一路径）。
-                      onShare={() => copyText(`${window.location.origin}/t/${task.id}`)}
-                      onClose={() => setOpenMenuId(null)}
-                      onRename={() => {
-                        setOpenMenuId(null);
-                        startEdit(task);
-                      }}
-                      onOpenInNewTab={() => {
-                        window.open(`/t/${task.id}`, "_blank", "noopener,noreferrer");
-                        setOpenMenuId(null);
-                      }}
-                      onTogglePin={() => {
-                        setOpenMenuId(null);
-                        void handleToggleFlag(task, "pinned");
-                      }}
-                      onToggleStar={() => {
-                        setOpenMenuId(null);
-                        void handleToggleFlag(task, "starred");
-                      }}
-                      onArchive={() => {
-                        setOpenMenuId(null);
-                        void handleArchive(task);
-                      }}
-                      onDelete={() => {
-                        setOpenMenuId(null);
-                        void handleDelete(task.id);
-                      }}
-                    />
-                  )}
-                </>
-              )}
-            </li>
-          );
-        })}
+        {ungrouped.map(renderTaskRow)}
       </ul>
+      {projects.map((project) => (
+        <ProjectFolder
+          key={project.id}
+          project={project}
+          tasks={byProject.get(project.id) ?? []}
+          renderTask={renderTaskRow}
+        />
+      ))}
       <ArchivedSection
         expanded={archOpen}
         tasks={archived}

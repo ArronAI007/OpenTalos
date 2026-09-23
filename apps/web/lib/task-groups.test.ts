@@ -10,6 +10,7 @@ const task = (id: string, updatedAt: string): Task => ({
   pinned: false,
   starred: false,
   archived: false,
+  project_id: null,
 });
 
 // 固定基准时间：2026-01-15 12:00（本地时区）。

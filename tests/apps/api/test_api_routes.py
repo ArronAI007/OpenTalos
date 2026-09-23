@@ -144,6 +144,71 @@ async def test_list_tasks_archived_param_rejects_invalid_value(api) -> None:
     assert (await api.get("/api/tasks", params={"archived": 2})).status_code == 422
 
 
+async def test_projects_empty_by_default(api) -> None:
+    resp = await api.get("/api/projects")
+    assert resp.status_code == 200
+    assert resp.json() == {"projects": []}
+
+
+async def test_create_and_list_projects(api) -> None:
+    resp = await api.post("/api/projects", json={"name": "  调研  "})
+    assert resp.status_code == 200
+    project = resp.json()
+    assert project["name"] == "调研"  # 已去首尾空白
+    assert project["id"]
+    assert project["created_at"]
+    listed = (await api.get("/api/projects")).json()["projects"]
+    assert [p["id"] for p in listed] == [project["id"]]
+
+
+async def test_projects_list_orders_newest_first(api) -> None:
+    first = (await api.post("/api/projects", json={"name": "最早"})).json()
+    second = (await api.post("/api/projects", json={"name": "最新"})).json()
+    ids = [p["id"] for p in (await api.get("/api/projects")).json()["projects"]]
+    assert ids == [second["id"], first["id"]]
+
+
+async def test_create_project_blank_name_400(api) -> None:
+    assert (await api.post("/api/projects", json={"name": ""})).status_code == 400
+    assert (await api.post("/api/projects", json={"name": "   "})).status_code == 400
+
+
+async def test_patch_task_assign_project(api) -> None:
+    task = (await api.post("/api/tasks", json={"agent_type": "react"})).json()
+    project = (await api.post("/api/projects", json={"name": "调研"})).json()
+    resp = await api.patch(f"/api/tasks/{task['id']}", json={"project_id": project["id"]})
+    assert resp.status_code == 200
+    assert resp.json()["project_id"] == project["id"]
+    # 列表里同样体现归组
+    assert (await api.get("/api/tasks")).json()["tasks"][0]["project_id"] == project["id"]
+
+
+async def test_patch_task_unknown_project_400(api) -> None:
+    task = (await api.post("/api/tasks", json={"agent_type": "react"})).json()
+    resp = await api.patch(f"/api/tasks/{task['id']}", json={"project_id": "no-such-project"})
+    assert resp.status_code == 400  # 400 而非 404：避免与任务不存在歧义
+
+
+async def test_patch_task_null_project_id_moves_out(api) -> None:
+    task = (await api.post("/api/tasks", json={"agent_type": "react"})).json()
+    project = (await api.post("/api/projects", json={"name": "调研"})).json()
+    await api.patch(f"/api/tasks/{task['id']}", json={"project_id": project["id"]})
+    # 显式 null = 移出项目，是合法操作，不算“全无有效字段”的 422
+    resp = await api.patch(f"/api/tasks/{task['id']}", json={"project_id": None})
+    assert resp.status_code == 200
+    assert resp.json()["project_id"] is None
+    assert (await api.get("/api/tasks")).json()["tasks"][0]["project_id"] is None
+
+
+async def test_patch_task_flag_regression_with_project_field(api) -> None:
+    # project_id 字段加入后，原有布尔 flag 通道不受影响
+    task = (await api.post("/api/tasks", json={"agent_type": "react"})).json()
+    resp = await api.patch(f"/api/tasks/{task['id']}", json={"pinned": True})
+    assert resp.status_code == 200
+    assert resp.json()["pinned"] == 1
+    assert resp.json()["project_id"] is None
+
+
 async def test_post_invalid_agent_type_422(api) -> None:
     resp = await api.post("/api/tasks", json={"agent_type": "nope"})
     assert resp.status_code == 422
