@@ -1,4 +1,4 @@
-import type { Task } from "@/lib/api";
+import type { Project, Task } from "@/lib/api";
 import { sortTasks } from "@/lib/task-sort";
 
 export interface TaskPartitions {
@@ -24,4 +24,14 @@ export function partitionTasks(tasks: Task[]): TaskPartitions {
     ungrouped: sortTasks(ungrouped),
     byProject: new Map([...byProject].map(([id, group]) => [id, sortTasks(group)])),
   };
+}
+
+// byProject 中找不到对应项目元数据的桶（projects 拉取失败或 project_id 引用漂移），
+// 并入未归组展示，避免任务从侧栏静默消失；无孤儿桶时原样返回（不引入多余分配）。
+export function visibleUngrouped(ungrouped: Task[], byProject: Map<string, Task[]>, projects: Project[]): Task[] {
+  const ids = new Set(projects.map((p) => p.id));
+  const orphans = [...byProject.entries()]
+    .filter(([projectId]) => !ids.has(projectId))
+    .flatMap(([, bucket]) => bucket);
+  return orphans.length === 0 ? ungrouped : sortTasks([...ungrouped, ...orphans]);
 }

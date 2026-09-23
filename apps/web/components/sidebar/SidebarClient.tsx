@@ -7,7 +7,7 @@ import { createProject, createTask, deleteTask, listProjects, listTasks, updateT
 import { readAgentType } from "@/lib/agent-type";
 import { copyText } from "@/lib/clipboard";
 import { sortTasks } from "@/lib/task-sort";
-import { partitionTasks } from "@/lib/task-projects";
+import { partitionTasks, visibleUngrouped } from "@/lib/task-projects";
 import { ClockIcon, PencilSquareIcon, PinIcon, PuzzleIcon, SearchIcon, SparklesIcon, StarIcon } from "@/components/ui/icons";
 import { LogoMark } from "./Logo";
 import { TaskListMenu } from "./TaskListMenu";
@@ -250,7 +250,9 @@ export function TaskList() {
 
   // 分组渲染：未归组列表保持原三级排序行为；项目文件夹排在未归组列表之后、已归档区之前，
   // 组内各自三级排序。行结构在主列表与文件夹内完全同源——同一 renderTaskRow 渲染。
+  // 找不到项目元数据的桶（projects 拉取失败或引用漂移）并入未归组展示，避免任务静默消失。
   const { ungrouped, byProject } = partitionTasks(tasks);
+  const visible = visibleUngrouped(ungrouped, byProject, projects);
 
   const renderTaskRow = (task: Task) => {
     const active = pathname === `/t/${task.id}`;
@@ -358,7 +360,7 @@ export function TaskList() {
     <section aria-label="任务历史" className="flex-1 overflow-y-auto">
       <p className="px-3 py-1 text-xs text-text-secondary">任务历史</p>
       <ul>
-        {ungrouped.map(renderTaskRow)}
+        {visible.map(renderTaskRow)}
       </ul>
       {projects.map((project) => (
         <ProjectFolder
