@@ -5,7 +5,8 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { createTask, deleteTask, listTasks, updateTask, type Task } from "@/lib/api";
 import { readAgentType } from "@/lib/agent-type";
-import { ClockIcon, PencilSquareIcon, PuzzleIcon, SearchIcon, SparklesIcon } from "@/components/ui/icons";
+import { sortTasks } from "@/lib/task-sort";
+import { ClockIcon, PencilSquareIcon, PinIcon, PuzzleIcon, SearchIcon, SparklesIcon } from "@/components/ui/icons";
 import { LogoMark } from "./Logo";
 import { TaskListMenu } from "./TaskListMenu";
 
@@ -134,6 +135,16 @@ export function TaskList() {
     if (pathname === `/t/${taskId}`) router.push("/");
   };
 
+  // 固定/取消固定：用接口返回的任务本地 patch 并按 sortTasks 重排，不重拉列表；失败静默。
+  const handleTogglePin = async (task: Task) => {
+    try {
+      const updated = await updateTask(task.id, { pinned: !task.pinned });
+      setTasks((prev) => sortTasks(prev.map((t) => (t.id === task.id ? updated : t))));
+    } catch {
+      // 与项目现状一致：不引入错误 UI 体系
+    }
+  };
+
   const startEdit = (task: Task) => {
     setEditingId(task.id);
     setEditValue(task.title);
@@ -203,7 +214,12 @@ export function TaskList() {
                     href={`/t/${task.id}`}
                     className={`block rounded-lg px-3 py-2 text-sm hover:bg-white ${active ? "bg-white font-medium" : ""}`}
                   >
-                    <span className="block truncate">{task.title || "（未命名任务）"}</span>
+                    <span className="flex items-center gap-1.5">
+                      {task.pinned && (
+                        <PinIcon width={12} height={12} className="shrink-0 text-text-secondary" />
+                      )}
+                      <span className="truncate">{task.title || "（未命名任务）"}</span>
+                    </span>
                     <span className="text-xs text-text-secondary">{task.agent_type}</span>
                   </a>
                   <button
@@ -226,6 +242,10 @@ export function TaskList() {
                       onOpenInNewTab={() => {
                         window.open(`/t/${task.id}`, "_blank", "noopener,noreferrer");
                         setOpenMenuId(null);
+                      }}
+                      onTogglePin={() => {
+                        setOpenMenuId(null);
+                        void handleTogglePin(task);
                       }}
                       onDelete={() => {
                         setOpenMenuId(null);

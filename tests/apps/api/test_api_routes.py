@@ -71,6 +71,29 @@ async def test_patch_task_empty_body_422(api) -> None:
     assert (await api.patch(f"/api/tasks/{task['id']}", json={})).status_code == 422
 
 
+async def test_patch_task_pin_and_unpin(api) -> None:
+    task = (await api.post("/api/tasks", json={"agent_type": "react"})).json()
+    resp = await api.patch(f"/api/tasks/{task['id']}", json={"pinned": True})
+    assert resp.status_code == 200
+    assert resp.json()["pinned"] == 1
+    # 列表里同样体现已固定
+    assert (await api.get("/api/tasks")).json()["tasks"][0]["pinned"] == 1
+    resp = await api.patch(f"/api/tasks/{task['id']}", json={"pinned": False})
+    assert resp.status_code == 200
+    assert resp.json()["pinned"] == 0
+    assert (await api.get("/api/tasks")).json()["tasks"][0]["pinned"] == 0
+
+
+async def test_list_tasks_places_pinned_first(api) -> None:
+    pinned = (await api.post("/api/tasks", json={"agent_type": "react"})).json()
+    resp = await api.patch(f"/api/tasks/{pinned['id']}", json={"pinned": True})
+    assert resp.status_code == 200
+    newer = (await api.post("/api/tasks", json={"agent_type": "react"})).json()
+    # 固定任务 updated_at 更旧仍排在最前
+    ids = [t["id"] for t in (await api.get("/api/tasks")).json()["tasks"]]
+    assert ids == [pinned["id"], newer["id"]]
+
+
 async def test_post_invalid_agent_type_422(api) -> None:
     resp = await api.post("/api/tasks", json={"agent_type": "nope"})
     assert resp.status_code == 422

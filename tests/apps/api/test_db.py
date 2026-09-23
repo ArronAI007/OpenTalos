@@ -1,3 +1,4 @@
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -77,3 +78,51 @@ def test_list_tasks_orders_by_updated_at_desc(store: ChatStore) -> None:
     second = store.create_task("toolcall")
     store.append_message(first["id"], "user", "触碰旧任务")
     assert [t["id"] for t in store.list_tasks()] == [first["id"], second["id"]]
+
+
+def test_task_defaults_to_unpinned(store: ChatStore) -> None:
+    assert store.create_task("react")["pinned"] == 0
+
+
+def test_pin_and_unpin_task_persists(store: ChatStore) -> None:
+    task = store.create_task("react")
+    pinned = store.update_task(task["id"], pinned=1)
+    assert pinned is not None
+    assert pinned["pinned"] == 1
+    assert store.get_task(task["id"])["pinned"] == 1  # 持久化：重新读取仍已固定
+    unpinned = store.update_task(task["id"], pinned=0)
+    assert unpinned is not None
+    assert unpinned["pinned"] == 0
+    assert store.get_task(task["id"])["pinned"] == 0
+
+
+def test_list_tasks_pinned_first_then_updated_at_desc(store: ChatStore) -> None:
+    pinned = store.create_task("react")
+    store.update_task(pinned["id"], pinned=1)
+    plain_old = store.create_task("toolcall")
+    plain_new = store.create_task("react")
+    # 固定任务 updated_at 最旧仍排最前；普通组内按 updated_at 降序
+    ids = [t["id"] for t in store.list_tasks()]
+    assert ids == [pinned["id"], plain_new["id"], plain_old["id"]]
+
+
+def test_legacy_db_without_pinned_column_migrates(tmp_path: Path) -> None:
+    db_path = tmp_path / "legacy.db"
+    # 构造旧 schema 库：tasks 表无 pinned 列且带一行旧数据
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "CREATE TABLE tasks (id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '',"
+        " agent_type TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"
+    )
+    conn.execute(
+        "INSERT INTO tasks (id, title, agent_type, created_at, updated_at)"
+        " VALUES ('t1', '旧任务', 'react', '2026-01-01T00:00:00', '2026-01-01T00:00:00')"
+    )
+    conn.commit()
+    conn.close()
+
+    store = ChatStore(db_path)
+    task = store.get_task("t1")
+    assert task is not None
+    assert task["pinned"] == 0  # 旧数据补默认值
+    assert store.update_task("t1", pinned=1)["pinned"] == 1  # 迁移后可正常固定

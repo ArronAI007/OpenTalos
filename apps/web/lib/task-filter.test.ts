@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { filterTasksByTitle } from "./task-filter";
 import type { Task } from "./api";
 
-const task = (id: string, title: string): Task => ({ id, title, agent_type: "react", updated_at: "" });
+const task = (id: string, title: string): Task => ({ id, title, agent_type: "react", updated_at: "", pinned: false });
 
 describe("filterTasksByTitle", () => {
   const tasks = [task("1", "写周报"), task("2", "调研 OpenTalos"), task("3", "Review 代码")];
@@ -27,7 +27,7 @@ describe("filterTasksByTitle", () => {
   it("null 标题不抛错且不匹配", () => {
     const mixed: Task[] = [
       task("1", "写周报"),
-      { id: "2", title: null as unknown as string, agent_type: "react", updated_at: "" },
+      { id: "2", title: null as unknown as string, agent_type: "react", updated_at: "", pinned: false },
     ];
     expect(filterTasksByTitle(mixed, "周报").map((t) => t.id)).toEqual(["1"]);
   });

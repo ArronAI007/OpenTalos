@@ -11,7 +11,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   title TEXT NOT NULL DEFAULT '',
   agent_type TEXT NOT NULL,
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  pinned INTEGER NOT NULL DEFAULT 0  -- SQLite 布尔：0 未固定 / 1 已固定
 );
 CREATE TABLE IF NOT EXISTS messages (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -33,6 +34,14 @@ class ChatStore:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as conn:
             conn.executescript(_SCHEMA)
+            self._migrate(conn)
+
+    @staticmethod
+    def _migrate(conn: sqlite3.Connection) -> None:
+        # 轻量迁移：CREATE TABLE IF NOT EXISTS 不会改造既有表，旧库缺 pinned 列时补上。
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(tasks)")}
+        if "pinned" not in columns:
+            conn.execute("ALTER TABLE tasks ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._path)
@@ -57,7 +66,9 @@ class ChatStore:
 
     def list_tasks(self) -> list[dict]:
         with self._connect() as conn:
-            rows = conn.execute("SELECT * FROM tasks ORDER BY updated_at DESC, rowid DESC").fetchall()
+            rows = conn.execute(
+                "SELECT * FROM tasks ORDER BY pinned DESC, updated_at DESC, rowid DESC"
+            ).fetchall()
         return [dict(row) for row in rows]
 
     def delete_task(self, task_id: str) -> bool:
@@ -83,14 +94,14 @@ class ChatStore:
             rows = conn.execute("SELECT * FROM messages WHERE task_id = ? ORDER BY id", (task_id,)).fetchall()
         return [dict(row) for row in rows]
 
-    def update_task(self, task_id: str, **fields: str) -> dict | None:
+    def update_task(self, task_id: str, **fields: str | int) -> dict | None:
         """通用字段更新通道，返回更新后的任务；任务不存在返回 None。
 
-        本轮仅落地 title 列；后续 pinned / starred / archived 等字段经同一通道扩展：
+        落地 title / pinned 列；后续 starred / archived 等字段经同一通道扩展：
         在 _UPDATABLE_COLUMNS 白名单中加列名即可（列名须已存在于 schema）。白名单同时
         保证 SQL 列名不可注入。
         """
-        _UPDATABLE_COLUMNS = {"title"}
+        _UPDATABLE_COLUMNS = {"title", "pinned"}
         updates = {k: v for k, v in fields.items() if k in _UPDATABLE_COLUMNS}
         if not updates:
             return self.get_task(task_id)

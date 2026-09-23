@@ -28,9 +28,10 @@ class PostMessageRequest(BaseModel):
 
 
 class UpdateTaskRequest(BaseModel):
-    # 字段可选：本轮仅支持 title；后续 pinned/starred/archived 字段加进此处并经
+    # 字段均可选但至少要有一个；后续 starred/archived 字段加进此处并经
     # store.update_task 的通用通道落地。
     title: str | None = None
+    pinned: bool | None = None
 
 
 def _sse(event: dict) -> str:
@@ -86,12 +87,18 @@ def create_app(runtime: ChatRuntime | None = None) -> FastAPI:
 
     @app.patch("/api/tasks/{task_id}")
     async def update_task(task_id: str, request: UpdateTaskRequest) -> dict:
-        if request.title is None:
+        if request.title is None and request.pinned is None:
             raise HTTPException(422, "no updatable field provided")
-        title = request.title.strip()
-        if not title:
-            raise HTTPException(400, "title must not be blank")
-        updated = store.update_task(task_id, title=title)
+        # 收集式装配待更新字段：title 去首尾空白，pinned 布尔转 SQLite 0/1。
+        fields: dict[str, str | int] = {}
+        if request.title is not None:
+            title = request.title.strip()
+            if not title:
+                raise HTTPException(400, "title must not be blank")
+            fields["title"] = title
+        if request.pinned is not None:
+            fields["pinned"] = 1 if request.pinned else 0
+        updated = store.update_task(task_id, **fields)
         if updated is None:
             raise HTTPException(404, "task not found")
         return updated

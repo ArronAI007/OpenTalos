@@ -7,6 +7,7 @@ const task = (id: string, updatedAt: string): Task => ({
   title: `任务 ${id}`,
   agent_type: "react",
   updated_at: updatedAt,
+  pinned: false,
 });
 
 // 固定基准时间：2026-01-15 12:00（本地时区）。
