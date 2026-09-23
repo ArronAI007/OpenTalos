@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { createTask, deleteTask, listTasks, updateTask, type Task } from "@/lib/api";
 import { readAgentType } from "@/lib/agent-type";
 import { sortTasks } from "@/lib/task-sort";
-import { ClockIcon, PencilSquareIcon, PinIcon, PuzzleIcon, SearchIcon, SparklesIcon } from "@/components/ui/icons";
+import { ClockIcon, PencilSquareIcon, PinIcon, PuzzleIcon, SearchIcon, SparklesIcon, StarIcon } from "@/components/ui/icons";
 import { LogoMark } from "./Logo";
 import { TaskListMenu } from "./TaskListMenu";
 
@@ -145,6 +145,16 @@ export function TaskList() {
     }
   };
 
+  // 收藏/取消收藏：与 handleTogglePin 同构，本地 patch 后重排。
+  const handleToggleStar = async (task: Task) => {
+    try {
+      const updated = await updateTask(task.id, { starred: !task.starred });
+      setTasks((prev) => sortTasks(prev.map((t) => (t.id === task.id ? updated : t))));
+    } catch {
+      // 与项目现状一致：不引入错误 UI 体系
+    }
+  };
+
   const startEdit = (task: Task) => {
     setEditingId(task.id);
     setEditValue(task.title);
@@ -218,6 +228,9 @@ export function TaskList() {
                       {task.pinned && (
                         <PinIcon width={12} height={12} className="shrink-0 text-text-secondary" />
                       )}
+                      {task.starred && (
+                        <StarIcon width={12} height={12} className="shrink-0 text-text-secondary" />
+                      )}
                       <span className="truncate">{task.title || "（未命名任务）"}</span>
                     </span>
                     <span className="text-xs text-text-secondary">{task.agent_type}</span>
@@ -246,6 +259,10 @@ export function TaskList() {
                       onTogglePin={() => {
                         setOpenMenuId(null);
                         void handleTogglePin(task);
+                      }}
+                      onToggleStar={() => {
+                        setOpenMenuId(null);
+                        void handleToggleStar(task);
                       }}
                       onDelete={() => {
                         setOpenMenuId(null);

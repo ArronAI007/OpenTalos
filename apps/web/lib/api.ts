@@ -1,11 +1,11 @@
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8400";
 
-export interface Task { id: string; title: string; agent_type: string; updated_at: string; pinned: boolean }
+export interface Task { id: string; title: string; agent_type: string; updated_at: string; pinned: boolean; starred: boolean }
 
-// 后端 SQLite 用 0/1 存 pinned；统一在此处归一为 boolean，组件层只见 boolean。
-type RawTask = Omit<Task, "pinned"> & { pinned: number };
+// 后端 SQLite 用 0/1 存 pinned/starred；统一在此处归一为 boolean，组件层只见 boolean。
+type RawTask = Omit<Task, "pinned" | "starred"> & { pinned: number; starred: number };
 function toTask(raw: RawTask): Task {
-  return { ...raw, pinned: Boolean(raw.pinned) };
+  return { ...raw, pinned: Boolean(raw.pinned), starred: Boolean(raw.starred) };
 }
 export interface StoredMessage { id: number; kind: "user" | "assistant" | "tool"; content: string; created_at: string }
 export interface AppConfig { model_name: string | null; agent_types: string[]; skills_reachable: boolean | null }
@@ -31,7 +31,7 @@ export async function createTask(agentType: string): Promise<Task> {
     body: JSON.stringify({ agent_type: agentType }),
   }).then(toTask);
 }
-export async function updateTask(id: string, patch: { title?: string; pinned?: boolean }): Promise<Task> {
+export async function updateTask(id: string, patch: { title?: string; pinned?: boolean; starred?: boolean }): Promise<Task> {
   return fetchJson<RawTask>(`${API_URL}/api/tasks/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },

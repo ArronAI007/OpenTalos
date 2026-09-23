@@ -94,6 +94,30 @@ async def test_list_tasks_places_pinned_first(api) -> None:
     assert ids == [pinned["id"], newer["id"]]
 
 
+async def test_patch_task_star_and_unstar(api) -> None:
+    task = (await api.post("/api/tasks", json={"agent_type": "react"})).json()
+    resp = await api.patch(f"/api/tasks/{task['id']}", json={"starred": True})
+    assert resp.status_code == 200
+    assert resp.json()["starred"] == 1
+    # 列表里同样体现已收藏
+    assert (await api.get("/api/tasks")).json()["tasks"][0]["starred"] == 1
+    resp = await api.patch(f"/api/tasks/{task['id']}", json={"starred": False})
+    assert resp.status_code == 200
+    assert resp.json()["starred"] == 0
+    assert (await api.get("/api/tasks")).json()["tasks"][0]["starred"] == 0
+
+
+async def test_list_tasks_orders_pinned_starred_plain(api) -> None:
+    starred = (await api.post("/api/tasks", json={"agent_type": "react"})).json()
+    assert (await api.patch(f"/api/tasks/{starred['id']}", json={"starred": True})).status_code == 200
+    pinned = (await api.post("/api/tasks", json={"agent_type": "react"})).json()
+    assert (await api.patch(f"/api/tasks/{pinned['id']}", json={"pinned": True})).status_code == 200
+    plain = (await api.post("/api/tasks", json={"agent_type": "react"})).json()
+    # 固定最前、收藏次之、普通最后（收藏任务的 updated_at 最旧仍排在普通之前）
+    ids = [t["id"] for t in (await api.get("/api/tasks")).json()["tasks"]]
+    assert ids == [pinned["id"], starred["id"], plain["id"]]
+
+
 async def test_post_invalid_agent_type_422(api) -> None:
     resp = await api.post("/api/tasks", json={"agent_type": "nope"})
     assert resp.status_code == 422

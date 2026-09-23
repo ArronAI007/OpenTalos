@@ -2,12 +2,13 @@ import { describe, expect, it } from "vitest";
 import { sortTasks } from "./task-sort";
 import type { Task } from "./api";
 
-const task = (id: string, updatedAt: string, pinned = false): Task => ({
+const task = (id: string, updatedAt: string, pinned = false, starred = false): Task => ({
   id,
   title: `任务 ${id}`,
   agent_type: "react",
   updated_at: updatedAt,
   pinned,
+  starred,
 });
 
 describe("sortTasks", () => {
@@ -28,6 +29,24 @@ describe("sortTasks", () => {
       task("n2", "2026-01-11T08:00:00"),
     ]);
     expect(tasks.map((t) => t.id)).toEqual(["p2", "p1", "n1", "n2"]);
+  });
+
+  it("三级次序：固定 > 收藏 > 普通（收藏组 updated_at 更旧仍排普通前）", () => {
+    const tasks = sortTasks([
+      task("plain", "2026-01-15T10:00:00"),
+      task("starred", "2026-01-10T08:00:00", false, true), // 最旧但已收藏
+      task("pinned", "2026-01-12T08:00:00", true),
+    ]);
+    expect(tasks.map((t) => t.id)).toEqual(["pinned", "starred", "plain"]);
+  });
+
+  it("收藏组内按 updated_at 降序", () => {
+    const tasks = sortTasks([
+      task("s1", "2026-01-10T08:00:00", false, true),
+      task("n1", "2026-01-13T08:00:00"),
+      task("s2", "2026-01-14T08:00:00", false, true),
+    ]);
+    expect(tasks.map((t) => t.id)).toEqual(["s2", "s1", "n1"]);
   });
 
   it("不修改入参数组（不可变）", () => {

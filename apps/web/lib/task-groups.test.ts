@@ -8,6 +8,7 @@ const task = (id: string, updatedAt: string): Task => ({
   agent_type: "react",
   updated_at: updatedAt,
   pinned: false,
+  starred: false,
 });
 
 // 固定基准时间：2026-01-15 12:00（本地时区）。

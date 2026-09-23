@@ -28,10 +28,11 @@ class PostMessageRequest(BaseModel):
 
 
 class UpdateTaskRequest(BaseModel):
-    # 字段均可选但至少要有一个；后续 starred/archived 字段加进此处并经
+    # 字段均可选但至少要有一个；后续 archived 字段加进此处并经
     # store.update_task 的通用通道落地。
     title: str | None = None
     pinned: bool | None = None
+    starred: bool | None = None
 
 
 def _sse(event: dict) -> str:
@@ -87,9 +88,9 @@ def create_app(runtime: ChatRuntime | None = None) -> FastAPI:
 
     @app.patch("/api/tasks/{task_id}")
     async def update_task(task_id: str, request: UpdateTaskRequest) -> dict:
-        if request.title is None and request.pinned is None:
+        if request.title is None and request.pinned is None and request.starred is None:
             raise HTTPException(422, "no updatable field provided")
-        # 收集式装配待更新字段：title 去首尾空白，pinned 布尔转 SQLite 0/1。
+        # 收集式装配待更新字段：title 去首尾空白，pinned/starred 布尔转 SQLite 0/1。
         fields: dict[str, str | int] = {}
         if request.title is not None:
             title = request.title.strip()
@@ -98,6 +99,8 @@ def create_app(runtime: ChatRuntime | None = None) -> FastAPI:
             fields["title"] = title
         if request.pinned is not None:
             fields["pinned"] = 1 if request.pinned else 0
+        if request.starred is not None:
+            fields["starred"] = 1 if request.starred else 0
         updated = store.update_task(task_id, **fields)
         if updated is None:
             raise HTTPException(404, "task not found")

@@ -80,8 +80,10 @@ def test_list_tasks_orders_by_updated_at_desc(store: ChatStore) -> None:
     assert [t["id"] for t in store.list_tasks()] == [first["id"], second["id"]]
 
 
-def test_task_defaults_to_unpinned(store: ChatStore) -> None:
-    assert store.create_task("react")["pinned"] == 0
+def test_task_defaults_to_unpinned_and_unstarred(store: ChatStore) -> None:
+    task = store.create_task("react")
+    assert task["pinned"] == 0
+    assert task["starred"] == 0
 
 
 def test_pin_and_unpin_task_persists(store: ChatStore) -> None:
@@ -106,9 +108,36 @@ def test_list_tasks_pinned_first_then_updated_at_desc(store: ChatStore) -> None:
     assert ids == [pinned["id"], plain_new["id"], plain_old["id"]]
 
 
-def test_legacy_db_without_pinned_column_migrates(tmp_path: Path) -> None:
+def test_star_and_unstar_task_persists(store: ChatStore) -> None:
+    task = store.create_task("react")
+    starred = store.update_task(task["id"], starred=1)
+    assert starred is not None
+    assert starred["starred"] == 1
+    assert store.get_task(task["id"])["starred"] == 1  # 持久化：重新读取仍已收藏
+    unstarred = store.update_task(task["id"], starred=0)
+    assert unstarred is not None
+    assert unstarred["starred"] == 0
+    assert store.get_task(task["id"])["starred"] == 0
+
+
+def test_list_tasks_pinned_then_starred_then_plain(store: ChatStore) -> None:
+    pinned = store.create_task("react")
+    store.update_task(pinned["id"], pinned=1)
+    starred_old = store.create_task("react")
+    store.update_task(starred_old["id"], starred=1)
+    starred_new = store.create_task("react")
+    store.update_task(starred_new["id"], starred=1)
+    plain_old = store.create_task("toolcall")
+    plain_new = store.create_task("react")
+    # 次序：固定 > 收藏 > 普通，各组内 updated_at 降序；注意收藏/固定操作会刷新
+    # updated_at，故 starred_old 比两个普通任务更旧，仍须排在普通组之前。
+    ids = [t["id"] for t in store.list_tasks()]
+    assert ids == [pinned["id"], starred_new["id"], starred_old["id"], plain_new["id"], plain_old["id"]]
+
+
+def test_legacy_db_without_flag_columns_migrates(tmp_path: Path) -> None:
     db_path = tmp_path / "legacy.db"
-    # 构造旧 schema 库：tasks 表无 pinned 列且带一行旧数据
+    # 构造旧 schema 库：tasks 表无 pinned/starred 列且带一行旧数据
     conn = sqlite3.connect(db_path)
     conn.execute(
         "CREATE TABLE tasks (id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '',"
@@ -125,4 +154,6 @@ def test_legacy_db_without_pinned_column_migrates(tmp_path: Path) -> None:
     task = store.get_task("t1")
     assert task is not None
     assert task["pinned"] == 0  # 旧数据补默认值
+    assert task["starred"] == 0
     assert store.update_task("t1", pinned=1)["pinned"] == 1  # 迁移后可正常固定
+    assert store.update_task("t1", starred=1)["starred"] == 1  # 迁移后可正常收藏
