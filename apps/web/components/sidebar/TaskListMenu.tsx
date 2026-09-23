@@ -43,6 +43,7 @@ export function TaskListMenu({ task, onShare, onClose, onRename, onOpenInNewTab,
   // shareState 随卸载天然复位，无需外部复位；关闭动作经 onClose 回传父层。
   const [shareState, setShareState] = useState<"idle" | "copied" | "failed">("idle");
   const shareTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(true);
 
   // 菜单位于 overflow-y-auto 滚动容器内，靠底任务的菜单会被裁剪：挂载后测量，
   // 下沿溢出视口则向上翻转（bottom-full）。开合即重新挂载，测一次即可；
@@ -52,9 +53,13 @@ export function TaskListMenu({ task, onShare, onClose, onRename, onOpenInNewTab,
     if (rect && rect.bottom > window.innerHeight) setFlipUp(true);
   }, []);
 
-  // 卸载即清分享延时定时器：避免菜单先行关闭/切换后旧定时器再触发 onClose 波及新打开的菜单。
+  // 卸载时双保险，防旧菜单的 onClose 误关其他任务的菜单：
+  // ① 清已存在的延时定时器（菜单先行关闭/切换的场景）；② mountedRef 置 false，挡住 await 返回后
+  // 再新建的定时器——Clipboard API 是异步的，写剪贴板期间外点/Esc 卸载（由 TaskList 全局监听触发），
+  // 此处 cleanup 已跑、但 handleShareClick 的 await 尚未返回，之后新建的 timer 将无人清理（孤儿）。
   useEffect(() => {
     return () => {
+      mountedRef.current = false;
       if (shareTimerRef.current !== null) clearTimeout(shareTimerRef.current);
     };
   }, []);
@@ -62,6 +67,7 @@ export function TaskListMenu({ task, onShare, onClose, onRename, onOpenInNewTab,
   // 分享：复制结果驱动反馈文案（已复制/复制失败），菜单保持打开，延时后统一由 onClose 关闭。
   const handleShareClick = async () => {
     const ok = await onShare();
+    if (!mountedRef.current) return; // await 期间已被卸载：不落状态、不设新定时器
     setShareState(ok ? "copied" : "failed");
     if (shareTimerRef.current !== null) clearTimeout(shareTimerRef.current); // 连点重置计时
     shareTimerRef.current = setTimeout(onClose, 1500);
