@@ -1,6 +1,10 @@
+"use client";
+
+import { useLayoutEffect, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { UiMessage } from "@/lib/chat-events";
+import { isNearBottom, scrollToBottom } from "@/lib/scroll-stick";
 
 function ToolBubble({ message }: { message: Extract<UiMessage, { kind: "tool" }> }) {
   const argsPreview = Object.entries(message.arguments)
@@ -20,8 +24,31 @@ function ToolBubble({ message }: { message: Extract<UiMessage, { kind: "tool" }>
 }
 
 export function MessageList({ messages }: { messages: UiMessage[] }) {
+  const listRef = useRef<HTMLOListElement>(null);
+  // 跟随滚动开关：初始 true（进入任务/历史加载后落在最新消息）；用户上翻超过阈值即停跟，回到底部恢复。
+  const stickRef = useRef(true);
+  const prevLenRef = useRef(0);
+
+  // 绘制前纠位，避免流式 token 逐帧闪现错位。每条 delta 都产生新 messages 引用，在此统一兜底。
+  useLayoutEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    // 新出现的是用户消息 = 自己刚发送：无条件回到底部（即便之前在上翻阅读）。
+    const appendedUser =
+      messages.length > prevLenRef.current && messages[messages.length - 1]?.kind === "user";
+    prevLenRef.current = messages.length;
+    if (appendedUser) stickRef.current = true;
+    if (stickRef.current) scrollToBottom(el);
+  }, [messages]);
+
   return (
-    <ol className="flex flex-1 flex-col gap-3 overflow-y-auto px-4 py-6">
+    <ol
+      ref={listRef}
+      onScroll={(e) => {
+        stickRef.current = isNearBottom(e.currentTarget);
+      }}
+      className="flex flex-1 flex-col gap-3 overflow-y-auto px-4 py-6"
+    >
       {messages.map((message) => {
         if (message.kind === "user") {
           return (
