@@ -17,6 +17,12 @@ export function Sidebar({ collapsed, onToggleCollapse }: SidebarProps) {
 
   // 窄栏只在折叠态渲染，此时 onToggleCollapse 等价于「展开」。
   const handleExpand = onToggleCollapse;
+  const handleCollapse = () => {
+    // 折叠时清空搜索态，避免经窄栏展开时带出旧搜索框并 autoFocus 抢焦点。
+    setSearchOpen(false);
+    setQuery("");
+    onToggleCollapse();
+  };
   const handleOpenSearch = () => {
     onToggleCollapse();
     setSearchOpen(true);
@@ -45,7 +51,7 @@ export function Sidebar({ collapsed, onToggleCollapse }: SidebarProps) {
         onQueryChange={setQuery}
         searchOpen={searchOpen}
         onSearchOpenChange={setSearchOpen}
-        onToggleCollapse={onToggleCollapse}
+        onToggleCollapse={handleCollapse}
       />
       <NewTaskButton busy={busy} error={error} onCreate={() => void create()} />
       <Link href="/agents" className="rounded-lg px-3 py-2 text-sm hover:bg-white">◈ Agent</Link>
