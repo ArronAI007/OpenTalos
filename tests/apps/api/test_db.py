@@ -58,6 +58,14 @@ def test_update_task_missing_returns_none(store: ChatStore) -> None:
     assert store.update_task("no-such-id", title="x") is None
 
 
+def test_update_task_ignores_non_whitelisted_columns(store: ChatStore) -> None:
+    task = store.create_task("react")
+    updated = store.update_task(task["id"], agent_type="toolcall", title="新标题")
+    # 非白名单列被忽略，合法列 title 正常落地
+    assert updated["agent_type"] == "react"
+    assert updated["title"] == "新标题"
+
+
 def test_append_unknown_kind_raises(store: ChatStore) -> None:
     task = store.create_task("react")
     with pytest.raises(ValueError):

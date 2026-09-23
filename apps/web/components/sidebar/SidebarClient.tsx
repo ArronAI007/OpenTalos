@@ -182,6 +182,7 @@ export function TaskList() {
                     onChange={(e) => setEditValue(e.target.value)}
                     onBlur={() => void commitEdit(task)}
                     onKeyDown={(e) => {
+                      if (e.nativeEvent.isComposing) return; // IME 候选窗激活时 Enter/Esc 仅作用于输入法，不提交/取消
                       if (e.key === "Enter") {
                         e.preventDefault();
                         void commitEdit(task);

@@ -66,6 +66,11 @@ async def test_patch_task_blank_title_400(api) -> None:
     assert (await api.patch(f"/api/tasks/{task['id']}", json={"title": "   "})).status_code == 400
 
 
+async def test_patch_task_empty_body_422(api) -> None:
+    task = (await api.post("/api/tasks", json={"agent_type": "react"})).json()
+    assert (await api.patch(f"/api/tasks/{task['id']}", json={})).status_code == 422
+
+
 async def test_post_invalid_agent_type_422(api) -> None:
     resp = await api.post("/api/tasks", json={"agent_type": "nope"})
     assert resp.status_code == 422
