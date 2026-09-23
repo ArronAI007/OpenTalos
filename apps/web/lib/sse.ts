@@ -1,10 +1,16 @@
 import { parseSseBlock, type ChatEvent } from "./chat-events";
 
-export async function postSse(url: string, body: unknown, onEvent: (event: ChatEvent) => void): Promise<void> {
+export async function postSse(
+  url: string,
+  body: unknown,
+  onEvent: (event: ChatEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
   const resp = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    signal,
   });
   if (!resp.ok || !resp.body) {
     const detail = await resp.text().catch(() => "");

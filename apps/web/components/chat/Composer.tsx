@@ -9,11 +9,14 @@ const MAX_TEXTAREA_HEIGHT_PX = 160;
 export function Composer({
   onSend,
   disabled,
+  onStop,
   value: controlledValue,
   onChange,
 }: {
   onSend: (text: string) => void;
   disabled: boolean;
+  // 流式进行中可中断（busy 时发送按钮变 ■）；首页建任务不可中断，不传
+  onStop?: () => void;
   value?: string;
   onChange?: (value: string) => void;
 }) {
@@ -67,13 +70,24 @@ export function Composer({
           className="max-h-40 flex-1 resize-none overflow-y-auto bg-transparent text-sm leading-5 outline-none disabled:opacity-50"
           aria-label="输入消息"
         />
-        <button
-          type="submit"
-          disabled={disabled || !value.trim()}
-          className="rounded-full bg-user-bubble px-3 py-1.5 text-sm text-white disabled:opacity-30"
-        >
-          ➤
-        </button>
+        {disabled && onStop ? (
+          <button
+            type="button"
+            onClick={onStop}
+            aria-label="停止生成"
+            className="rounded-full bg-user-bubble px-3 py-1.5 text-sm text-white"
+          >
+            ■
+          </button>
+        ) : (
+          <button
+            type="submit"
+            disabled={disabled || !value.trim()}
+            className="rounded-full bg-user-bubble px-3 py-1.5 text-sm text-white disabled:opacity-30"
+          >
+            ➤
+          </button>
+        )}
       </div>
     </form>
   );

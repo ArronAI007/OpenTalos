@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseSseBlock, reduceChatEvent, type UiMessage } from "./chat-events";
+import { finalizeStreaming, parseSseBlock, reduceChatEvent, type UiMessage } from "./chat-events";
 
 describe("parseSseBlock", () => {
   it("parses a data frame", () => {
@@ -46,5 +46,33 @@ describe("reduceChatEvent", () => {
     expect(msgs[1]).toEqual({ id: "live-2", kind: "error", content: "boom" });
     msgs = reduceChatEvent(msgs, { type: "delta", text: "结果A" });
     expect(msgs[2]).toEqual({ id: "live-3", kind: "assistant", content: "结果A", streaming: true });
+  });
+});
+
+describe("finalizeStreaming", () => {
+  it("settles streaming assistant bubbles and keeps partial content", () => {
+    let msgs = reduceChatEvent([], { type: "delta", text: "半截回复" });
+    msgs = finalizeStreaming(msgs);
+    expect(msgs[0]).toEqual({ id: "live-1", kind: "assistant", content: "半截回复", streaming: false });
+  });
+
+  it("returns the same reference when nothing is streaming (no-op fast path)", () => {
+    const msgs: UiMessage[] = [
+      { id: "row-1", kind: "user", content: "问" },
+      { id: "row-2", kind: "assistant", content: "答" },
+    ];
+    expect(finalizeStreaming(msgs)).toBe(msgs);
+  });
+
+  it("leaves user and tool bubbles untouched, and the next reply starts fresh", () => {
+    let msgs: UiMessage[] = [{ id: "row-1", kind: "user", content: "问" }];
+    msgs = reduceChatEvent(msgs, { type: "tool_call", name: "read_skill", arguments: {} });
+    msgs = reduceChatEvent(msgs, { type: "delta", text: "查" });
+    msgs = finalizeStreaming(msgs);
+    expect(msgs[0]).toEqual({ id: "row-1", kind: "user", content: "问" });
+    expect(msgs[1]).toMatchObject({ kind: "tool", name: "read_skill", result: undefined });
+    expect(msgs[2]).toMatchObject({ kind: "assistant", streaming: false });
+    msgs = reduceChatEvent(msgs, { type: "delta", text: "新回复" });
+    expect(msgs[3]).toEqual({ id: "live-3", kind: "assistant", content: "新回复", streaming: true });
   });
 });

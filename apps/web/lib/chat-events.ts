@@ -30,6 +30,14 @@ export function parseSseBlock(block: string): ChatEvent | null {
   return JSON.parse(line.slice(5).trim()) as ChatEvent;
 }
 
+// 把所有 streaming 助理泡定稿（内容保留、摘掉 streaming 标记），
+// 用户主动停止（AbortError）与 error 事件共用。无 streaming 泡时原样返回引用，
+// 让 setMessages 走 React bail-out 快路径（不触发多余渲染）。
+export function finalizeStreaming(prev: UiMessage[]): UiMessage[] {
+  if (!prev.some((m) => m.kind === "assistant" && m.streaming)) return prev;
+  return prev.map((m) => (m.kind === "assistant" && m.streaming ? { ...m, streaming: false } : m));
+}
+
 export function reduceChatEvent(prev: UiMessage[], event: ChatEvent): UiMessage[] {
   switch (event.type) {
     case "delta": {
@@ -65,9 +73,7 @@ export function reduceChatEvent(prev: UiMessage[], event: ChatEvent): UiMessage[
     }
     case "error": {
       // 终结所有 streaming 泡：error 与 done 互斥，不终结的话残留泡会把下一轮回复合流进去。
-      const finalized = prev.map((m) =>
-        m.kind === "assistant" && m.streaming ? { ...m, streaming: false } : m,
-      );
+      const finalized = finalizeStreaming(prev);
       return [...finalized, { id: nextUiId(finalized), kind: "error", content: event.message }];
     }
   }

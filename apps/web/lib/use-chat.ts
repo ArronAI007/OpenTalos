@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { API_URL, listMessages, type StoredMessage } from "./api";
-import { nextUiId, reduceChatEvent, type UiMessage } from "./chat-events";
+import { finalizeStreaming, nextUiId, reduceChatEvent, type UiMessage } from "./chat-events";
 import { postSse } from "./sse";
 
 function fromStored(row: StoredMessage): UiMessage {
@@ -19,6 +19,13 @@ function fromStored(row: StoredMessage): UiMessage {
 export function useChat(taskId: string) {
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [busy, setBusy] = useState(false);
+  // 当前流式请求的开关：stop() 通过它中断 fetch 读取循环
+  const abortRef = useRef<AbortController | null>(null);
+
+  // 仅清自己那次 send 建的控制器（busy 互斥已防并发，双保险不误清）
+  const stop = useCallback(() => {
+    abortRef.current?.abort();
+  }, []);
 
   useEffect(() => {
     void listMessages(taskId)
@@ -39,21 +46,31 @@ export function useChat(taskId: string) {
       const content = text.trim();
       if (!content) return;
       setMessages((prev) => [...prev, { id: nextUiId(prev), kind: "user", content }]);
+      const ctrl = new AbortController();
+      abortRef.current = ctrl;
       setBusy(true);
       try {
         await postSse(
           `${API_URL}/api/tasks/${taskId}/messages`,
           { content },
           (event) => setMessages((prev) => reduceChatEvent(prev, event)),
+          ctrl.signal,
         );
       } catch (error) {
-        setMessages((prev) => [...prev, { id: nextUiId(prev), kind: "error", content: String(error) }]);
+        // 用户点停止 → fetch 抛 AbortError：定稿已流出的部分内容（保留在流中），
+        // 不追加错误泡；其余错误维持原有的错误泡行为。
+        if (error instanceof Error && error.name === "AbortError") {
+          setMessages((prev) => finalizeStreaming(prev));
+        } else {
+          setMessages((prev) => [...prev, { id: nextUiId(prev), kind: "error", content: String(error) }]);
+        }
       } finally {
+        if (abortRef.current === ctrl) abortRef.current = null;
         setBusy(false);
       }
     },
     [taskId],
   );
 
-  return { messages, busy, send };
+  return { messages, busy, send, stop };
 }
