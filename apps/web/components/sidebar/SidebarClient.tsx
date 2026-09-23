@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { createTask, deleteTask, listTasks, updateTask, type Task, type TaskPatch } from "@/lib/api";
 import { readAgentType } from "@/lib/agent-type";
+import { copyText } from "@/lib/clipboard";
 import { sortTasks } from "@/lib/task-sort";
 import { ClockIcon, PencilSquareIcon, PinIcon, PuzzleIcon, SearchIcon, SparklesIcon, StarIcon } from "@/components/ui/icons";
 import { LogoMark } from "./Logo";
@@ -281,6 +282,10 @@ export function TaskList() {
                   {openMenuId === task.id && (
                     <TaskListMenu
                       task={task}
+                      // 分享只负责复制并返回结果，不关菜单：反馈文案与延时关闭由 TaskListMenu 自管，
+                      // 延时结束后经 onClose 回传关闭（成功/失败同一路径）。
+                      onShare={() => copyText(`${window.location.origin}/t/${task.id}`)}
+                      onClose={() => setOpenMenuId(null)}
                       onRename={() => {
                         setOpenMenuId(null);
                         startEdit(task);
