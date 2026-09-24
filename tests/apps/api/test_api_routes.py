@@ -4,7 +4,7 @@ import httpx
 import pytest
 from core.protocol import ToolCompletion
 from db import ChatStore
-from main import create_app
+from main import _sse, create_app
 from runtime import ChatRuntime
 
 
@@ -278,3 +278,21 @@ async def test_cors_origins_configurable_via_env(api, monkeypatch, tmp_path, scr
         "/api/tasks", headers={"Origin": "http://evil.example", **preflight_headers}
     )
     assert "access-control-allow-origin" not in resp.headers
+
+
+async def test_stop_endpoint_idempotent(api) -> None:
+    # 无活动流时停止是幂等 no-op：用户可能在流刚结束的那刻才点下"停止"。
+    resp = await api.post("/api/tasks", json={"agent_type": "react"})
+    task_id = resp.json()["id"]
+    stop = await api.post(f"/api/tasks/{task_id}/stop")
+    assert stop.status_code == 200
+    assert stop.json() == {"ok": True}
+
+    missing = await api.post("/api/tasks/not-a-task/stop")
+    assert missing.status_code == 404
+
+
+def test_sse_ping_encodes_as_comment() -> None:
+    # ping 只是探活不是聊天事件：编码成 SSE comment 帧，前端 parseSseBlock 天然忽略。
+    assert _sse({"type": "ping"}) == ": keep-alive\n\n"
+    assert _sse({"type": "delta", "text": "你"}) == 'data: {"type": "delta", "text": "你"}\n\n'

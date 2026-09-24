@@ -71,6 +71,11 @@ class EventToolRegistry(ToolRegistry):
         return outcome
 
 
+# 消费循环等不到事件时的空闲上限：超时发 ping，让真实 HTTP 层的断连在 ≤1s 内
+# 暴露（starlette/uvicorn 只在写响应时才发现客户端断开），同时给停止信号兜底响应时延。
+_STREAM_IDLE_S = 1.0
+
+
 def _truncate_title(text: str, limit: int = 40) -> str:
     text = text.strip()
     return text if len(text) <= limit else text[:limit] + "…"
@@ -94,6 +99,8 @@ class ChatRuntime:
         self._agents: dict[str, Agent] = {}
         self._registries: dict[str, EventToolRegistry] = {}
         self._task_locks: dict[str, asyncio.Lock] = {}
+        # 活动流的停止信号：stream_reply 入流时登记、finally 清理，生命周期与流一致。
+        self._active_stops: dict[str, asyncio.Event] = {}
         self._skill_tools: list[Any] = []
         self._skills_suffix: str | None = None
         self._skills_reachable: bool | None = None
@@ -163,6 +170,13 @@ class ChatRuntime:
         self._agents[task["id"]] = agent
         return agent
 
+    def request_stop(self, task_id: str) -> None:
+        # 无活动流时幂等 no-op：事件只在流存活期间登记（流结束即随 finally 清理），
+        # 停止一个已结束/未开始的流没有意义。
+        event = self._active_stops.get(task_id)
+        if event is not None:
+            event.set()
+
     def evict(self, task_id: str) -> None:
         # 调用方须保证该任务当前没有进行中的流：pop 掉锁对象后，新流会 setdefault 造出
         # 一把新锁，同一任务的两条流会并发跑，可能串流。
@@ -215,9 +229,21 @@ class ChatRuntime:
 
             producer = asyncio.create_task(run_agent())
             persisted = False
+            stopped_by_user = False
+            stop_event = self._active_stops[task_id] = asyncio.Event()
             try:
                 while True:
-                    event = await queue.get()
+                    # 每轮先查停止信号：即使队列里还压着已产事件也立即止步——"停止"就是不再往后播。
+                    if stop_event.is_set():
+                        stopped_by_user = True
+                        break
+                    try:
+                        event = await asyncio.wait_for(queue.get(), timeout=_STREAM_IDLE_S)
+                    except TimeoutError:
+                        # 空闲心跳：ping 由编码层转成 SSE comment 帧，意义仅在于让断连尽早
+                        # 通过下次写失败暴露；不进 parts，也不落库。
+                        yield {"type": "ping"}
+                        continue
                     if event is None:
                         break
                     if event["type"] == "delta":
@@ -238,6 +264,9 @@ class ChatRuntime:
                             }, ensure_ascii=False),
                         )
                     yield event
+                if stopped_by_user:
+                    # 跳到 finally 的统一兜底（partial + stopped 标记落库），不发 done/error
+                    return
                 if error is not None:
                     yield {"type": "error", "message": error}
                 else:
@@ -248,24 +277,23 @@ class ChatRuntime:
                     persisted = True
                     yield {"type": "done", "reply": final_reply}
             finally:
+                self._active_stops.pop(task_id, None)
                 if not producer.done():
+                    # 不等收敛：断连时 starlette 用 anyio cancel scope 取消响应，scope 内任何
+                    # await（含 gather/to_thread）都会再抛 CancelledError（真机实测），
+                    # 连用 await 达成的落库都会半路夭折——所以下端落库必须同步调用；
+                    # producer 是独立 task，不在该 scope 内，自行收尾。
                     producer.cancel()
-                await asyncio.gather(producer, return_exceptions=True)
-                # 客户端中途断开（前端"停止"会 abort fetch，SSE 被关）：消费循环在
-                # yield/await 处被 GeneratorExit/CancelledError 打断，上面正常完成路径的
-                # assistant 落库不可达。这里兜底：①有已流出内容则落 assistant partial；
-                # ②无条件落一行 kind="stopped" 标记——否则立即停止（0 delta）刷新后
-                # 这次提问像从未发生过。error 场景前端已有错误泡，保持既有的不落语义
-                # （test_agent_error_..._no_assistant_row 守护）。
+                # 客户端中途断开 / 用户停止（消费循环被 GeneratorExit/CancelledError 打断、
+                # 或 stopped_by_user 提前 return）：正常完成路径的 assistant 落库不可达。
+                # 这里兜底：①有已流出内容则落 assistant partial；②无条件落一行
+                # kind="stopped" 标记——否则立即停止（0 delta）刷新后这次提问像从未发生过。
+                # error 场景前端已有错误泡，保持既有的不落语义（test_agent_error_* 守护）。
                 # parts 在消费循环里随 yield 累积 = 恰好用户实际看到的部分。
                 if not persisted and error is None:
                     if not parts and reply:
                         parts.append(reply)
                     partial = "".join(parts)
                     if partial:
-                        await asyncio.to_thread(
-                            self._store.append_message, task_id, "assistant", partial
-                        )
-                    await asyncio.to_thread(
-                        self._store.append_message, task_id, "stopped", ""
-                    )
+                        self._store.append_message(task_id, "assistant", partial)
+                    self._store.append_message(task_id, "stopped", "")

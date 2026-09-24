@@ -36,8 +36,12 @@ export function useChat(taskId: string) {
 
   // 仅清自己那次 send 建的控制器（busy 互斥已防并发，双保险不误清）
   const stop = useCallback(() => {
+    // 先通知服务端置位停止信号（消费循环 ≤1s 响应、partial+stopped 标记落库），
+    // 再 abort 本地读取。落库发生在服务端，与此后本地连接是否已断无关；
+    // 单发即可，失败（如网络已断）也无妨——断连路径由同一个服务端兜底覆盖。
+    void fetch(`${API_URL}/api/tasks/${taskId}/stop`, { method: "POST" }).catch(() => {});
     abortRef.current?.abort();
-  }, []);
+  }, [taskId]);
 
   useEffect(() => {
     void listMessages(taskId)

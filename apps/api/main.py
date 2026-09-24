@@ -47,6 +47,10 @@ _FLAG_FIELDS = ("pinned", "starred", "archived")
 
 
 def _sse(event: dict) -> str:
+    # ping 只是探活不是聊天事件：编成 SSE comment 帧，前端 parseSseBlock 天然忽略。
+    # 唯二作用：保持连接、让客户端断开在下次写时暴露（uvicorn 只在写响应时发现断开）。
+    if event["type"] == "ping":
+        return ": keep-alive\n\n"
     return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
 
@@ -148,6 +152,16 @@ def create_app(runtime: ChatRuntime | None = None) -> FastAPI:
         if not store.delete_task(task_id):
             raise HTTPException(404, "task not found")
         runtime.evict(task_id)
+
+    @app.post("/api/tasks/{task_id}/stop")
+    async def stop_stream(task_id: str) -> dict:
+        if store.get_task(task_id) is None:
+            raise HTTPException(404, "task not found")
+        # 无活动流时幂等 no-op：用户可能在流刚结束的那刻才点下"停止"。
+        # 只置位信号，不等流真正退出：消费循环每轮首查信号，≤_STREAM_IDLE_S 内响应，
+        # partial + stopped 标记由 stream_reply 的 finally 兜底落库。
+        runtime.request_stop(task_id)
+        return {"ok": True}
 
     @app.get("/api/tasks/{task_id}/messages")
     async def list_messages(task_id: str) -> dict:

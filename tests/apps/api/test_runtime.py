@@ -98,6 +98,59 @@ def test_disconnect_before_any_delta_persists_stopped_marker(store, scripted_cli
     assert [r["kind"] for r in rows] == ["user", "stopped"]
 
 
+def test_request_stop_persists_partial_and_stopped_row(store, scripted_client, tmp_path) -> None:
+    # 用户点"停止"按钮（区别于断连）：前端先调 POST /stop 置位停止信号，再 abort 读取。
+    # 服务端消费循环每轮首查信号 → 立即停流，走与断连相同的兜底：partial + stopped 标记落库。
+    client = scripted_client(tool_completions=[
+        ToolCompletion(text="你好，世界！", requested_tools=[], model_id="mock-model"),
+    ])
+    runtime = _runtime(store, client, tmp_path)
+    task = store.create_task("react")
+
+    async def consume_until_stop() -> list[dict[str, Any]]:
+        events: list[dict[str, Any]] = []
+        async for event in runtime.stream_reply(task["id"], "hi"):
+            events.append(event)
+            if event["type"] == "delta":
+                runtime.request_stop(task["id"])  # 见到首个增量即停止
+        return events
+
+    events = asyncio.run(consume_until_stop())
+
+    deltas = [e for e in events if e["type"] == "delta"]
+    assert deltas
+    assert not any(e["type"] == "done" for e in events)  # 提前终止，无 done
+    partial = "".join(e["text"] for e in deltas)
+    assert len(partial) < len("你好，世界！")  # 确实被截断而非跑完
+    rows = store.list_messages(task["id"])
+    assert [r["kind"] for r in rows] == ["user", "assistant", "stopped"]
+    assert rows[1]["content"] == partial
+
+
+def test_idle_stream_emits_keepalive_ping(store, scripted_client, tmp_path) -> None:
+    # 模型长时间无产出时，消费循环周期性发 ping：真实 HTTP 层只在写时才感知客户端
+    # 断开，有数据可写才能让断连 ≤1s 内暴露、走落库兜底（ping 由编码层转成 SSE comment）。
+    client = scripted_client(tool_completions=[])
+
+    async def slow_silent_astream(messages, tools, on_text_delta=None, **kwargs):
+        await asyncio.sleep(3600)  # 永不产出；aclose 时由 stream_reply 的 producer.cancel() 收敛
+        return ToolCompletion(text="", requested_tools=[], model_id="mock-model")  # pragma: no cover
+
+    client.astream_with_tools = slow_silent_astream  # type: ignore[method-assign]
+    runtime = _runtime(store, client, tmp_path)
+    task = store.create_task("react")
+
+    async def first_event() -> dict[str, Any]:
+        gen = runtime.stream_reply(task["id"], "hi")
+        try:
+            return await asyncio.wait_for(gen.__anext__(), timeout=5)
+        finally:
+            await gen.aclose()
+
+    first = asyncio.run(first_event())
+    assert first["type"] == "ping"
+
+
 def test_stream_tool_call_events_and_tool_row(store, scripted_client, echo_tool_registry, tmp_path) -> None:
     client = scripted_client(tool_completions=[
         ToolCompletion(
