@@ -11,6 +11,7 @@ import {
   PencilSquareIcon,
   TrashIcon,
 } from "@/components/ui/icons";
+import { DeleteTurnDialog } from "./DeleteTurnDialog";
 
 interface CopyStateButtonProps {
   getText: () => string;
@@ -77,6 +78,8 @@ export interface UserActionRowProps {
 // Manus 式用户消息操作行：相对时间 + 复制内容 / 分享会话链接 / 编辑回填 / ⋯（删除整轮）。
 export function UserActionRow({ content, completedAt, taskId, busy, onEdit, onDelete }: UserActionRowProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+  // 删除二次确认：菜单项只负责开弹窗，确认按钮才真正触发 onDelete
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   // 打开期间点击菜单外或 Esc 关闭（与侧栏 TaskListMenu 同款交互，菜单小、就地管理）
@@ -97,7 +100,9 @@ export function UserActionRow({ content, completedAt, taskId, busy, onEdit, onDe
   }, [menuOpen]);
 
   return (
-    <div className="mt-1 flex items-center justify-end gap-0.5">
+    <>
+    {/* 行级显隐：li.group 上 hover / focus-within 时才显现（invisible 保留占位不抖动） */}
+    <div className="mt-1 flex items-center justify-end gap-0.5 invisible opacity-0 transition-opacity group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100">
       {completedAt !== undefined && (
         <time className="mr-1.5 text-xs text-text-secondary">{formatRelativeDay(completedAt)}</time>
       )}
@@ -141,7 +146,7 @@ export function UserActionRow({ content, completedAt, taskId, busy, onEdit, onDe
               disabled={busy}
               onClick={() => {
                 setMenuOpen(false);
-                onDelete();
+                setConfirmOpen(true);
               }}
               className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-red-500 hover:bg-sidebar disabled:opacity-40"
             >
@@ -152,5 +157,15 @@ export function UserActionRow({ content, completedAt, taskId, busy, onEdit, onDe
         )}
       </div>
     </div>
+    <DeleteTurnDialog
+      open={confirmOpen}
+      busy={busy}
+      onCancel={() => setConfirmOpen(false)}
+      onConfirm={() => {
+        setConfirmOpen(false);
+        onDelete();
+      }}
+    />
+    </>
   );
 }

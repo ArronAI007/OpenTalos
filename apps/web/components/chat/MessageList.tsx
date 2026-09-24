@@ -82,12 +82,13 @@ export function MessageList({
       {messages.map((message) => {
         if (message.kind === "user") {
           return (
-            <li key={message.id} className={rowCls}>
+            <li key={message.id} className={`${rowCls} group`}>
               {/* 气泡底色与左侧栏同 token（--color-sidebar），文字用主前景色 */}
               <div className="ml-auto w-fit max-w-[75%] rounded-2xl bg-sidebar px-4 py-2 text-sm text-text">
                 {message.content}
               </div>
-              {/* Manus 式操作行：相对时间 + 复制/分享/编辑/删除整轮，右对齐贴在气泡下方 */}
+              {/* Manus 式操作行：相对时间 + 复制/分享/编辑/删除整轮，右对齐贴在气泡下方；
+                  默认隐藏，仅 hover/键盘聚焦本行区域时显现（group 挂在整行 li 上） */}
               <UserActionRow
                 content={message.content}
                 completedAt={message.completedAt}
