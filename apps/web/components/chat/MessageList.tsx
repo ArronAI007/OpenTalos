@@ -7,7 +7,7 @@ import type { UiMessage } from "@/lib/chat-events";
 import { isNearBottom, scrollToBottom } from "@/lib/scroll-stick";
 import { LogoMark } from "@/components/sidebar/Logo";
 import { CirclePauseIcon } from "@/components/ui/icons";
-import { formatDateTimeCN, formatHM } from "@/lib/format-time";
+import { formatDateTimeCN } from "@/lib/format-time";
 import { CopyReplyButton } from "./CopyReplyButton";
 import { UserActionRow } from "./UserActionRow";
 
@@ -102,7 +102,7 @@ export function MessageList({
         }
         if (message.kind === "assistant") {
           return (
-            <li key={message.id} className={rowCls}>
+            <li key={message.id} className={`${rowCls} group`}>
               <div className="max-w-[85%] text-base leading-6">
                 {/* 每条回复带品牌头（流式与历史同等处理），对齐 Manus 版式 */}
                 <BrandHeader />
@@ -110,20 +110,15 @@ export function MessageList({
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
                 </div>
                 {message.streaming && <span className="animate-pulse text-text-secondary">▍</span>}
-                {/* 回复定稿（含被停止定稿与历史行）后提供复制与时间；流式中隐藏 */}
+                {/* 回复定稿（含被停止定稿与历史行）后提供复制与时间；流式中隐藏。
+                    时间默认不可见：光标覆盖/键盘聚焦回复区域时显现，直接展示完整日期（与 UserActionRow 同一显隐范式） */}
                 {!message.streaming && (
                   <div className="mt-1.5 flex items-center gap-2">
                     <CopyReplyButton content={message.content} />
                     {message.completedAt !== undefined && (
-                      <span className="group relative">
-                        <time className="text-xs leading-6 text-text-secondary">
-                          {formatHM(message.completedAt)}
-                        </time>
-                        {/* 黑气泡：hover 时间文本时浮现完整日期（纯 CSS group-hover，无 JS） */}
-                        <span className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1 hidden -translate-x-1/2 whitespace-nowrap rounded-md bg-user-bubble px-2 py-1 text-xs text-white group-hover:block">
-                          {formatDateTimeCN(message.completedAt)}
-                        </span>
-                      </span>
+                      <time className="text-xs leading-6 text-text-secondary invisible opacity-0 transition-opacity group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100">
+                        {formatDateTimeCN(message.completedAt)}
+                      </time>
                     )}
                   </div>
                 )}
