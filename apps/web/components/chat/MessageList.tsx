@@ -70,7 +70,8 @@ export function MessageList({ messages }: { messages: UiMessage[] }) {
         if (message.kind === "user") {
           return (
             <li key={message.id} className={rowCls}>
-              <div className="ml-auto w-fit max-w-[75%] rounded-2xl bg-user-bubble px-4 py-2 text-sm text-white">
+              {/* 气泡底色与左侧栏同 token（--color-sidebar），文字用主前景色 */}
+              <div className="ml-auto w-fit max-w-[75%] rounded-2xl bg-sidebar px-4 py-2 text-sm text-text">
                 {message.content}
               </div>
             </li>
