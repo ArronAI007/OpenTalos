@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { copyText } from "@/lib/clipboard";
 import { CheckIcon, CopyIcon } from "@/components/ui/icons";
+import { Tooltip } from "@/components/ui/Tooltip";
 
 // 回复完成后的动作行：复制本轮回复的原始 Markdown（保留结构）。
 // 状态机 idle → copied/failed →（1500ms）idle。
@@ -33,20 +34,21 @@ export function CopyReplyButton({ content }: { content: string }) {
     state === "copied" ? "已复制" : state === "failed" ? "复制失败，点击重试" : "复制回复内容";
 
   return (
-    <button
-      type="button"
-      onClick={() => void handleCopy()}
-      aria-label={label}
-      title={label}
-      className={`rounded p-1 transition-colors ${
-        state === "copied"
-          ? "text-green-600"
-          : state === "failed"
-            ? "text-red-600"
-            : "text-text-secondary hover:bg-sidebar hover:text-text"
-      }`}
-    >
-      {state === "copied" ? <CheckIcon /> : <CopyIcon />}
-    </button>
+    <Tooltip label={label}>
+      <button
+        type="button"
+        onClick={() => void handleCopy()}
+        aria-label={label}
+        className={`rounded p-1 transition-colors ${
+          state === "copied"
+            ? "text-green-600"
+            : state === "failed"
+              ? "text-red-600"
+              : "text-text-secondary hover:bg-sidebar hover:text-text"
+        }`}
+      >
+        {state === "copied" ? <CheckIcon /> : <CopyIcon />}
+      </button>
+    </Tooltip>
   );
 }

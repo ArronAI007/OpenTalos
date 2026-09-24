@@ -11,6 +11,7 @@ import {
   PencilSquareIcon,
   TrashIcon,
 } from "@/components/ui/icons";
+import { Tooltip } from "@/components/ui/Tooltip";
 import { DeleteTurnDialog } from "./DeleteTurnDialog";
 
 interface CopyStateButtonProps {
@@ -54,15 +55,16 @@ function CopyStateButton({ getText, idleLabel, children }: CopyStateButtonProps)
   const label = state === "copied" ? "已复制" : state === "failed" ? "复制失败，点击重试" : idleLabel;
 
   return (
-    <button
-      type="button"
-      onClick={() => void handleCopy()}
-      aria-label={label}
-      title={label}
-      className={iconBtnCls(state)}
-    >
-      {state === "copied" ? <CheckIcon /> : children}
-    </button>
+    <Tooltip label={label}>
+      <button
+        type="button"
+        onClick={() => void handleCopy()}
+        aria-label={label}
+        className={iconBtnCls(state)}
+      >
+        {state === "copied" ? <CheckIcon /> : children}
+      </button>
+    </Tooltip>
   );
 }
 
@@ -128,27 +130,29 @@ export function UserActionRow({ content, completedAt, taskId, busy, onEdit, onDe
       <CopyStateButton getText={() => `${window.location.origin}/t/${taskId}`} idleLabel="分享会话链接">
         <CornerUpRightIcon />
       </CopyStateButton>
-      <button
-        type="button"
-        onClick={onEdit}
-        aria-label="编辑：回填到输入框"
-        title="编辑：回填到输入框"
-        className={iconBtnCls("idle")}
-      >
-        <PencilSquareIcon />
-      </button>
-      <div className="relative" ref={menuRef}>
+      <Tooltip label="编辑：回填到输入框">
         <button
           type="button"
-          onClick={() => setMenuOpen((v) => !v)}
-          aria-label="更多操作"
-          title="更多操作"
-          aria-haspopup="menu"
-          aria-expanded={menuOpen}
+          onClick={onEdit}
+          aria-label="编辑：回填到输入框"
           className={iconBtnCls("idle")}
         >
-          <EllipsisIcon />
+          <PencilSquareIcon />
         </button>
+      </Tooltip>
+      <div className="relative" ref={menuRef}>
+        <Tooltip label="更多操作" hidden={menuOpen}>
+          <button
+            type="button"
+            onClick={() => setMenuOpen((v) => !v)}
+            aria-label="更多操作"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            className={iconBtnCls("idle")}
+          >
+            <EllipsisIcon />
+          </button>
+        </Tooltip>
         {menuOpen && (
           <div
             ref={panelRef}
