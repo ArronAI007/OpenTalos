@@ -25,6 +25,16 @@ function ToolBubble({ message }: { message: Extract<UiMessage, { kind: "tool" }>
   );
 }
 
+// 回复块品牌头：assistant 回复与停止提示行共用（对齐 Manus“每个产出块带头”版式）
+function BrandHeader() {
+  return (
+    <div className="mb-1 flex items-center gap-1.5">
+      <LogoMark size={18} />
+      <span className="text-sm font-semibold tracking-tight">OpenTalos</span>
+    </div>
+  );
+}
+
 // 消息行行壳：ol 已铺满内容区，列宽与内边距约束收回到行级（与原先 max-w-3xl + px-4 的几何等同）。
 const rowCls = "mx-auto w-full max-w-3xl px-4";
 
@@ -69,10 +79,7 @@ export function MessageList({ messages }: { messages: UiMessage[] }) {
             <li key={message.id} className={rowCls}>
               <div className="max-w-[85%] text-sm leading-6">
                 {/* 每条回复带品牌头（流式与历史同等处理），对齐 Manus 版式 */}
-                <div className="mb-1 flex items-center gap-1.5">
-                  <LogoMark size={18} />
-                  <span className="text-sm font-semibold tracking-tight">OpenTalos</span>
-                </div>
+                <BrandHeader />
                 <div className="md">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
                 </div>
@@ -84,9 +91,13 @@ export function MessageList({ messages }: { messages: UiMessage[] }) {
         if (message.kind === "stopped") {
           return (
             <li key={message.id} className={rowCls}>
-              <div className="flex items-center gap-2 text-sm text-amber-600">
-                <CirclePauseIcon />
-                OpenTalos已停止 — 发送消息以继续
+              <div className="max-w-[85%] text-sm leading-6">
+                {/* 立即停止（尚无内容流出）时这里是唯一可见的响应块，同样带品牌头 */}
+                <BrandHeader />
+                <div className="flex items-center gap-2 text-amber-600">
+                  <CirclePauseIcon />
+                  OpenTalos已停止 — 发送消息以继续
+                </div>
               </div>
             </li>
           );
