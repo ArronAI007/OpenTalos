@@ -58,9 +58,11 @@ export function finalizeStreaming(prev: UiMessage[], now = Date.now()): UiMessag
   );
 }
 
-// 停止流式后追加提示行（幂等：已存在则返回原引用，防止双击停止叠加）
+// 停止流式后追加提示行（幂等：本会话已有 live 提示则返回原引用，防止双击停止叠加）。
+// 幂等只查 live-N，与 dropStoppedNotice 同口径：row-N 停止行是历史轮次痕迹，
+// 它的存在不代表本轮已提示——若查任意 stopped，历史行会把本轮提示短路掉。
 export function appendStoppedNotice(prev: UiMessage[]): UiMessage[] {
-  if (prev.some((m) => m.kind === "stopped")) return prev;
+  if (prev.some((m) => m.kind === "stopped" && m.id.startsWith("live-"))) return prev;
   return [...prev, { id: nextUiId(prev), kind: "stopped" }];
 }
 

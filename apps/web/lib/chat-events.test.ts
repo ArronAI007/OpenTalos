@@ -122,6 +122,20 @@ describe("stopped notice", () => {
     expect(appendStoppedNotice(once)).toBe(once);
   });
 
+  it("appendStoppedNotice still appends when only historical row-N stopped rows exist", () => {
+    // 回归：旧守卫查"任意 stopped"，历史停止行（服务端落库的轮次痕迹）会把它短路，
+    // 导致会话里停止过一次之后，再次停止时提示永远加不上
+    const prev: UiMessage[] = [
+      { id: "row-9", kind: "user", content: "旧问" },
+      { id: "row-10", kind: "assistant", content: "旧答" },
+      { id: "row-11", kind: "stopped" },
+      { id: "row-12", kind: "user", content: "新问" },
+      { id: "live-1", kind: "assistant", content: "半截", streaming: false },
+    ];
+    const next = appendStoppedNotice(prev);
+    expect(next[next.length - 1]).toEqual({ id: "live-2", kind: "stopped" });
+  });
+
   it("dropStoppedNotice removes the notice and keeps other rows; no-op fast path without one", () => {
     let msgs: UiMessage[] = [{ id: "row-1", kind: "user", content: "问" }];
     msgs = reduceChatEvent(msgs, { type: "delta", text: "半截" });
