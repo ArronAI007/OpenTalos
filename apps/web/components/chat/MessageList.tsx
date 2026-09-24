@@ -28,7 +28,8 @@ function ToolBubble({ message }: { message: Extract<UiMessage, { kind: "tool" }>
   );
 }
 
-// 回复块品牌头：assistant 回复与停止提示行共用（对齐 Manus“每个产出块带头”版式）
+// 回复块品牌头：assistant 回复带；孤立的「已停止」提示（未流出内容即停）作为唯一可见块也带，
+// 一轮问答里品牌头只出现一次（对齐 Manus“每个产出块带头”版式）
 function BrandHeader() {
   return (
     <div className="mb-1 flex items-center gap-1.5">
@@ -79,7 +80,7 @@ export function MessageList({
       }}
       className="flex flex-1 flex-col gap-3 overflow-y-auto py-6"
     >
-      {messages.map((message) => {
+      {messages.map((message, index) => {
         if (message.kind === "user") {
           return (
             <li key={message.id} className={`${rowCls} group`}>
@@ -101,6 +102,8 @@ export function MessageList({
           );
         }
         if (message.kind === "assistant") {
+          // 紧跟其后的 stopped（本轮有内容流出后被停止）并入本回复块渲染，品牌头一轮只出现一次
+          const followedByStopped = messages[index + 1]?.kind === "stopped";
           return (
             <li key={message.id} className={`${rowCls} group`}>
               <div className="max-w-[85%] text-base leading-6">
@@ -110,6 +113,13 @@ export function MessageList({
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
                 </div>
                 {message.streaming && <span className="animate-pulse text-text-secondary">▍</span>}
+                {/* 本轮被停止：停止提示并入本块收尾（品牌头不重复），复制/时间行照常保留 */}
+                {followedByStopped && (
+                  <div className="mt-1.5 flex items-center gap-2 text-amber-600">
+                    <CirclePauseIcon />
+                    OpenTalos已停止 — 发送消息以继续
+                  </div>
+                )}
                 {/* 回复定稿（含被停止定稿与历史行）后提供复制与时间；流式中隐藏。
                     时间默认不可见：光标覆盖/键盘聚焦回复区域时显现，直接展示完整日期（与 UserActionRow 同一显隐范式） */}
                 {!message.streaming && (
@@ -127,10 +137,12 @@ export function MessageList({
           );
         }
         if (message.kind === "stopped") {
+          // 紧跟 assistant（有内容流出后被停止）的提示已并入该回复块，这里不再单列；
+          // 仅立即停止（尚无内容流出）的孤立提示自成一行——那时它是唯一可见的响应块，带头
+          if (messages[index - 1]?.kind === "assistant") return null;
           return (
             <li key={message.id} className={rowCls}>
               <div className="max-w-[85%] text-base leading-6">
-                {/* 立即停止（尚无内容流出）时这里是唯一可见的响应块，同样带品牌头 */}
                 <BrandHeader />
                 <div className="flex items-center gap-2 text-amber-600">
                   <CirclePauseIcon />
