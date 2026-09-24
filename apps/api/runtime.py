@@ -233,6 +233,16 @@ class ChatRuntime:
                     await queue.put(None)
 
             producer = asyncio.create_task(run_agent())
+            # 跟进问题推荐并行预发：与回复生成同时起跑（此刻 history 含本轮提问、尚无
+            # 回复正文——推荐语义=从历史+提问延伸）。回复流完时推荐通常已就绪，done 后
+            # 不再串行空等第二次模型调用（实测串行耗时 ~4s：TTFT+思维链+输出）。
+            # 停止/error 路径不产生推荐：统一在 finally 里 cancel，任务不泄漏。
+            suggest_task = asyncio.create_task(
+                suggest_followups(
+                    self._client(),
+                    await asyncio.to_thread(self._store.list_messages, task_id),
+                )
+            )
             persisted = False
             stopped_by_user = False
             stop_event = self._active_stops[task_id] = asyncio.Event()
@@ -281,12 +291,9 @@ class ChatRuntime:
                     await asyncio.to_thread(self._store.append_message, task_id, "assistant", final_reply)
                     persisted = True
                     yield {"type": "done", "reply": final_reply}
-                    # 跟进问题推荐：独立一次小调用（不进 agent transcript），失败静默为空。
-                    # 在 done 之后发——回复先定稿，推荐稍后出现；停止/error 路径不产生推荐。
-                    suggestions = await suggest_followups(
-                        self._client(),
-                        await asyncio.to_thread(self._store.list_messages, task_id),
-                    )
+                    # 推荐已在 producer 旁并行预发——回复流式期间它跑完了大半，这里通常直接
+                    # 拿到结果；失败静默为空（suggest_followups 出口无异常）。
+                    suggestions = await suggest_task
                     if suggestions:
                         yield {"type": "suggestions", "items": suggestions}
             finally:
@@ -297,6 +304,8 @@ class ChatRuntime:
                     # 连用 await 达成的落库都会半路夭折——所以下端落库必须同步调用；
                     # producer 是独立 task，不在该 scope 内，自行收尾。
                     producer.cancel()
+                if not suggest_task.done():
+                    suggest_task.cancel()
                 # 客户端中途断开 / 用户停止（消费循环被 GeneratorExit/CancelledError 打断、
                 # 或 stopped_by_user 提前 return）：正常完成路径的 assistant 落库不可达。
                 # 这里兜底：①有已流出内容则落 assistant partial；②无条件落一行

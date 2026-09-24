@@ -418,3 +418,44 @@ def test_followup_suggestions_absent_on_stop(store, scripted_client, tmp_path) -
     types = [e["type"] for e in events]
     assert "suggestions" not in types
     assert "done" not in types
+
+
+def test_followup_suggestions_prefetch_starts_with_reply(store, scripted_client, tmp_path) -> None:
+    # 并行预发的决定性证据：done 事件到达时推荐调用必须已在飞（串行时代 done 之后才发起）。
+    # 两道 asyncio.Event 闸门替代时钟断言，杜绝时序抖动。
+    suggest_started = asyncio.Event()
+    suggest_gate = asyncio.Event()
+    captured: list[list[dict[str, Any]]] = []
+
+    client = scripted_client(
+        tool_completions=[ToolCompletion(text="答复", requested_tools=[], model_id="mock-model")],
+    )
+
+    async def gated_acomplete(messages: list[dict[str, Any]], **kwargs: Any) -> Completion:
+        captured.append(messages)
+        suggest_started.set()
+        await suggest_gate.wait()
+        return Completion(text='["然后呢？"]', model_id="mock-model")
+
+    client.acomplete = gated_acomplete  # type: ignore[method-assign]
+    runtime = _runtime(store, client, tmp_path)
+    task = store.create_task("react")
+
+    async def consume() -> list[dict[str, Any]]:
+        events: list[dict[str, Any]] = []
+        async for event in runtime.stream_reply(task["id"], "hi"):
+            events.append(event)
+            if event["type"] == "done":
+                # 预发生效：推荐在回复流式期间就已发起；放行让它收尾
+                assert suggest_started.is_set()
+                suggest_gate.set()
+        return events
+
+    events = asyncio.run(consume())
+
+    assert [e["type"] for e in events][-2:] == ["done", "suggestions"]
+    assert events[-1]["items"] == ["然后呢？"]
+    # 预发语义：推荐只看得到历史+本轮提问，看不到尚未生成的回复
+    prompt = captured[0][-1]["content"]
+    assert "hi" in prompt
+    assert "答复" not in prompt
