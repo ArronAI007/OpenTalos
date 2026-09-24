@@ -44,6 +44,32 @@ def test_stream_plain_reply_deltas_and_persists(store, scripted_client, tmp_path
     assert store.get_task(task["id"])["title"] == "hi"
 
 
+def test_disconnect_mid_stream_persists_partial(store, scripted_client, tmp_path) -> None:
+    # 前端"停止"会 abort fetch；SSE 断开时消费循环被中断，正常完成路径的落库不可达。
+    # 期望：已流出的部分内容兜底落库，刷新后仍可见。
+    client = scripted_client(tool_completions=[
+        ToolCompletion(text="你好，世界！", requested_tools=[], model_id="mock-model"),
+    ])
+    runtime = _runtime(store, client, tmp_path)
+    task = store.create_task("react")
+
+    async def consume_one_delta_then_close() -> str:
+        gen = runtime.stream_reply(task["id"], "hi")
+        first = await gen.__anext__()
+        assert first["type"] == "delta"
+        partial = first["text"]
+        await gen.aclose()  # 模拟客户端中途断开（关闭 SSE）
+        return partial
+
+    partial = asyncio.run(consume_one_delta_then_close())
+
+    rows = store.list_messages(task["id"])
+    assistant_rows = [r for r in rows if r["kind"] == "assistant"]
+    assert len(assistant_rows) == 1
+    assert assistant_rows[0]["content"] == partial  # 恰好是用户实际看到的部分
+    assert partial and "你好，世界！".startswith(partial)
+
+
 def test_stream_tool_call_events_and_tool_row(store, scripted_client, echo_tool_registry, tmp_path) -> None:
     client = scripted_client(tool_completions=[
         ToolCompletion(

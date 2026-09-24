@@ -214,6 +214,7 @@ class ChatRuntime:
                     await queue.put(None)
 
             producer = asyncio.create_task(run_agent())
+            persisted = False
             try:
                 while True:
                     event = await queue.get()
@@ -244,8 +245,22 @@ class ChatRuntime:
                         parts.append(reply)  # 后端未流式时兜底，流式过则不重复追加
                     final_reply = "".join(parts)
                     await asyncio.to_thread(self._store.append_message, task_id, "assistant", final_reply)
+                    persisted = True
                     yield {"type": "done", "reply": final_reply}
             finally:
                 if not producer.done():
                     producer.cancel()
                 await asyncio.gather(producer, return_exceptions=True)
+                # 客户端中途断开（前端"停止"会 abort fetch，SSE 被关）：消费循环在
+                # yield/await 处被 GeneratorExit/CancelledError 打断，上面正常完成路径的
+                # assistant 落库不可达。这里兜底把已流出的部分内容落库——刷新后仍能看到
+                # 停止前的输出。无内容不落（空泡无意义）；error 场景前端已有错误泡，
+                # 保持既有的不落语义（test_agent_error_..._no_assistant_row 守护）。
+                if not persisted and error is None:
+                    if not parts and reply:
+                        parts.append(reply)
+                    partial = "".join(parts)
+                    if partial:
+                        await asyncio.to_thread(
+                            self._store.append_message, task_id, "assistant", partial
+                        )
