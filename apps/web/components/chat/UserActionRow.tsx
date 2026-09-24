@@ -88,10 +88,13 @@ export function UserActionRow({ content, completedAt, taskId, busy, onEdit, onDe
 
   useLayoutEffect(() => {
     if (!menuOpen) return;
+    const trigger = menuRef.current;
     const panel = panelRef.current;
-    const list = menuRef.current?.closest("ol"); // 最近滚动容器（MessageList 的消息列表）
-    if (!panel || !list) return;
-    setFlipUp(panel.getBoundingClientRect().bottom > list.getBoundingClientRect().bottom);
+    const list = trigger?.closest("ol"); // 最近滚动容器（MessageList 的消息列表）
+    if (!trigger || !panel || !list) return;
+    // 用触发器底沿 + 面板高度推算向下展开的落点，与面板当前摆放（flipUp 残留值）无关——
+    // 若量面板自身 rect，上次残留的 flip 会让重开先渲染在上方、误判没越界、回落下方再被裁。
+    setFlipUp(trigger.getBoundingClientRect().bottom + panel.offsetHeight > list.getBoundingClientRect().bottom);
   }, [menuOpen]);
 
   // 打开期间点击菜单外或 Esc 关闭（与侧栏 TaskListMenu 同款交互，菜单小、就地管理）
