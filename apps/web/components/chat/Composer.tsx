@@ -59,7 +59,7 @@ export function Composer({
 
   return (
     <form
-      className="border-t border-border p-4"
+      className="p-4"
       onSubmit={(event) => { event.preventDefault(); submit(); }}
     >
       <div className="mx-auto flex max-w-3xl items-end gap-2 rounded-composer border border-border bg-white px-4 py-2">
