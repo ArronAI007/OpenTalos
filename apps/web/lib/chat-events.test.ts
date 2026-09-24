@@ -35,10 +35,16 @@ describe("reduceChatEvent", () => {
     expect(msgs[1]).toMatchObject({ id: "live-2", kind: "tool", name: "run_skill_script", result: undefined });
   });
 
-  it("done finalizes the assistant message", () => {
+  it("done finalizes the assistant message and stamps completedAt from the injected now", () => {
     let msgs = reduceChatEvent([], { type: "delta", text: "完" });
-    msgs = reduceChatEvent(msgs, { type: "done", reply: "完" });
-    expect(msgs[0]).toEqual({ id: "live-1", kind: "assistant", content: "完", streaming: false });
+    msgs = reduceChatEvent(msgs, { type: "done", reply: "完" }, 1700000000000);
+    expect(msgs[0]).toEqual({
+      id: "live-1",
+      kind: "assistant",
+      content: "完",
+      streaming: false,
+      completedAt: 1700000000000,
+    });
   });
 
   it("error becomes an error bubble", () => {
@@ -46,10 +52,16 @@ describe("reduceChatEvent", () => {
     expect(msgs[0]).toEqual({ id: "live-1", kind: "error", content: "boom" });
   });
 
-  it("error finalizes streaming bubble and next reply starts fresh", () => {
+  it("error finalizes streaming bubble (stamped) and next reply starts fresh", () => {
     let msgs = reduceChatEvent([], { type: "delta", text: "正在查" });
-    msgs = reduceChatEvent(msgs, { type: "error", message: "boom" });
-    expect(msgs[0]).toEqual({ id: "live-1", kind: "assistant", content: "正在查", streaming: false });
+    msgs = reduceChatEvent(msgs, { type: "error", message: "boom" }, 1700000000001);
+    expect(msgs[0]).toEqual({
+      id: "live-1",
+      kind: "assistant",
+      content: "正在查",
+      streaming: false,
+      completedAt: 1700000000001,
+    });
     expect(msgs[1]).toEqual({ id: "live-2", kind: "error", content: "boom" });
     msgs = reduceChatEvent(msgs, { type: "delta", text: "结果A" });
     expect(msgs[2]).toEqual({ id: "live-3", kind: "assistant", content: "结果A", streaming: true });
@@ -57,10 +69,16 @@ describe("reduceChatEvent", () => {
 });
 
 describe("finalizeStreaming", () => {
-  it("settles streaming assistant bubbles and keeps partial content", () => {
+  it("settles streaming assistant bubbles, keeps partial content and stamps completedAt", () => {
     let msgs = reduceChatEvent([], { type: "delta", text: "半截回复" });
-    msgs = finalizeStreaming(msgs);
-    expect(msgs[0]).toEqual({ id: "live-1", kind: "assistant", content: "半截回复", streaming: false });
+    msgs = finalizeStreaming(msgs, 1700000000002);
+    expect(msgs[0]).toEqual({
+      id: "live-1",
+      kind: "assistant",
+      content: "半截回复",
+      streaming: false,
+      completedAt: 1700000000002,
+    });
   });
 
   it("returns the same reference when nothing is streaming (no-op fast path)", () => {
@@ -75,10 +93,10 @@ describe("finalizeStreaming", () => {
     let msgs: UiMessage[] = [{ id: "row-1", kind: "user", content: "问" }];
     msgs = reduceChatEvent(msgs, { type: "tool_call", name: "read_skill", arguments: {} });
     msgs = reduceChatEvent(msgs, { type: "delta", text: "查" });
-    msgs = finalizeStreaming(msgs);
+    msgs = finalizeStreaming(msgs, 1700000000003);
     expect(msgs[0]).toEqual({ id: "row-1", kind: "user", content: "问" });
     expect(msgs[1]).toMatchObject({ kind: "tool", name: "read_skill", result: undefined });
-    expect(msgs[2]).toMatchObject({ kind: "assistant", streaming: false });
+    expect(msgs[2]).toMatchObject({ kind: "assistant", streaming: false, completedAt: 1700000000003 });
     msgs = reduceChatEvent(msgs, { type: "delta", text: "新回复" });
     expect(msgs[3]).toEqual({ id: "live-3", kind: "assistant", content: "新回复", streaming: true });
   });
@@ -88,11 +106,11 @@ describe("stopped notice", () => {
   it("appendStoppedNotice appends a stopped row after the finalized reply", () => {
     let msgs: UiMessage[] = [{ id: "row-1", kind: "user", content: "问" }];
     msgs = reduceChatEvent(msgs, { type: "delta", text: "半截" });
-    msgs = finalizeStreaming(msgs);
+    msgs = finalizeStreaming(msgs, 1700000000004);
     msgs = appendStoppedNotice(msgs);
     expect(msgs).toEqual([
       { id: "row-1", kind: "user", content: "问" },
-      { id: "live-1", kind: "assistant", content: "半截", streaming: false },
+      { id: "live-1", kind: "assistant", content: "半截", streaming: false, completedAt: 1700000000004 },
       { id: "live-2", kind: "stopped" },
     ]);
   });

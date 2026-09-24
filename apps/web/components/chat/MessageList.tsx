@@ -7,6 +7,7 @@ import type { UiMessage } from "@/lib/chat-events";
 import { isNearBottom, scrollToBottom } from "@/lib/scroll-stick";
 import { LogoMark } from "@/components/sidebar/Logo";
 import { CirclePauseIcon } from "@/components/ui/icons";
+import { formatDateTimeCN, formatHM } from "@/lib/format-time";
 import { CopyReplyButton } from "./CopyReplyButton";
 
 function ToolBubble({ message }: { message: Extract<UiMessage, { kind: "tool" }> }) {
@@ -85,10 +86,21 @@ export function MessageList({ messages }: { messages: UiMessage[] }) {
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
                 </div>
                 {message.streaming && <span className="animate-pulse text-text-secondary">▍</span>}
-                {/* 回复定稿（含被停止定稿与历史行）后提供复制；流式中隐藏 */}
+                {/* 回复定稿（含被停止定稿与历史行）后提供复制与时间；流式中隐藏 */}
                 {!message.streaming && (
-                  <div className="mt-1.5">
+                  <div className="mt-1.5 flex items-center gap-2">
                     <CopyReplyButton content={message.content} />
+                    {message.completedAt !== undefined && (
+                      <span className="group relative">
+                        <time className="text-xs leading-6 text-text-secondary">
+                          {formatHM(message.completedAt)}
+                        </time>
+                        {/* 黑气泡：hover 时间文本时浮现完整日期（纯 CSS group-hover，无 JS） */}
+                        <span className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1 hidden -translate-x-1/2 whitespace-nowrap rounded-md bg-user-bubble px-2 py-1 text-xs text-white group-hover:block">
+                          {formatDateTimeCN(message.completedAt)}
+                        </span>
+                      </span>
+                    )}
                   </div>
                 )}
               </div>

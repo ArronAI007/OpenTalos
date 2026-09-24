@@ -18,7 +18,8 @@ function fromStored(row: StoredMessage): UiMessage {
     return { id: `row-${row.id}`, kind: "tool", ...parsed };
   }
   if (row.kind === "user" || row.kind === "assistant") {
-    return { id: `row-${row.id}`, kind: row.kind, content: row.content };
+    // 服务端 created_at 为无时区后缀的本地 ISO：Date.parse 按本地时区解析，与后端同机一致
+    return { id: `row-${row.id}`, kind: row.kind, content: row.content, completedAt: Date.parse(row.created_at) };
   }
   return { id: `row-${row.id}`, kind: "error", content: `未知消息类型: ${row.kind}` };
 }

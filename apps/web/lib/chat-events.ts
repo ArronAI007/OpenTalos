@@ -6,7 +6,15 @@ export type ChatEvent =
   | { type: "error"; message: string };
 
 export type UiMessage =
-  | { kind: "user" | "assistant"; id: string; content: string; streaming?: boolean }
+  // completedAt（epoch ms）：assistant 回复定稿时刻（done/停止/error 定稿）或历史行 created_at；
+  // 渲染层动作行（复制 + 时间）据此显示回复时间。user 历史行同样带，live user 暂无需求不填。
+  | {
+      kind: "user" | "assistant";
+      id: string;
+      content: string;
+      streaming?: boolean;
+      completedAt?: number;
+    }
   | { kind: "tool"; id: string; name: string; arguments: Record<string, unknown>; result?: string; ok?: boolean }
   | { kind: "error"; id: string; content: string }
   // 停止提示是纯本地 UI 行（不来自服务端、不入库）：kind 只携带语义，文案在渲染层（MessageList）。
@@ -32,12 +40,15 @@ export function parseSseBlock(block: string): ChatEvent | null {
   return JSON.parse(line.slice(5).trim()) as ChatEvent;
 }
 
-// 把所有 streaming 助理泡定稿（内容保留、摘掉 streaming 标记），
+// 把所有 streaming 助理泡定稿（内容保留、摘掉 streaming 标记、补 completedAt 时间戳），
 // 用户主动停止（AbortError）与 error 事件共用。无 streaming 泡时原样返回引用，
 // 让 setMessages 走 React bail-out 快路径（不触发多余渲染）。
-export function finalizeStreaming(prev: UiMessage[]): UiMessage[] {
+// now 默认 Date.now()，测试注入固定值保持确定性。
+export function finalizeStreaming(prev: UiMessage[], now = Date.now()): UiMessage[] {
   if (!prev.some((m) => m.kind === "assistant" && m.streaming)) return prev;
-  return prev.map((m) => (m.kind === "assistant" && m.streaming ? { ...m, streaming: false } : m));
+  return prev.map((m) =>
+    m.kind === "assistant" && m.streaming ? { ...m, streaming: false, completedAt: now } : m,
+  );
 }
 
 // 停止流式后追加提示行（幂等：已存在则返回原引用，防止双击停止叠加）
@@ -53,7 +64,8 @@ export function dropStoppedNotice(prev: UiMessage[]): UiMessage[] {
   return prev.filter((m) => m.kind !== "stopped");
 }
 
-export function reduceChatEvent(prev: UiMessage[], event: ChatEvent): UiMessage[] {
+// now 仅用于 done/error 定稿时给 assistant 泡落 completedAt（默认 Date.now()，测试注入固定值）
+export function reduceChatEvent(prev: UiMessage[], event: ChatEvent, now = Date.now()): UiMessage[] {
   switch (event.type) {
     case "delta": {
       const current = prev.find(
@@ -82,13 +94,13 @@ export function reduceChatEvent(prev: UiMessage[], event: ChatEvent): UiMessage[
       );
       const rest = prev.filter((m) => m !== current);
       if (current) {
-        return [...rest, { ...current, content: event.reply, streaming: false }];
+        return [...rest, { ...current, content: event.reply, streaming: false, completedAt: now }];
       }
-      return [...rest, { id: nextUiId(rest), kind: "assistant", content: event.reply, streaming: false }];
+      return [...rest, { id: nextUiId(rest), kind: "assistant", content: event.reply, streaming: false, completedAt: now }];
     }
     case "error": {
       // 终结所有 streaming 泡：error 与 done 互斥，不终结的话残留泡会把下一轮回复合流进去。
-      const finalized = finalizeStreaming(prev);
+      const finalized = finalizeStreaming(prev, now);
       return [...finalized, { id: nextUiId(finalized), kind: "error", content: event.message }];
     }
   }
