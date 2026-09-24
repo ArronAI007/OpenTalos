@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { shouldSubmitOnEnter } from "@/lib/composer-keys";
 
-// 输入框自增高上限：约 6 行（text-sm / leading-5），超出后框内滚动
+// 输入框自增高上限：约 6 行（text-base / leading-6），超出后框内滚动
 const MAX_TEXTAREA_HEIGHT_PX = 160;
 
 export function Composer({
@@ -79,7 +79,7 @@ export function Composer({
           }}
           disabled={disabled}
           placeholder="给 OpenTalos 发任务…"
-          className="max-h-40 flex-1 resize-none overflow-y-auto bg-transparent text-sm leading-5 outline-none disabled:opacity-50"
+          className="max-h-40 flex-1 resize-none overflow-y-auto bg-transparent text-base leading-6 outline-none disabled:opacity-50"
           aria-label="输入消息"
         />
         {disabled && onStop ? (

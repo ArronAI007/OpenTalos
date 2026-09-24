@@ -84,7 +84,7 @@ export function MessageList({
           return (
             <li key={message.id} className={`${rowCls} group`}>
               {/* 气泡底色与左侧栏同 token（--color-sidebar），文字用主前景色 */}
-              <div className="ml-auto w-fit max-w-[75%] rounded-2xl bg-sidebar px-4 py-2 text-sm text-text">
+              <div className="ml-auto w-fit max-w-[75%] rounded-2xl bg-sidebar px-4 py-2 text-base text-text">
                 {message.content}
               </div>
               {/* Manus 式操作行：相对时间 + 复制/分享/编辑/删除整轮，右对齐贴在气泡下方；
@@ -103,7 +103,7 @@ export function MessageList({
         if (message.kind === "assistant") {
           return (
             <li key={message.id} className={rowCls}>
-              <div className="max-w-[85%] text-sm leading-6">
+              <div className="max-w-[85%] text-base leading-6">
                 {/* 每条回复带品牌头（流式与历史同等处理），对齐 Manus 版式 */}
                 <BrandHeader />
                 <div className="md">
@@ -134,7 +134,7 @@ export function MessageList({
         if (message.kind === "stopped") {
           return (
             <li key={message.id} className={rowCls}>
-              <div className="max-w-[85%] text-sm leading-6">
+              <div className="max-w-[85%] text-base leading-6">
                 {/* 立即停止（尚无内容流出）时这里是唯一可见的响应块，同样带品牌头 */}
                 <BrandHeader />
                 <div className="flex items-center gap-2 text-amber-600">
@@ -150,7 +150,7 @@ export function MessageList({
         }
         return (
           <li key={message.id} className={rowCls}>
-            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-base text-red-600">
               出错了：{message.content}
             </div>
           </li>
