@@ -7,6 +7,7 @@ import type { UiMessage } from "@/lib/chat-events";
 import { isNearBottom, scrollToBottom } from "@/lib/scroll-stick";
 import { LogoMark } from "@/components/sidebar/Logo";
 import { CirclePauseIcon } from "@/components/ui/icons";
+import { CopyReplyButton } from "./CopyReplyButton";
 
 function ToolBubble({ message }: { message: Extract<UiMessage, { kind: "tool" }> }) {
   const argsPreview = Object.entries(message.arguments)
@@ -84,6 +85,12 @@ export function MessageList({ messages }: { messages: UiMessage[] }) {
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
                 </div>
                 {message.streaming && <span className="animate-pulse text-text-secondary">▍</span>}
+                {/* 回复定稿（含被停止定稿与历史行）后提供复制；流式中隐藏 */}
+                {!message.streaming && (
+                  <div className="mt-1.5">
+                    <CopyReplyButton content={message.content} />
+                  </div>
+                )}
               </div>
             </li>
           );
