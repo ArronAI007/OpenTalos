@@ -43,7 +43,7 @@ class TranscriptStore:
 
         keep_from = starts[-self.min_retain_turns]
         summary_message = self._message_type(
-            content=f"## Archived Session Summary\n{summary}",
+            content=summary,
             role="summary",
             metadata={"compressed_at": datetime.now().isoformat()},
         )

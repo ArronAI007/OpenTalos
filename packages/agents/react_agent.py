@@ -106,7 +106,6 @@ class ReActAgent(Agent):
 
         self.record_message(ChatMessage(content=input_text, role="user"))
         self.record_message(ChatMessage(content=answer, role="assistant"))
-        await self.maybe_compress_history()
         return answer
 
     async def _handle(self, invocation: ToolInvocation, step: int) -> dict[str, str]:

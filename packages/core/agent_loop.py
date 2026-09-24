@@ -40,6 +40,9 @@ def seed_messages(system_prompt: str | None, history: list[Any], user_text: str)
                 ],
             })
             messages.append({"role": "tool", "tool_call_id": call_id, "content": message.content})
+        elif message.role == "summary":
+            # summary 不是 OpenAI 兼容 role，派生成 system 消息并加前缀，让模型知道这是旧对话摘要。
+            messages.append({"role": "system", "content": f"## Archived Session Summary\n{message.content}"})
         else:
             messages.append({"role": message.role, "content": message.content})
     messages.append({"role": "user", "content": user_text})

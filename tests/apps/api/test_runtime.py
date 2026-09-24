@@ -518,3 +518,70 @@ def test_followup_suggestions_prefetch_starts_with_reply(store, scripted_client,
     prompt = captured[0][-1]["content"]
     assert "hi" in prompt
     assert "答复" not in prompt
+
+
+def test_compression_persists_summary_checkpoint(store, scripted_client, tmp_path) -> None:
+    # 压缩成功后落一条 kind="summary" 快照行（summary + 保留近期），重启据此恢复、不重新压。
+    # completions 队列两个：首个给 suggest（返回 []，静默），次个给 summarize_history（摘要文本）。
+    client = scripted_client(
+        completions=[
+            Completion(text="[]", model_id="mock-model"),
+            Completion(text="早期讨论摘要", model_id="mock-model"),
+        ],
+        tool_completions=[ToolCompletion(text="答复", requested_tools=[], model_id="mock-model")],
+    )
+    task = store.create_task("react")
+    for i in range(11):  # 种入 11 回合，第 12 轮触发压缩（min_retain_turns=10）
+        store.append_message(task["id"], "user", f"问题 {i}")
+        store.append_message(task["id"], "assistant", f"回答 {i}")
+
+    runtime = _runtime(store, client, tmp_path, compaction_token_limit=1)
+    asyncio.run(_collect(runtime, task["id"], "第 12 个问题"))
+
+    summary_rows = [r for r in store.list_messages(task["id"]) if r["kind"] == "summary"]
+    assert len(summary_rows) == 1
+    checkpoint = json.loads(summary_rows[0]["content"])
+    assert checkpoint["messages"][0]["role"] == "summary"
+    assert "早期讨论摘要" in checkpoint["messages"][0]["content"]
+    # 快照含保留的近期回合（本轮 user/assistant 也在内）
+    assert any(m["role"] == "user" and "第 12 个问题" in m["content"] for m in checkpoint["messages"])
+
+
+def test_rebuild_restores_summary_checkpoint_and_skips_folded(store, scripted_client, tmp_path) -> None:
+    seen_messages: list[list[dict]] = []
+
+    task = store.create_task("react")
+    # 早期被折叠消息（不在快照里）
+    store.append_message(task["id"], "user", "早期问题 A")
+    store.append_message(task["id"], "assistant", "早期回答 A")
+    # summary 快照行：summary + 近期回合
+    checkpoint = {
+        "messages": [
+            {"content": "存档摘要", "role": "summary", "metadata": {"compressed_at": "2026-09-24T00:00:00"}},
+            {"content": "近期问题 B", "role": "user"},
+            {"content": "近期回答 B", "role": "assistant"},
+        ],
+        "saved_at": "2026-09-24T00:00:00",
+        "turns": 1,
+    }
+    store.append_message(task["id"], "summary", json.dumps(checkpoint, ensure_ascii=False))
+    # summary 之后的新消息
+    store.append_message(task["id"], "user", "新问题 C")
+    store.append_message(task["id"], "assistant", "新回答 C")
+
+    replaying = scripted_client(tool_completions=[])
+
+    async def spy_astream_with_tools(messages, tools, on_text_delta=None, **kwargs):
+        seen_messages.append(list(messages))
+        return ToolCompletion(text="ok", requested_tools=[], model_id="mock-model")
+
+    replaying.astream_with_tools = spy_astream_with_tools  # type: ignore[method-assign]
+    runtime = _runtime(store, replaying, tmp_path)  # 新 runtime = 模拟重启
+    asyncio.run(_collect(runtime, task["id"], "继续"))
+
+    messages = seen_messages[-1]
+    system_msgs = [m for m in messages if m["role"] == "system"]
+    assert any("## Archived Session Summary\n存档摘要" in m["content"] for m in system_msgs)
+    payload = json.dumps(messages, ensure_ascii=False)
+    assert "近期问题 B" in payload and "新问题 C" in payload
+    assert "早期问题 A" not in payload

@@ -56,6 +56,24 @@ def test_seed_messages_rehydrates_tool_history():
     ]
 
 
+def test_seed_messages_maps_summary_to_system_block():
+    # summary 不是 OpenAI 兼容 role，必须派生成 system 消息（加前缀），否则压缩后下一轮 400。
+    history = [
+        ChatMessage(content="earlier", role="summary"),
+        ChatMessage(content="recent user", role="user"),
+        ChatMessage(content="recent assistant", role="assistant"),
+    ]
+    messages = seed_messages("Be nice.", history, "now?")
+
+    assert messages == [
+        {"role": "system", "content": "Be nice."},
+        {"role": "system", "content": "## Archived Session Summary\nearlier"},
+        {"role": "user", "content": "recent user"},
+        {"role": "assistant", "content": "recent assistant"},
+        {"role": "user", "content": "now?"},
+    ]
+
+
 def test_build_reply_message_shapes_tool_calls_for_the_wire():
     invocation = ToolInvocation(call_id="call_1", tool_name="echo", arguments_json='{"text": "hi"}')
     message = build_reply_message("thinking...", [invocation])

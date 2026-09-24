@@ -20,8 +20,8 @@ CREATE TABLE IF NOT EXISTS tasks (
 CREATE TABLE IF NOT EXISTS messages (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-  kind TEXT NOT NULL,           -- 'user' | 'assistant' | 'tool' | 'stopped'
-  content TEXT NOT NULL,        -- tool 行存 JSON: {"call_id","name","arguments","result","ok"}
+  kind TEXT NOT NULL,           -- 'user' | 'assistant' | 'tool' | 'summary' | 'stopped'
+  content TEXT NOT NULL,        -- tool 行存 JSON: {"call_id","name","arguments","result","ok"}; summary 行存 Surface 快照 JSON
   created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS projects (
@@ -105,7 +105,7 @@ class ChatStore:
 
     def append_message(self, task_id: str, kind: str, content: str) -> dict:
         # stopped：会话被中断（前端停止/断连）的标记行，无内容，仅让刷新后仍能见到"已停止"
-        if kind not in ("user", "assistant", "tool", "stopped"):
+        if kind not in ("user", "assistant", "tool", "summary", "stopped"):
             raise ValueError(f"unknown message kind: {kind}")
         now = _now()
         with self._connect() as conn:

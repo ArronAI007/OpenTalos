@@ -61,7 +61,6 @@ class ReflectionAgent(Agent):
 
         self.record_message(ChatMessage(content=input_text, role="user"))
         self.record_message(ChatMessage(content=attempt, role="assistant"))
-        await self.maybe_compress_history()
         return attempt
 
     async def _call(self, phase: str, user_text: str, **kwargs: object) -> str:

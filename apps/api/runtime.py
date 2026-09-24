@@ -91,12 +91,14 @@ class ChatRuntime:
         skill_service_url: str = "http://localhost:8321",
         trace_dir: Path | None = None,
         tool_registry_factory: Callable[[], ToolRegistry] | None = None,
+        compaction_token_limit: int | None = None,
     ) -> None:
         self._store = store
         self._model_client = model_client  # None → 首次需要时按 env 构造
         self._skill_service_url = skill_service_url
         self._trace_dir = trace_dir
         self._tool_registry_factory = tool_registry_factory
+        self._compaction_token_limit = compaction_token_limit
         self._agents: dict[str, Agent] = {}
         self._registries: dict[str, EventToolRegistry] = {}
         self._task_locks: dict[str, asyncio.Lock] = {}
@@ -163,8 +165,28 @@ class ChatRuntime:
             tool_registry=self._build_registry(task["id"]),
             system_prompt_suffix=self._skills_suffix,
             trace_dir=str(self._trace_dir) if self._trace_dir else None,
+            compaction_token_limit=self._compaction_token_limit,
         )
+
+        # 压缩成功后落一份 Surface 快照（summary + 保留近期）到 DB：重启据此恢复、不重新压。
+        async def _persist_checkpoint() -> None:
+            await asyncio.to_thread(
+                self._store.append_message, task["id"], "summary",
+                json.dumps(agent.snapshot_history(), ensure_ascii=False),
+            )
+
+        agent.on_compression = _persist_checkpoint
+
         rows = await asyncio.to_thread(self._store.list_messages, task["id"])
+        # 若存在 summary 检查点：恢复其快照，只重放它之后的新行（被折叠的早期行不再进 Surface）。
+        last_summary = max((i for i, r in enumerate(rows) if r["kind"] == "summary"), default=-1)
+        if last_summary >= 0:
+            try:
+                agent.restore_history(json.loads(rows[last_summary]["content"]))
+            except json.JSONDecodeError:
+                pass  # 快照损坏：按无检查点处理，退回全量重放
+            else:
+                rows = rows[last_summary + 1:]
         for row in rows:
             if row["kind"] in ("user", "assistant"):
                 agent.record_message(ChatMessage(role=row["kind"], content=row["content"]))
@@ -310,6 +332,12 @@ class ChatRuntime:
                     suggestions = await suggest_task
                     if suggestions:
                         yield {"type": "suggestions", "items": suggestions}
+                    # 压缩是优化、失败不影响对话：assistant 已落库，此处触发折叠+快照落库，
+                    # DB 顺序 user → tool → assistant → summary，重放时 summary 之后无重复行。
+                    try:
+                        await agent.maybe_compress_history()
+                    except Exception:  # noqa: BLE001 - 摘要失败静默跳过，下轮继续
+                        pass
             finally:
                 self._active_stops.pop(task_id, None)
                 if not producer.done():

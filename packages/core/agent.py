@@ -71,6 +71,9 @@ class Agent(ABC):
         # 不为空时，工具输出超限会被截断、完整内容落盘（OutputTrimmer 构造即建目录，所以默认不建）。
         self.output_trimmer = output_trimmer
         self._tokens = TokenBudget()
+        # 压缩成功后触发的无参回调（供 runtime 落库快照）；压缩本身是纯 Surface 操作，不该在
+        # 这里耦合任何持久化逻辑，所以回调由外部按需注入，None 时静默跳过。
+        self.on_compression: Callable[[], Awaitable[None]] | None = None
 
     @abstractmethod
     async def arespond(self, input_text: str, **kwargs: object) -> str: ...
@@ -130,8 +133,9 @@ class Agent(ABC):
     async def maybe_compress_history(self) -> bool:
         """历史消息的预估 token 数达到 compaction_token_limit 时，用 LLM 生成结构化摘要并折叠旧历史。
 
-        compaction_token_limit 为 None（默认）时是 no-op，不会产生额外的模型调用；子类在每轮
-        arespond() 结束时调用它即可获得自动压缩，不需要调用方手动拼摘要。
+        compaction_token_limit 为 None（默认）时是 no-op，不会产生额外的模型调用；折叠成功后
+        触发 on_compression 回调（若有）。压缩触发时机由调用方编排（如 runtime 在 assistant
+        落库后调用），保证落库顺序与重放一致。
         """
         if self.compaction_token_limit is None:
             return False
@@ -139,7 +143,18 @@ class Agent(ABC):
         if self._tokens.estimate_messages(messages) < self.compaction_token_limit:
             return False
         summary = await summarize_history(self.model_client, messages)
-        return self.compress_history(summary)
+        changed = self.compress_history(summary)
+        if changed and self.on_compression is not None:
+            await self.on_compression()
+        return changed
+
+    def snapshot_history(self) -> dict[str, Any]:
+        """当前 Surface（transcript）的完整序列化，供压缩落库 / 重启恢复。"""
+        return self._transcript.snapshot()
+
+    def restore_history(self, data: dict[str, Any]) -> None:
+        """用一份快照覆盖当前 transcript，用于重启后从 summary 检查点恢复而非全量重放。"""
+        self._transcript.restore(data)
 
     def build_context(self, user_query: str, extra_slices: list[ContextSlice] | None = None) -> str:
         """跑一遍 GSSC 流水线，把 system_prompt + 历史 + user_query 组装成结构化上下文。"""

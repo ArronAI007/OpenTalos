@@ -183,6 +183,42 @@ async def test_maybe_compress_history_summarizes_and_folds_history_once_over_the
     assert "condensed summary" in history[0].content
 
 
+async def test_maybe_compress_history_notifies_on_compression_when_folded():
+    client = ModelClient(provider="mock")
+    client._backend = FakeModelBackend(
+        model_name="mock-model", response=Completion(text="condensed summary", model_id="mock-model")
+    )
+    agent = _EchoAgent(name="echo", model_client=client, min_retain_turns=1, compaction_token_limit=5)
+    for i in range(4):
+        agent.record_message(ChatMessage(content=f"question {i}", role="user"))
+        agent.record_message(ChatMessage(content=f"answer {i}", role="assistant"))
+
+    notified: list[bool] = []
+
+    async def on_compression() -> None:
+        notified.append(True)
+
+    agent.on_compression = on_compression
+
+    changed = await agent.maybe_compress_history()
+
+    assert changed is True
+    assert notified == [True]
+
+
+def test_snapshot_and_restore_history_round_trip(model_client):
+    agent = _EchoAgent(name="echo", model_client=model_client)
+    agent.record_message(ChatMessage(content="hi", role="user"))
+    agent.record_message(ChatMessage(content="hello", role="assistant"))
+
+    data = agent.snapshot_history()
+    assert [m["content"] for m in data["messages"]] == ["hi", "hello"]
+
+    other = _EchoAgent(name="other", model_client=model_client)
+    other.restore_history(data)
+    assert [m.content for m in other.history_snapshot()] == ["hi", "hello"]
+
+
 def test_runtime_settings_has_expected_defaults():
     settings = RuntimeSettings()
     assert settings.temperature == 0.7
