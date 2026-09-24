@@ -47,6 +47,8 @@ function TaskChat({ taskId }: { taskId: string }) {
         busy={busy}
         onEditUser={handleEditUser}
         onDeleteTurn={(messageId) => void deleteTurn(messageId)}
+        // 推荐问题点击直接发送（不回填输入框）；手头草稿保持不动
+        onPickSuggestion={(text) => void send(text)}
       />
       <div className="mx-auto w-full max-w-3xl">
         <Composer

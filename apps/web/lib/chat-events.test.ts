@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   appendStoppedNotice,
   dropStoppedNotice,
+  dropSuggestions,
   dropTurn,
   finalizeStreaming,
   parseSseBlock,
@@ -197,5 +198,45 @@ describe("dropTurn", () => {
     ];
     expect(dropTurn(msgs, "row-99")).toBe(msgs);
     expect(dropTurn(msgs, "row-2")).toBe(msgs); // 目标是 assistant：不发生删除
+  });
+});
+
+describe("suggestions", () => {
+  it("appends a suggestions row after done-finalized assistant", () => {
+    const prev: UiMessage[] = [
+      { id: "row-1", kind: "user", content: "问" },
+      { id: "live-1", kind: "assistant", content: "答", streaming: false, completedAt: 1 },
+    ];
+    const next = reduceChatEvent(prev, { type: "suggestions", items: ["然后呢？"] });
+    expect(next.map((m) => m.kind)).toEqual(["user", "assistant", "suggestions"]);
+    const row = next[next.length - 1];
+    if (row.kind !== "suggestions") throw new Error("unreachable");
+    expect(row.items).toEqual(["然后呢？"]);
+  });
+
+  it("replaces an existing suggestions row instead of stacking", () => {
+    const prev: UiMessage[] = [
+      { id: "live-1", kind: "suggestions", items: ["旧建议"] },
+      { id: "live-2", kind: "assistant", content: "答", streaming: false, completedAt: 1 },
+    ];
+    const next = reduceChatEvent(prev, { type: "suggestions", items: ["新建议"] });
+    expect(next.filter((m) => m.kind === "suggestions")).toHaveLength(1);
+    const row = next.find((m) => m.kind === "suggestions");
+    if (row?.kind !== "suggestions") throw new Error("unreachable");
+    expect(row.items).toEqual(["新建议"]);
+  });
+
+  it("dropSuggestions removes suggestion rows, keeps everything else", () => {
+    const prev: UiMessage[] = [
+      { id: "row-1", kind: "user", content: "问" },
+      { id: "row-2", kind: "assistant", content: "答" },
+      { id: "live-3", kind: "suggestions", items: ["然后呢？"] },
+    ];
+    expect(dropSuggestions(prev).map((m) => m.id)).toEqual(["row-1", "row-2"]);
+  });
+
+  it("dropSuggestions no-ops with the same reference when no suggestions", () => {
+    const prev: UiMessage[] = [{ id: "row-1", kind: "assistant", content: "答" }];
+    expect(dropSuggestions(prev)).toBe(prev);
   });
 });

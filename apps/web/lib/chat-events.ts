@@ -5,7 +5,9 @@ export type ChatEvent =
   | { type: "done"; reply: string }
   | { type: "error"; message: string }
   // user 行落库后服务端回送：把 live-N user 泡换成 row-N 身份（删除轮次需要服务端 id）。
-  | { type: "user_stored"; id: number; created_at: string };
+  | { type: "user_stored"; id: number; created_at: string }
+  // 回复完成后服务端追加的跟进问题推荐（done 之后、流尾；仅出现在本会话，不落库）。
+  | { type: "suggestions"; items: string[] };
 
 export type UiMessage =
   // completedAt（epoch ms）：assistant 回复定稿时刻（done/停止/error 定稿）或历史行 created_at；
@@ -20,7 +22,10 @@ export type UiMessage =
   | { kind: "tool"; id: string; name: string; arguments: Record<string, unknown>; result?: string; ok?: boolean }
   | { kind: "error"; id: string; content: string }
   // 停止提示是纯本地 UI 行（不来自服务端、不入库）：kind 只携带语义，文案在渲染层（MessageList）。
-  | { kind: "stopped"; id: string };
+  | { kind: "stopped"; id: string }
+  // 跟进问题推荐：本会话 UI 行（服务端 done 后追加；不落库、不进历史）。
+  // 下一条用户消息发出即过时清除（dropSuggestions），点击条目直接发送。
+  | { kind: "suggestions"; id: string; items: string[] };
 
 type AssistantMessage = { kind: "assistant"; id: string; content: string; streaming?: boolean };
 
@@ -65,6 +70,13 @@ export function appendStoppedNotice(prev: UiMessage[]): UiMessage[] {
 export function dropStoppedNotice(prev: UiMessage[]): UiMessage[] {
   if (!prev.some((m) => m.kind === "stopped" && m.id.startsWith("live-"))) return prev;
   return prev.filter((m) => m.kind !== "stopped" || !m.id.startsWith("live-"));
+}
+
+// 发送新消息时清掉上一轮的跟进问题推荐（新一轮会有新推荐，旧建议已过时）；
+// 建议行全部 live（不落库），整类清除；无建议时返回原引用。
+export function dropSuggestions(prev: UiMessage[]): UiMessage[] {
+  if (!prev.some((m) => m.kind === "suggestions")) return prev;
+  return prev.filter((m) => m.kind !== "suggestions");
 }
 
 // 删除整轮问答：目标 user 行 + 其后直到下一条 user 行之前的所有行（assistant/tool/stopped）。
@@ -133,6 +145,11 @@ export function reduceChatEvent(prev: UiMessage[], event: ChatEvent, now = Date.
       // 终结所有 streaming 泡：error 与 done 互斥，不终结的话残留泡会把下一轮回复合流进去。
       const finalized = finalizeStreaming(prev, now);
       return [...finalized, { id: nextUiId(finalized), kind: "error", content: event.message }];
+    }
+    case "suggestions": {
+      // 一轮至多一次；防御性替换旧建议行而非叠加
+      const rest = prev.filter((m) => m.kind !== "suggestions");
+      return [...rest, { id: nextUiId(rest), kind: "suggestions", items: event.items }];
     }
   }
 }

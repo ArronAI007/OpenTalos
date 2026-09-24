@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from core.protocol import ToolCompletion, ToolInvocation
+from core.protocol import Completion, ToolCompletion, ToolInvocation
 from db import ChatStore
 from runtime import ChatRuntime
 
@@ -337,3 +337,59 @@ def test_concurrent_tasks_do_not_cross_streams(store, scripted_client, echo_tool
             assert "AAA" in payload and "BBB" not in payload
         else:
             assert "BBB" in payload and "AAA" not in payload
+
+
+def test_followup_suggestions_emitted_after_done(store, scripted_client, tmp_path) -> None:
+    # 回复正常完成后，流内追加一次跟进问题推荐（done 之后、流尾）；
+    # 推荐走独立 acomplete 调用（completions 队列），不影响 agent 的 toolcall 流。
+    client = scripted_client(
+        completions=[Completion(text='["然后呢？","举个例子"]', model_id="mock-model")],
+        tool_completions=[ToolCompletion(text="答复", requested_tools=[], model_id="mock-model")],
+    )
+    runtime = _runtime(store, client, tmp_path)
+    task = store.create_task("react")
+
+    events = asyncio.run(_collect(runtime, task["id"], "hi"))
+
+    assert [e["type"] for e in events][-2:] == ["done", "suggestions"]
+    assert events[-1]["items"] == ["然后呢？", "举个例子"]
+
+
+def test_followup_suggestions_bad_output_is_silent(store, scripted_client, tmp_path) -> None:
+    # 推荐输出无法解析时静默省略事件，回复与落库不受影响（无 suggestions，done 仍是流尾）。
+    client = scripted_client(
+        completions=[Completion(text="这不是 JSON", model_id="mock-model")],
+        tool_completions=[ToolCompletion(text="答复", requested_tools=[], model_id="mock-model")],
+    )
+    runtime = _runtime(store, client, tmp_path)
+    task = store.create_task("react")
+
+    events = asyncio.run(_collect(runtime, task["id"], "hi"))
+
+    assert [e["type"] for e in events][-1] == "done"
+    rows = store.list_messages(task["id"])
+    assert [(r["kind"], r["content"]) for r in rows] == [("user", "hi"), ("assistant", "答复")]
+
+
+def test_followup_suggestions_absent_on_stop(store, scripted_client, tmp_path) -> None:
+    # 用户停止路径不产生推荐：stopped 提前 return，到不了 done 之后的推荐段。
+    client = scripted_client(
+        completions=[Completion(text='["不应出现"]', model_id="mock-model")],
+        tool_completions=[ToolCompletion(text="你好，世界！", requested_tools=[], model_id="mock-model")],
+    )
+    runtime = _runtime(store, client, tmp_path)
+    task = store.create_task("react")
+
+    async def consume_then_stop() -> list[dict[str, Any]]:
+        gen = runtime.stream_reply(task["id"], "hi")
+        events = [await gen.__anext__(), await gen.__anext__()]  # user_stored + 首个 delta
+        runtime.request_stop(task["id"])
+        async for event in gen:
+            events.append(event)
+        return events
+
+    events = asyncio.run(consume_then_stop())
+
+    types = [e["type"] for e in events]
+    assert "suggestions" not in types
+    assert "done" not in types

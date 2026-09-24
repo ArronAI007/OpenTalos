@@ -48,12 +48,14 @@ export function MessageList({
   busy,
   onEditUser,
   onDeleteTurn,
+  onPickSuggestion,
 }: {
   messages: UiMessage[];
   taskId: string;
   busy: boolean;
   onEditUser: (content: string) => void;
   onDeleteTurn: (messageId: string) => void;
+  onPickSuggestion: (text: string) => void;
 }) {
   const listRef = useRef<HTMLOListElement>(null);
   // 跟随滚动开关：初始 true（进入任务/历史加载后落在最新消息）；用户上翻超过阈值即停跟，回到底部恢复。
@@ -148,6 +150,26 @@ export function MessageList({
                   <CirclePauseIcon />
                   OpenTalos已停止 — 发送消息以继续
                 </div>
+              </div>
+            </li>
+          );
+        }
+        if (message.kind === "suggestions") {
+          // 跟进问题推荐：回复块的附属行（无品牌头——一轮只出现一次），点击条目直接发送，不回填输入框
+          return (
+            <li key={message.id} className={rowCls}>
+              <div className="flex max-w-[85%] flex-col items-start gap-1.5">
+                {message.items.map((item, index) => (
+                  <button
+                    key={`${index}-${item}`}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => onPickSuggestion(item)}
+                    className="rounded-full border border-border px-3 py-1.5 text-left text-sm text-text-secondary transition-colors hover:bg-sidebar hover:text-text disabled:opacity-40"
+                  >
+                    {item}
+                  </button>
+                ))}
               </div>
             </li>
           );

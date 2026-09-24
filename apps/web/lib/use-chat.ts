@@ -5,6 +5,7 @@ import { API_URL, deleteTurn as deleteTurnApi, listMessages, type StoredMessage 
 import {
   appendStoppedNotice,
   dropStoppedNotice,
+  dropSuggestions,
   dropTurn,
   finalizeStreaming,
   nextUiId,
@@ -34,6 +35,9 @@ export function useChat(taskId: string) {
   const [busy, setBusy] = useState(false);
   // 当前流式请求的开关：stop() 通过它中断 fetch 读取循环
   const abortRef = useRef<AbortController | null>(null);
+  // 本轮是否已收到 done：done 之后流还活着（服务端在生成跟进问题推荐），
+  // 此时点停止只该掐掉推荐尾巴——回复已定稿，不该加"已停止"提示行。
+  const doneRef = useRef(false);
 
   // 仅清自己那次 send 建的控制器（busy 互斥已防并发，双保险不误清）
   const stop = useCallback(() => {
@@ -62,10 +66,11 @@ export function useChat(taskId: string) {
     async (text: string) => {
       const content = text.trim();
       if (!content) return;
-      // 新一轮发送同时清掉上一轮的"已停止"提示行。
+      // 新一轮发送清掉上一轮的"已停止"提示行与跟进问题推荐（两者都已过时）。
       // user 泡乐观带上本地时刻（操作行据此显示时间）；user_stored 回执到后即校准为服务端时间。
+      doneRef.current = false;
       setMessages((prev) => [
-        ...dropStoppedNotice(prev),
+        ...dropSuggestions(dropStoppedNotice(prev)),
         { id: nextUiId(prev), kind: "user", content, completedAt: Date.now() },
       ]);
       const ctrl = new AbortController();
@@ -75,15 +80,21 @@ export function useChat(taskId: string) {
         await postSse(
           `${API_URL}/api/tasks/${taskId}/messages`,
           { content },
-          (event) => setMessages((prev) => reduceChatEvent(prev, event)),
+          (event) => {
+            if (event.type === "done") doneRef.current = true;
+            setMessages((prev) => reduceChatEvent(prev, event));
+          },
           ctrl.signal,
         );
       } catch (error) {
         // 用户点停止 → fetch 抛 AbortError：定稿已流出的部分内容（保留在流中），
         // 不追加错误泡；其余错误维持原有的错误泡行为。
         if (error instanceof Error && error.name === "AbortError") {
-          // 定稿部分内容 + 追加"已停止，发送消息以继续"提示行
-          setMessages((prev) => appendStoppedNotice(finalizeStreaming(prev)));
+          // done 已收到 = 回复已正常定稿，此刻点停止只掐推荐尾巴：不加"已停止"行
+          if (!doneRef.current) {
+            // 定稿部分内容 + 追加"已停止，发送消息以继续"提示行
+            setMessages((prev) => appendStoppedNotice(finalizeStreaming(prev)));
+          }
         } else {
           setMessages((prev) => [...prev, { id: nextUiId(prev), kind: "error", content: String(error) }]);
         }

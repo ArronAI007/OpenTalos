@@ -22,6 +22,7 @@ from tool.registry import ToolRegistry
 from tool.tool import Tool
 
 from db import ChatStore
+from suggest import suggest_followups
 
 EventSink = Callable[[dict[str, Any]], Awaitable[None]]
 
@@ -279,6 +280,14 @@ class ChatRuntime:
                     await asyncio.to_thread(self._store.append_message, task_id, "assistant", final_reply)
                     persisted = True
                     yield {"type": "done", "reply": final_reply}
+                    # 跟进问题推荐：独立一次小调用（不进 agent transcript），失败静默为空。
+                    # 在 done 之后发——回复先定稿，推荐稍后出现；停止/error 路径不产生推荐。
+                    suggestions = await suggest_followups(
+                        self._client(),
+                        await asyncio.to_thread(self._store.list_messages, task_id),
+                    )
+                    if suggestions:
+                        yield {"type": "suggestions", "items": suggestions}
             finally:
                 self._active_stops.pop(task_id, None)
                 if not producer.done():
