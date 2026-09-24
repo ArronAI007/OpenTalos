@@ -286,6 +286,16 @@ describe("shouldShowThinkingHint", () => {
     ];
     expect(shouldShowThinkingHint(msgs, true)).toBe(true);
   });
+
+  it("hides after done while the stream stays open computing suggestions", () => {
+    // 回归：done 后 SSE 未关（服务端在同流上算 suggestions，busy 仍为 true），
+    // 占位若再现会带着品牌头读作「第二轮思考」
+    const msgs: UiMessage[] = [
+      { id: "live-1", kind: "user", content: "问" },
+      { id: "live-2", kind: "assistant", content: "答", streaming: false, completedAt: 1 },
+    ];
+    expect(shouldShowThinkingHint(msgs, true)).toBe(false);
+  });
 });
 
 describe("suggestions", () => {

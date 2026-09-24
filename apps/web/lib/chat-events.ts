@@ -74,9 +74,13 @@ function settleReasoning(prev: UiMessage[]): UiMessage[] {
 
 // 「正在思考…」占位的显示条件：本轮已发出（busy）但还没有任何流式气泡（思维链或正文）。
 // 覆盖的是请求→首个 SSE chunk 之间的空白；一旦思维链开始滚动即让位。
+// 末行守卫：回复泡已落定（done 已处理）而流未关闭的窗口（服务端在同一条流上算
+// suggestions，busy 仍为 true）不能再冒占位——带着品牌头出现会读作「第二轮思考」。
 export function shouldShowThinkingHint(messages: UiMessage[], busy: boolean): boolean {
   if (!busy) return false;
-  return !messages.some((m) => (m.kind === "assistant" || m.kind === "reasoning") && m.streaming);
+  if (messages.some((m) => (m.kind === "assistant" || m.kind === "reasoning") && m.streaming)) return false;
+  const last = messages[messages.length - 1];
+  return last?.kind !== "assistant" && last?.kind !== "stopped";
 }
 
 // 停止流式后追加提示行（幂等：本会话已有 live 提示则返回原引用，防止双击停止叠加）。
