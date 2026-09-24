@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { copyText } from "@/lib/clipboard";
 import { formatRelativeDay } from "@/lib/format-time";
 import {
@@ -81,6 +81,18 @@ export function UserActionRow({ content, completedAt, taskId, busy, onEdit, onDe
   // 删除二次确认：菜单项只负责开弹窗，确认按钮才真正触发 onDelete
   const [confirmOpen, setConfirmOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  // 菜单本体 + 翻转态：默认向下展开；最末轮提问贴近可滚动区（ol）下沿时向下会被
+  // overflow-y-auto 垂直裁断——渲染后测量，越界即向上翻转（TaskListMenu 同款范式）。
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [flipUp, setFlipUp] = useState(false);
+
+  useLayoutEffect(() => {
+    if (!menuOpen) return;
+    const panel = panelRef.current;
+    const list = menuRef.current?.closest("ol"); // 最近滚动容器（MessageList 的消息列表）
+    if (!panel || !list) return;
+    setFlipUp(panel.getBoundingClientRect().bottom > list.getBoundingClientRect().bottom);
+  }, [menuOpen]);
 
   // 打开期间点击菜单外或 Esc 关闭（与侧栏 TaskListMenu 同款交互，菜单小、就地管理）
   useEffect(() => {
@@ -136,9 +148,10 @@ export function UserActionRow({ content, completedAt, taskId, busy, onEdit, onDe
         </button>
         {menuOpen && (
           <div
+            ref={panelRef}
             role="menu"
             aria-label="提问操作"
-            className="absolute right-0 top-full z-10 mt-1 w-32 rounded-lg border border-border bg-white p-1 shadow-lg"
+            className={`absolute right-0 z-10 w-32 rounded-lg border border-border bg-white p-1 shadow-lg ${flipUp ? "bottom-full mb-1" : "top-full mt-1"}`}
           >
             <button
               type="button"
