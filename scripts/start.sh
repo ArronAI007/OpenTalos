@@ -22,14 +22,15 @@ PID_DIR=".data/pids"
 # 只动 .data/pids/ 里记录的 PID 与端口：复用的外部进程（非本脚本拉起）没有记录，天然不受影响。
 do_stop() {
   local stopped=""
-  local pid_file name pid port port_pid
+  local pid_file name pid port port_pid killed
   for pid_file in "$PID_DIR"/*.pid; do
     [ -e "$pid_file" ] || break  # 无匹配时 glob 原样保留，直接退出循环
     name="$(basename "$pid_file" .pid)"
+    killed=""
     pid="$(cat "$pid_file" 2>/dev/null || true)"
     if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
       kill "$pid" 2>/dev/null || true
-      stopped="$stopped $name"
+      killed="$name"
     fi
     # 顶层命令是 uv/pnpm 包装，实际监听者可能是孙进程、pid 那一杀漏网：按记录的端口补杀
     port="$(cat "$PID_DIR/$name.port" 2>/dev/null || true)"
@@ -37,8 +38,11 @@ do_stop() {
       port_pid="$(lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null | head -1 || true)"
       if [ -n "$port_pid" ]; then
         kill "$port_pid" 2>/dev/null || true
-        stopped="$stopped $name"
+        killed="$name"
       fi
+    fi
+    if [ -n "$killed" ]; then
+      stopped="$stopped $name"
     fi
     rm -f "$pid_file" "$PID_DIR/$name.port"
   done
