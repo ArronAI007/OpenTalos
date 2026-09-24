@@ -13,6 +13,15 @@ What has already been done or decided.
 ## Decisions
 Any constraints, choices, or conclusions that must not be forgotten.
 
+## Files and Code
+Which files were created or modified, and the key functions, symbols, or code involved.
+
+## Errors and Fixes
+Errors that were hit and how they were fixed, so they are not repeated.
+
+## Critical Context
+Hard constraints or rules that must not be violated.
+
 ## Next Steps
 What remains to be done, if anything.
 
