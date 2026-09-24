@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS messages (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
   kind TEXT NOT NULL,           -- 'user' | 'assistant' | 'tool' | 'stopped'
-  content TEXT NOT NULL,        -- tool 行存 JSON: {"name","arguments","result","ok"}
+  content TEXT NOT NULL,        -- tool 行存 JSON: {"call_id","name","arguments","result","ok"}
   created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS projects (

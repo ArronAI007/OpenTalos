@@ -57,7 +57,7 @@ class ToolRegistry:
     def function_schemas(self) -> list[dict[str, Any]]:
         return [tool.to_function_schema() for tool in self._tools.values()]
 
-    async def acall(self, name: str, arguments: dict[str, Any]) -> ToolOutcome:
+    async def acall(self, name: str, arguments: dict[str, Any], *, call_id: str | None = None) -> ToolOutcome:
         tool = self._tools.get(name)
         if tool is None:
             return ToolOutcome.error(f'Unknown tool "{name}"', code=FailureCode.NOT_FOUND)

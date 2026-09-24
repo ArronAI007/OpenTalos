@@ -117,7 +117,10 @@ class ReActAgent(Agent):
     async def _resolve(self, invocation: ToolInvocation, step: int) -> dict[str, str]:
         if self.tool_registry is None:
             return {"role": "tool", "tool_call_id": invocation.call_id, "content": "No tools are available."}
-        return await resolve_tool_call(self.tool_registry, invocation, self.recorder, step, self.output_trimmer)
+        return await resolve_tool_call(
+            self.tool_registry, invocation, self.recorder, step, self.output_trimmer,
+            on_tool_result=self.record_tool_result,
+        )
 
 
 def _read_final_answer(invocation: ToolInvocation) -> str:

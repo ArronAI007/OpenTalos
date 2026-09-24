@@ -47,6 +47,7 @@ class ToolCallingAgent(Agent):
             self.max_tool_iterations,
             self.recorder,
             trimmer=self.output_trimmer,
+            on_tool_result=self.record_tool_result,
             **kwargs,
         )
 

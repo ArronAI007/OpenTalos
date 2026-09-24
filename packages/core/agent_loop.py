@@ -24,7 +24,24 @@ def seed_messages(system_prompt: str | None, history: list[Any], user_text: str)
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
     for message in history:
-        messages.append({"role": message.role, "content": message.content})
+        if message.role == "tool":
+            # 工具结果在 transcript 里只存了 role="tool" 一条，还原成协议要求的两条：
+            # 一条 assistant 的 tool_calls 前导（单 call）+ 一条 tool 结果。前导文本置空——
+            # record 时没保留"模型调工具前说的那句话"，那是次要信息。
+            meta = message.metadata or {}
+            call_id = meta.get("tool_call_id", "")
+            tool_name = meta.get("tool_name", "")
+            arguments = meta.get("arguments", "{}")
+            messages.append({
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": call_id, "type": "function", "function": {"name": tool_name, "arguments": arguments}}
+                ],
+            })
+            messages.append({"role": "tool", "tool_call_id": call_id, "content": message.content})
+        else:
+            messages.append({"role": message.role, "content": message.content})
     messages.append({"role": "user", "content": user_text})
     return messages
 
@@ -65,6 +82,7 @@ async def resolve_tool_call(
     recorder: RunRecorder | None = None,
     step: int | None = None,
     trimmer: OutputTrimmer | None = None,
+    on_tool_result: Callable[[str, str, str, str], None] | None = None,
 ) -> dict[str, str]:
     if recorder:
         recorder.log_event("tool_call", {"tool_name": invocation.tool_name, "arguments": invocation.arguments_json}, step=step)
@@ -77,8 +95,10 @@ async def resolve_tool_call(
             recorder.log_event("tool_result", {"tool_name": invocation.tool_name, "result": message["content"]}, step=step)
         return message
 
-    outcome = await tool_registry.acall(invocation.tool_name, arguments)
+    outcome = await tool_registry.acall(invocation.tool_name, arguments, call_id=invocation.call_id)
     content = _trim_output(trimmer, invocation.tool_name, outcome.output)
+    if on_tool_result is not None:
+        on_tool_result(invocation.call_id, invocation.tool_name, invocation.arguments_json, content)
     message = {"role": "tool", "tool_call_id": invocation.call_id, "content": content}
     if recorder:
         recorder.log_event("tool_result", {"tool_name": invocation.tool_name, "result": content}, step=step)
@@ -171,6 +191,7 @@ async def run_tool_turn(
     on_reasoning_delta: Callable[[str], Awaitable[None]] | None = None,
     cancellation: CancellationToken | None = None,
     trimmer: OutputTrimmer | None = None,
+    on_tool_result: Callable[[str, str, str, str], None] | None = None,
     **kwargs: Any,
 ) -> str:
     """调用 LLM -> 按需执行工具 -> 把结果喂回去，直到模型不再请求工具或用光 max_iterations。
@@ -193,7 +214,7 @@ async def run_tool_turn(
     tools = tool_registry.function_schemas()
 
     async def handle_invocation(invocation: ToolInvocation) -> dict[str, str]:
-        return await resolve_tool_call(tool_registry, invocation, recorder, step, trimmer)
+        return await resolve_tool_call(tool_registry, invocation, recorder, step, trimmer, on_tool_result)
 
     for step in range(1, max_iterations + 1):
         completion = await execute_model_step(

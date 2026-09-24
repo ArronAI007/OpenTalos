@@ -28,6 +28,34 @@ def test_seed_messages_omits_system_block_when_no_prompt():
     assert messages == [{"role": "user", "content": "hi"}]
 
 
+def test_seed_messages_rehydrates_tool_history():
+    history = [
+        ChatMessage(content="查一下", role="user"),
+        ChatMessage(
+            content="echoed: hi",
+            role="tool",
+            metadata={"tool_call_id": "c1", "tool_name": "echo", "arguments": '{"text": "hi"}'},
+        ),
+        ChatMessage(content="结果是 hi", role="assistant"),
+    ]
+
+    messages = seed_messages(None, history, "再来一次")
+
+    assert messages == [
+        {"role": "user", "content": "查一下"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "c1", "type": "function", "function": {"name": "echo", "arguments": '{"text": "hi"}'}}
+            ],
+        },
+        {"role": "tool", "tool_call_id": "c1", "content": "echoed: hi"},
+        {"role": "assistant", "content": "结果是 hi"},
+        {"role": "user", "content": "再来一次"},
+    ]
+
+
 def test_build_reply_message_shapes_tool_calls_for_the_wire():
     invocation = ToolInvocation(call_id="call_1", tool_name="echo", arguments_json='{"text": "hi"}')
     message = build_reply_message("thinking...", [invocation])

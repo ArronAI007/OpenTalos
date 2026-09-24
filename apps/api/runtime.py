@@ -60,13 +60,13 @@ class EventToolRegistry(ToolRegistry):
     def function_schemas(self) -> list[dict[str, Any]]:
         return self._inner.function_schemas()
 
-    async def acall(self, name: str, arguments: dict[str, Any]) -> ToolOutcome:
+    async def acall(self, name: str, arguments: dict[str, Any], *, call_id: str | None = None) -> ToolOutcome:
         if self.sink is not None:
-            await self.sink({"type": "tool_call", "name": name, "arguments": arguments})
+            await self.sink({"type": "tool_call", "call_id": call_id, "name": name, "arguments": arguments})
         outcome = await self._inner.acall(name, arguments)
         if self.sink is not None:
             await self.sink({
-                "type": "tool_result", "name": name,
+                "type": "tool_result", "call_id": call_id, "name": name,
                 "result": outcome.output, "ok": outcome.succeeded,
             })
         return outcome
@@ -168,6 +168,19 @@ class ChatRuntime:
         for row in rows:
             if row["kind"] in ("user", "assistant"):
                 agent.record_message(ChatMessage(role=row["kind"], content=row["content"]))
+            elif row["kind"] == "tool":
+                # tool 行还原成 record_tool_result 进 transcript：老数据（无 call_id）或内容
+                # 解析失败时跳过——本就不进上下文，保持现状，不做伪 call_id 兜底。
+                try:
+                    data = json.loads(row["content"])
+                except json.JSONDecodeError:
+                    continue
+                call_id = data.get("call_id")
+                if not call_id:
+                    continue
+                agent.record_tool_result(
+                    call_id, data.get("name", ""), json.dumps(data.get("arguments", {})), data.get("result", "")
+                )
         self._agents[task["id"]] = agent
         return agent
 
@@ -266,15 +279,16 @@ class ChatRuntime:
                     elif event["type"] == "tool_call":
                         pending_calls.append(event)
                     elif event["type"] == "tool_result":
+                        call_id = event.get("call_id")
                         match = next(
-                            (i for i, call in enumerate(pending_calls) if call["name"] == event["name"]),
+                            (i for i, call in enumerate(pending_calls) if call.get("call_id") == call_id),
                             None,
-                        )
+                        ) if call_id is not None else None
                         arguments = pending_calls.pop(match)["arguments"] if match is not None else {}
                         await asyncio.to_thread(
                             self._store.append_message, task_id, "tool",
                             json.dumps({
-                                "name": event["name"], "arguments": arguments,
+                                "call_id": call_id, "name": event["name"], "arguments": arguments,
                                 "result": event["result"], "ok": event["ok"],
                             }, ensure_ascii=False),
                         )

@@ -38,6 +38,29 @@ async def test_arespond_with_tools_executes_and_returns_final_text(scripted_clie
     assert answer == "all done"
 
 
+async def test_tool_result_recorded_into_history(scripted_client, echo_tool_registry):
+    client = scripted_client(
+        tool_completions=[
+            ToolCompletion(
+                text=None,
+                requested_tools=[ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text": "hi"}')],
+                model_id="mock",
+            ),
+            ToolCompletion(text="all done", requested_tools=[], model_id="mock"),
+        ]
+    )
+    agent = ToolCallingAgent(name="bot", model_client=client, tool_registry=echo_tool_registry)
+
+    await agent.arespond("say hi via the echo tool")
+
+    tool_msgs = [m for m in agent.history_snapshot() if m.role == "tool"]
+    assert len(tool_msgs) == 1
+    assert tool_msgs[0].content == "echoed: hi"
+    assert tool_msgs[0].metadata["tool_call_id"] == "c1"
+    assert tool_msgs[0].metadata["tool_name"] == "echo"
+    assert tool_msgs[0].metadata["arguments"] == '{"text": "hi"}'
+
+
 async def test_arespond_records_history_that_seeds_the_next_turn(scripted_client):
     client = scripted_client(
         completions=[Completion(text="first reply", model_id="mock"), Completion(text="second reply", model_id="mock")]

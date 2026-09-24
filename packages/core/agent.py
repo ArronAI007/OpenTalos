@@ -105,6 +105,18 @@ class Agent(ABC):
     def record_message(self, message: ChatMessage) -> None:
         self._transcript.append(message)
 
+    def record_tool_result(self, call_id: str, tool_name: str, arguments_json: str, result: str) -> None:
+        """把一次工具调用记录进 transcript，供跨轮/跨重启时由 seed_messages 还原成合法的
+        assistant(tool_calls) + tool(tool_call_id) 结构。arguments_json 保持原始 JSON 字符串，
+        因为还原时 tool_calls 的 function.arguments 就是 JSON 字符串。"""
+        self._transcript.append(
+            ChatMessage(
+                role="tool",
+                content=result,
+                metadata={"tool_call_id": call_id, "tool_name": tool_name, "arguments": arguments_json},
+            )
+        )
+
     def history_snapshot(self) -> list[ChatMessage]:
         return self._transcript.messages()
 

@@ -228,6 +228,65 @@ def test_rebuild_replays_user_assistant_history(store, scripted_client, tmp_path
     assert "暗号是foo" in transcript_text and "记住了，foo" in transcript_text
 
 
+def test_tool_row_persists_call_id(store, scripted_client, echo_tool_registry, tmp_path) -> None:
+    client = scripted_client(tool_completions=[
+        ToolCompletion(
+            text="",
+            requested_tools=[ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text":"ping"}')],
+            model_id="mock-model",
+        ),
+        ToolCompletion(text="回声是 ping", requested_tools=[], model_id="mock-model"),
+    ])
+    runtime = _runtime(store, client, tmp_path, tool_registry_factory=lambda: echo_tool_registry)
+    task = store.create_task("toolcall")
+
+    asyncio.run(_collect(runtime, task["id"], "call the echo tool"))
+
+    tool_rows = [r for r in store.list_messages(task["id"]) if r["kind"] == "tool"]
+    data = json.loads(tool_rows[0]["content"])
+    assert data["call_id"] == "c1"
+    assert data["name"] == "echo"
+
+
+def test_rebuild_replays_tool_history(store, scripted_client, echo_tool_registry, tmp_path) -> None:
+    seen_messages: list[list[dict]] = []
+
+    async def run_twice() -> None:
+        first_client = scripted_client(tool_completions=[
+            ToolCompletion(
+                text=None,
+                requested_tools=[ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text":"ping"}')],
+                model_id="mock-model",
+            ),
+            ToolCompletion(text="回声是 ping", requested_tools=[], model_id="mock-model"),
+        ])
+        runtime_a = _runtime(store, first_client, tmp_path, tool_registry_factory=lambda: echo_tool_registry)
+        task = store.create_task("toolcall")
+        await _collect(runtime_a, task["id"], "echo ping")
+
+        replaying = scripted_client(tool_completions=[])
+
+        async def spy_astream_with_tools(messages, tools, on_text_delta=None, **kwargs):
+            seen_messages.append(list(messages))
+            return ToolCompletion(text="ok", requested_tools=[], model_id="mock-model")
+
+        replaying.astream_with_tools = spy_astream_with_tools  # type: ignore[method-assign]
+        runtime_b = _runtime(store, replaying, tmp_path, tool_registry_factory=lambda: echo_tool_registry)
+        await _collect(runtime_b, task["id"], "再来一次")
+
+    asyncio.run(run_twice())
+
+    messages = seen_messages[-1]
+    tool_msgs = [m for m in messages if m.get("role") == "tool"]
+    assert len(tool_msgs) == 1
+    assert tool_msgs[0]["tool_call_id"] == "c1"
+    assert "echoed: ping" in tool_msgs[0]["content"]
+    assistant_calls = [m for m in messages if m.get("role") == "assistant" and m.get("tool_calls")]
+    assert assistant_calls
+    assert assistant_calls[0]["tool_calls"][0]["id"] == "c1"
+    assert assistant_calls[0]["tool_calls"][0]["function"]["name"] == "echo"
+
+
 def test_missing_task_yields_error_event(store, scripted_client, tmp_path) -> None:
     runtime = _runtime(store, scripted_client(tool_completions=[]), tmp_path)
     events = asyncio.run(_collect(runtime, "no-such-task", "hi"))
