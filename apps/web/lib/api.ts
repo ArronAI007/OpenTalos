@@ -13,7 +13,7 @@ function toTask(raw: RawTask): Task {
 // project_id 显式传 null 表示移出项目（后端按 model_fields_set 区分"未传入"与"显式 null"）。
 export interface TaskPatch { title?: string; pinned?: boolean; starred?: boolean; archived?: boolean; project_id?: string | null }
 export interface Project { id: string; name: string; created_at: string }
-export interface StoredMessage { id: number; kind: "user" | "assistant" | "tool"; content: string; created_at: string }
+export interface StoredMessage { id: number; kind: "user" | "assistant" | "tool" | "stopped"; content: string; created_at: string }
 export interface AppConfig { model_name: string | null; agent_types: string[]; skills_reachable: boolean | null }
 export interface SkillsResponse { reachable: boolean; skills: { name: string; description: string }[]; error?: string }
 

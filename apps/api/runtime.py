@@ -253,9 +253,11 @@ class ChatRuntime:
                 await asyncio.gather(producer, return_exceptions=True)
                 # 客户端中途断开（前端"停止"会 abort fetch，SSE 被关）：消费循环在
                 # yield/await 处被 GeneratorExit/CancelledError 打断，上面正常完成路径的
-                # assistant 落库不可达。这里兜底把已流出的部分内容落库——刷新后仍能看到
-                # 停止前的输出。无内容不落（空泡无意义）；error 场景前端已有错误泡，
-                # 保持既有的不落语义（test_agent_error_..._no_assistant_row 守护）。
+                # assistant 落库不可达。这里兜底：①有已流出内容则落 assistant partial；
+                # ②无条件落一行 kind="stopped" 标记——否则立即停止（0 delta）刷新后
+                # 这次提问像从未发生过。error 场景前端已有错误泡，保持既有的不落语义
+                # （test_agent_error_..._no_assistant_row 守护）。
+                # parts 在消费循环里随 yield 累积 = 恰好用户实际看到的部分。
                 if not persisted and error is None:
                     if not parts and reply:
                         parts.append(reply)
@@ -264,3 +266,6 @@ class ChatRuntime:
                         await asyncio.to_thread(
                             self._store.append_message, task_id, "assistant", partial
                         )
+                    await asyncio.to_thread(
+                        self._store.append_message, task_id, "stopped", ""
+                    )

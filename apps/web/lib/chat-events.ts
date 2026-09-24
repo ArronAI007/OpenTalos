@@ -57,11 +57,12 @@ export function appendStoppedNotice(prev: UiMessage[]): UiMessage[] {
   return [...prev, { id: nextUiId(prev), kind: "stopped" }];
 }
 
-// 下一条用户消息发出时清掉提示（"发送消息以继续"已失去时效）；
+// 下一条用户消息发出时清掉本会话内的提示（"发送消息以继续"已失去时效）；
+// 仅清 live-N 行——row-N 停止行是服务端持久化的轮次痕迹（断连兜底落库），发送时应保留；
 // 无提示时返回原引用，不触发多余渲染。
 export function dropStoppedNotice(prev: UiMessage[]): UiMessage[] {
-  if (!prev.some((m) => m.kind === "stopped")) return prev;
-  return prev.filter((m) => m.kind !== "stopped");
+  if (!prev.some((m) => m.kind === "stopped" && m.id.startsWith("live-"))) return prev;
+  return prev.filter((m) => m.kind !== "stopped" || !m.id.startsWith("live-"));
 }
 
 // now 仅用于 done/error 定稿时给 assistant 泡落 completedAt（默认 Date.now()，测试注入固定值）

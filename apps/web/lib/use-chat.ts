@@ -13,6 +13,10 @@ import {
 import { postSse } from "./sse";
 
 function fromStored(row: StoredMessage): UiMessage {
+  // 服务端断连兜底落的 stopped 标记行 → 渲染为"已停止 — 发送消息以继续"提示
+  if (row.kind === "stopped") {
+    return { id: `row-${row.id}`, kind: "stopped" };
+  }
   if (row.kind === "tool") {
     const parsed = JSON.parse(row.content) as { name: string; arguments: Record<string, unknown>; result: string; ok: boolean };
     return { id: `row-${row.id}`, kind: "tool", ...parsed };

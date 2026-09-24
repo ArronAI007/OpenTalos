@@ -128,4 +128,16 @@ describe("stopped notice", () => {
     expect(dropStoppedNotice(withNotice)).toEqual(msgs);
     expect(dropStoppedNotice(msgs)).toBe(msgs);
   });
+
+  it("dropStoppedNotice keeps historical (row-N) stopped rows — they are persisted turn traces", () => {
+    let msgs: UiMessage[] = [
+      { id: "row-9", kind: "user", content: "旧问" },
+      { id: "row-10", kind: "assistant", content: "旧答" },
+      { id: "row-11", kind: "stopped" },
+    ];
+    // 会话内又发生一次停止，再发送时只应清掉 live 提示，历史痕迹保留
+    msgs = appendStoppedNotice(msgs);
+    const dropped = dropStoppedNotice(msgs);
+    expect(dropped.map((m) => m.id)).toEqual(["row-9", "row-10", "row-11"]);
+  });
 });

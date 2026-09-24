@@ -64,10 +64,38 @@ def test_disconnect_mid_stream_persists_partial(store, scripted_client, tmp_path
     partial = asyncio.run(consume_one_delta_then_close())
 
     rows = store.list_messages(task["id"])
-    assistant_rows = [r for r in rows if r["kind"] == "assistant"]
-    assert len(assistant_rows) == 1
-    assert assistant_rows[0]["content"] == partial  # 恰好是用户实际看到的部分
+    assert [r["kind"] for r in rows] == ["user", "assistant", "stopped"]
+    assert rows[1]["content"] == partial  # 恰好是用户实际看到的部分
     assert partial and "你好，世界！".startswith(partial)
+    assert rows[2]["content"] == ""  # 停止标记本身无内容，渲染文案在前端
+
+
+def test_disconnect_before_any_delta_persists_stopped_marker(store, scripted_client, tmp_path) -> None:
+    # 立即停止（一个 delta 都还没发出就断开）：没有内容可落，但"已停止"标记必须落库，
+    # 否则刷新后这次提问像从未发生过。
+    client = scripted_client(tool_completions=[])
+
+    async def slow_silent_astream(messages, tools, on_text_delta=None, **kwargs):
+        await asyncio.sleep(3600)  # 永不产出；断连后由 stream_reply 的 producer.cancel() 收敛
+        return ToolCompletion(text="", requested_tools=[], model_id="mock-model")  # pragma: no cover
+
+    client.astream_with_tools = slow_silent_astream  # type: ignore[method-assign]
+    runtime = _runtime(store, client, tmp_path)
+    task = store.create_task("react")
+
+    async def close_before_first_event() -> None:
+        gen = runtime.stream_reply(task["id"], "hi")
+        reader = asyncio.create_task(gen.__anext__())
+        await asyncio.sleep(0.05)  # 让消费循环进入 queue.get() 等待（producer 被 sleep 阻塞）
+        reader.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await reader
+        await gen.aclose()
+
+    asyncio.run(close_before_first_event())
+
+    rows = store.list_messages(task["id"])
+    assert [r["kind"] for r in rows] == ["user", "stopped"]
 
 
 def test_stream_tool_call_events_and_tool_row(store, scripted_client, echo_tool_registry, tmp_path) -> None:
