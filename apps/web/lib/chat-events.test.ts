@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { finalizeStreaming, parseSseBlock, reduceChatEvent, type UiMessage } from "./chat-events";
+import {
+  appendStoppedNotice,
+  dropStoppedNotice,
+  finalizeStreaming,
+  parseSseBlock,
+  reduceChatEvent,
+  type UiMessage,
+} from "./chat-events";
 
 describe("parseSseBlock", () => {
   it("parses a data frame", () => {
@@ -74,5 +81,33 @@ describe("finalizeStreaming", () => {
     expect(msgs[2]).toMatchObject({ kind: "assistant", streaming: false });
     msgs = reduceChatEvent(msgs, { type: "delta", text: "新回复" });
     expect(msgs[3]).toEqual({ id: "live-3", kind: "assistant", content: "新回复", streaming: true });
+  });
+});
+
+describe("stopped notice", () => {
+  it("appendStoppedNotice appends a stopped row after the finalized reply", () => {
+    let msgs: UiMessage[] = [{ id: "row-1", kind: "user", content: "问" }];
+    msgs = reduceChatEvent(msgs, { type: "delta", text: "半截" });
+    msgs = finalizeStreaming(msgs);
+    msgs = appendStoppedNotice(msgs);
+    expect(msgs).toEqual([
+      { id: "row-1", kind: "user", content: "问" },
+      { id: "live-1", kind: "assistant", content: "半截", streaming: false },
+      { id: "live-2", kind: "stopped" },
+    ]);
+  });
+
+  it("appendStoppedNotice is idempotent (returns the same reference if one already exists)", () => {
+    const once = appendStoppedNotice([]);
+    expect(appendStoppedNotice(once)).toBe(once);
+  });
+
+  it("dropStoppedNotice removes the notice and keeps other rows; no-op fast path without one", () => {
+    let msgs: UiMessage[] = [{ id: "row-1", kind: "user", content: "问" }];
+    msgs = reduceChatEvent(msgs, { type: "delta", text: "半截" });
+    msgs = finalizeStreaming(msgs);
+    const withNotice = appendStoppedNotice(msgs);
+    expect(dropStoppedNotice(withNotice)).toEqual(msgs);
+    expect(dropStoppedNotice(msgs)).toBe(msgs);
   });
 });

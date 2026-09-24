@@ -182,6 +182,16 @@ export function ChevronDownIcon(props: IconProps) {
   );
 }
 
+export function CirclePauseIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <circle cx={12} cy={12} r={10} />
+      <path d="M10 9v6" />
+      <path d="M14 9v6" />
+    </Icon>
+  );
+}
+
 export function ChevronRightIcon(props: IconProps) {
   return (
     <Icon {...props}>

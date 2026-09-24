@@ -1,9 +1,10 @@
 import Link from "next/link";
 
 // 圆角六边形轮廓 + 内部火花形节点，单色抽象标，风格对齐 Manus 花形标。
-export function LogoMark() {
+// size 默认 22 保持侧栏既有尺寸；回复品牌头用 18。
+export function LogoMark({ size = 22 }: { size?: number }) {
   return (
-    <svg viewBox="0 0 24 24" width={22} height={22} className="text-accent" aria-hidden="true">
+    <svg viewBox="0 0 24 24" width={size} height={size} className="text-accent" aria-hidden="true">
       <path
         d="M12 4 L18.93 8 L18.93 16 L12 20 L5.07 16 L5.07 8 Z"
         fill="none"

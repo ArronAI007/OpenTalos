@@ -8,7 +8,9 @@ export type ChatEvent =
 export type UiMessage =
   | { kind: "user" | "assistant"; id: string; content: string; streaming?: boolean }
   | { kind: "tool"; id: string; name: string; arguments: Record<string, unknown>; result?: string; ok?: boolean }
-  | { kind: "error"; id: string; content: string };
+  | { kind: "error"; id: string; content: string }
+  // 停止提示是纯本地 UI 行（不来自服务端、不入库）：kind 只携带语义，文案在渲染层（MessageList）。
+  | { kind: "stopped"; id: string };
 
 type AssistantMessage = { kind: "assistant"; id: string; content: string; streaming?: boolean };
 
@@ -36,6 +38,19 @@ export function parseSseBlock(block: string): ChatEvent | null {
 export function finalizeStreaming(prev: UiMessage[]): UiMessage[] {
   if (!prev.some((m) => m.kind === "assistant" && m.streaming)) return prev;
   return prev.map((m) => (m.kind === "assistant" && m.streaming ? { ...m, streaming: false } : m));
+}
+
+// 停止流式后追加提示行（幂等：已存在则返回原引用，防止双击停止叠加）
+export function appendStoppedNotice(prev: UiMessage[]): UiMessage[] {
+  if (prev.some((m) => m.kind === "stopped")) return prev;
+  return [...prev, { id: nextUiId(prev), kind: "stopped" }];
+}
+
+// 下一条用户消息发出时清掉提示（"发送消息以继续"已失去时效）；
+// 无提示时返回原引用，不触发多余渲染。
+export function dropStoppedNotice(prev: UiMessage[]): UiMessage[] {
+  if (!prev.some((m) => m.kind === "stopped")) return prev;
+  return prev.filter((m) => m.kind !== "stopped");
 }
 
 export function reduceChatEvent(prev: UiMessage[], event: ChatEvent): UiMessage[] {

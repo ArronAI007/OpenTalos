@@ -5,6 +5,8 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { UiMessage } from "@/lib/chat-events";
 import { isNearBottom, scrollToBottom } from "@/lib/scroll-stick";
+import { LogoMark } from "@/components/sidebar/Logo";
+import { CirclePauseIcon } from "@/components/ui/icons";
 
 function ToolBubble({ message }: { message: Extract<UiMessage, { kind: "tool" }> }) {
   const argsPreview = Object.entries(message.arguments)
@@ -66,10 +68,25 @@ export function MessageList({ messages }: { messages: UiMessage[] }) {
           return (
             <li key={message.id} className={rowCls}>
               <div className="max-w-[85%] text-sm leading-6">
+                {/* 每条回复带品牌头（流式与历史同等处理），对齐 Manus 版式 */}
+                <div className="mb-1 flex items-center gap-1.5">
+                  <LogoMark size={18} />
+                  <span className="text-sm font-semibold tracking-tight">OpenTalos</span>
+                </div>
                 <div className="md">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
                 </div>
                 {message.streaming && <span className="animate-pulse text-text-secondary">▍</span>}
+              </div>
+            </li>
+          );
+        }
+        if (message.kind === "stopped") {
+          return (
+            <li key={message.id} className={rowCls}>
+              <div className="flex items-center gap-2 text-sm text-amber-600">
+                <CirclePauseIcon />
+                OpenTalos已停止 — 发送消息以继续
               </div>
             </li>
           );

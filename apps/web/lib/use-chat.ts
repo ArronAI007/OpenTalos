@@ -2,7 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { API_URL, listMessages, type StoredMessage } from "./api";
-import { finalizeStreaming, nextUiId, reduceChatEvent, type UiMessage } from "./chat-events";
+import {
+  appendStoppedNotice,
+  dropStoppedNotice,
+  finalizeStreaming,
+  nextUiId,
+  reduceChatEvent,
+  type UiMessage,
+} from "./chat-events";
 import { postSse } from "./sse";
 
 function fromStored(row: StoredMessage): UiMessage {
@@ -45,7 +52,8 @@ export function useChat(taskId: string) {
     async (text: string) => {
       const content = text.trim();
       if (!content) return;
-      setMessages((prev) => [...prev, { id: nextUiId(prev), kind: "user", content }]);
+      // 新一轮发送同时清掉上一轮的"已停止"提示行
+      setMessages((prev) => [...dropStoppedNotice(prev), { id: nextUiId(prev), kind: "user", content }]);
       const ctrl = new AbortController();
       abortRef.current = ctrl;
       setBusy(true);
@@ -60,7 +68,8 @@ export function useChat(taskId: string) {
         // 用户点停止 → fetch 抛 AbortError：定稿已流出的部分内容（保留在流中），
         // 不追加错误泡；其余错误维持原有的错误泡行为。
         if (error instanceof Error && error.name === "AbortError") {
-          setMessages((prev) => finalizeStreaming(prev));
+          // 定稿部分内容 + 追加"已停止，发送消息以继续"提示行
+          setMessages((prev) => appendStoppedNotice(finalizeStreaming(prev)));
         } else {
           setMessages((prev) => [...prev, { id: nextUiId(prev), kind: "error", content: String(error) }]);
         }
