@@ -160,6 +160,10 @@ async def execute_model_step(
     if cancellation is not None:
         cancellation.raise_if_cancelled()
 
+    if recorder:
+        # 输入侧审计：记录模型当次看到的上下文（脱敏后），出问题时能回放"当时给了什么历史/提示词"。
+        recorder.log_event("request", {"messages": messages, "tools": tools}, step=step)
+
     if on_text_delta is not None or on_reasoning_delta is not None:
         completion = await model_client.astream_with_tools(
             messages, tools, on_text_delta=on_text_delta, on_reasoning_delta=on_reasoning_delta, **kwargs

@@ -253,6 +253,37 @@ async def test_execute_model_step_appends_assistant_and_tool_messages_via_the_gi
     assert messages[-1] == {"role": "tool", "tool_call_id": "c1", "content": "handled"}
 
 
+async def test_execute_model_step_records_request_with_redacted_messages_and_tools(tmp_path):
+    # 输入侧审计：记录模型当次看到的脱敏 messages + tools，出问题时能回放"当时给了什么上下文"。
+    from observability.run_recorder import RunRecorder
+
+    client = ModelClient(provider="mock")
+
+    async def fake_acomplete_with_tools(messages, tools, tool_choice="auto", **kwargs):
+        return ToolCompletion(text="done", requested_tools=[], model_id="mock")
+
+    client.acomplete_with_tools = fake_acomplete_with_tools  # type: ignore[method-assign]
+    recorder = RunRecorder(output_dir=str(tmp_path))
+    messages = [
+        {"role": "system", "content": "key=sk-abc123XYZ"},
+        {"role": "user", "content": "hi"},
+    ]
+    tools = [{"type": "function", "function": {"name": "echo", "parameters": {}}}]
+
+    async def handle_invocation(invocation):
+        raise AssertionError("should not be called")
+
+    await execute_model_step(
+        client, messages, tools, recorder=recorder, step=1, handle_invocation=handle_invocation
+    )
+    recorder.finalize()
+
+    request = next(e for e in recorder.events() if e["event"] == "request")
+    assert request["step"] == 1
+    assert request["payload"]["messages"][0]["content"] == "key=sk-***"
+    assert request["payload"]["tools"][0]["function"]["name"] == "echo"
+
+
 async def test_execute_model_step_raises_when_already_cancelled():
     client = ModelClient(provider="mock")
     token = CancellationToken()

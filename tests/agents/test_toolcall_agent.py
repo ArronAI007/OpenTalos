@@ -95,7 +95,8 @@ async def test_arespond_logs_model_and_tool_events_when_tracing_is_enabled(scrip
 
     lines = [json.loads(line) for line in agent.recorder.jsonl_path.read_text(encoding="utf-8").splitlines()]
     event_types = [line["event"] for line in lines]
-    assert event_types == ["model_output", "tool_call", "tool_result", "model_output"]
+    # 每步先记 request（输入侧审计）再记 model_output；工具调用夹在中间
+    assert event_types == ["request", "model_output", "tool_call", "tool_result", "request", "model_output"]
     assert stats["tool_calls"] == {"echo": 1}
 
 
