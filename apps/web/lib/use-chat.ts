@@ -1,10 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { API_URL, listMessages, type StoredMessage } from "./api";
+import { API_URL, deleteTurn as deleteTurnApi, listMessages, type StoredMessage } from "./api";
 import {
   appendStoppedNotice,
   dropStoppedNotice,
+  dropTurn,
   finalizeStreaming,
   nextUiId,
   reduceChatEvent,
@@ -61,8 +62,12 @@ export function useChat(taskId: string) {
     async (text: string) => {
       const content = text.trim();
       if (!content) return;
-      // 新一轮发送同时清掉上一轮的"已停止"提示行
-      setMessages((prev) => [...dropStoppedNotice(prev), { id: nextUiId(prev), kind: "user", content }]);
+      // 新一轮发送同时清掉上一轮的"已停止"提示行。
+      // user 泡乐观带上本地时刻（操作行据此显示时间）；user_stored 回执到后即校准为服务端时间。
+      setMessages((prev) => [
+        ...dropStoppedNotice(prev),
+        { id: nextUiId(prev), kind: "user", content, completedAt: Date.now() },
+      ]);
       const ctrl = new AbortController();
       abortRef.current = ctrl;
       setBusy(true);
@@ -90,5 +95,22 @@ export function useChat(taskId: string) {
     [taskId],
   );
 
-  return { messages, busy, send, stop };
+  // 删除整轮问答（目标 user 行 + 其后直到下一 user 前的所有行）：先服务端后本地，
+  // 本地用与 DB 同语义的区间删除，无需重拉历史。
+  const deleteTurn = useCallback(
+    async (messageId: string) => {
+      const rowId = /^row-(\d+)$/.exec(messageId)?.[1];
+      // live-N 泡没有服务端行——删除入口只在 row-N 上出现，此分支理论不可达，防御性早退。
+      if (!rowId) return;
+      try {
+        await deleteTurnApi(taskId, Number(rowId));
+        setMessages((prev) => dropTurn(prev, messageId));
+      } catch {
+        setMessages((prev) => [...prev, { id: nextUiId(prev), kind: "error", content: "删除失败，请重试" }]);
+      }
+    },
+    [taskId],
+  );
+
+  return { messages, busy, send, stop, deleteTurn };
 }

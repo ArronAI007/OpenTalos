@@ -3,7 +3,9 @@ export type ChatEvent =
   | { type: "tool_call"; name: string; arguments: Record<string, unknown> }
   | { type: "tool_result"; name: string; result: string; ok: boolean }
   | { type: "done"; reply: string }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  // user 行落库后服务端回送：把 live-N user 泡换成 row-N 身份（删除轮次需要服务端 id）。
+  | { type: "user_stored"; id: number; created_at: string };
 
 export type UiMessage =
   // completedAt（epoch ms）：assistant 回复定稿时刻（done/停止/error 定稿）或历史行 created_at；
@@ -65,9 +67,37 @@ export function dropStoppedNotice(prev: UiMessage[]): UiMessage[] {
   return prev.filter((m) => m.kind !== "stopped" || !m.id.startsWith("live-"));
 }
 
+// 删除整轮问答：目标 user 行 + 其后直到下一条 user 行之前的所有行（assistant/tool/stopped）。
+// 无目标或目标不是 user 行时返回原引用（不触发多余渲染）。
+export function dropTurn(prev: UiMessage[], messageId: string): UiMessage[] {
+  const start = prev.findIndex((m) => m.id === messageId);
+  if (start === -1 || prev[start].kind !== "user") return prev;
+  let end = prev.length;
+  for (let i = start + 1; i < prev.length; i++) {
+    if (prev[i].kind === "user") { end = i; break; }
+  }
+  return [...prev.slice(0, start), ...prev.slice(end)];
+}
+
 // now 仅用于 done/error 定稿时给 assistant 泡落 completedAt（默认 Date.now()，测试注入固定值）
 export function reduceChatEvent(prev: UiMessage[], event: ChatEvent, now = Date.now()): UiMessage[] {
   switch (event.type) {
+    case "user_stored": {
+      // user 落库回执：替换本会话最后一条 live-N user 泡（row-N 身份 + 服务端写入时间校准）。
+      // 从尾部找——同一连接上只有刚发出的那条泡可能是 live user（重放/历史行都是 row-N）。
+      let at = -1;
+      for (let i = prev.length - 1; i >= 0; i--) {
+        if (prev[i].kind === "user" && prev[i].id.startsWith("live-")) { at = i; break; }
+      }
+      if (at === -1) return prev;
+      const message = prev[at];
+      if (message.kind !== "user") return prev; // 索引访问不保留循环内 narrowing，这里收窄 + 防御
+      return [
+        ...prev.slice(0, at),
+        { ...message, id: `row-${event.id}`, completedAt: Date.parse(event.created_at) },
+        ...prev.slice(at + 1),
+      ];
+    }
     case "delta": {
       const current = prev.find(
         (m): m is AssistantMessage => m.kind === "assistant" && m.streaming === true,

@@ -9,6 +9,7 @@ import { LogoMark } from "@/components/sidebar/Logo";
 import { CirclePauseIcon } from "@/components/ui/icons";
 import { formatDateTimeCN, formatHM } from "@/lib/format-time";
 import { CopyReplyButton } from "./CopyReplyButton";
+import { UserActionRow } from "./UserActionRow";
 
 function ToolBubble({ message }: { message: Extract<UiMessage, { kind: "tool" }> }) {
   const argsPreview = Object.entries(message.arguments)
@@ -40,7 +41,19 @@ function BrandHeader() {
 // 消息行行壳：ol 已铺满内容区，列宽与内边距约束收回到行级（与原先 max-w-3xl + px-4 的几何等同）。
 const rowCls = "mx-auto w-full max-w-3xl px-4";
 
-export function MessageList({ messages }: { messages: UiMessage[] }) {
+export function MessageList({
+  messages,
+  taskId,
+  busy,
+  onEditUser,
+  onDeleteTurn,
+}: {
+  messages: UiMessage[];
+  taskId: string;
+  busy: boolean;
+  onEditUser: (content: string) => void;
+  onDeleteTurn: (messageId: string) => void;
+}) {
   const listRef = useRef<HTMLOListElement>(null);
   // 跟随滚动开关：初始 true（进入任务/历史加载后落在最新消息）；用户上翻超过阈值即停跟，回到底部恢复。
   const stickRef = useRef(true);
@@ -74,6 +87,15 @@ export function MessageList({ messages }: { messages: UiMessage[] }) {
               <div className="ml-auto w-fit max-w-[75%] rounded-2xl bg-sidebar px-4 py-2 text-sm text-text">
                 {message.content}
               </div>
+              {/* Manus 式操作行：相对时间 + 复制/分享/编辑/删除整轮，右对齐贴在气泡下方 */}
+              <UserActionRow
+                content={message.content}
+                completedAt={message.completedAt}
+                taskId={taskId}
+                busy={busy}
+                onEdit={() => onEditUser(message.content)}
+                onDelete={() => onDeleteTurn(message.id)}
+              />
             </li>
           );
         }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { shouldSubmitOnEnter } from "@/lib/composer-keys";
 
 // 输入框自增高上限：约 6 行（text-sm / leading-5），超出后框内滚动
@@ -12,6 +12,7 @@ export function Composer({
   onStop,
   value: controlledValue,
   onChange,
+  focusNonce,
 }: {
   onSend: (text: string) => void;
   disabled: boolean;
@@ -19,12 +20,23 @@ export function Composer({
   onStop?: () => void;
   value?: string;
   onChange?: (value: string) => void;
+  // 外部触发聚焦的 nonce：编辑回填相同内容也要重新聚焦，所以用计数而非布尔/字符串
+  focusNonce?: number;
 }) {
   const [internalValue, setInternalValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isControlled = onChange !== undefined;
   const value = isControlled ? (controlledValue ?? "") : internalValue;
   const setValue = isControlled ? onChange : setInternalValue;
+
+  // focusNonce 变化时聚焦并把光标挪到末尾（编辑回填场景：文本已就位，缺少的是焦点）
+  useEffect(() => {
+    if (focusNonce === undefined || focusNonce === 0) return;
+    const el = textareaRef.current;
+    if (!el) return;
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+  }, [focusNonce]);
 
   // 高度随内容自适应：先归 auto 让 scrollHeight 反映真实内容高，再夹到上限。
   // 挂在 [value] 上而非 onChange：受控/非受控（含提交后清空草稿）都能触发，空值自动缩回单行。

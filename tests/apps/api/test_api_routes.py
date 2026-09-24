@@ -222,10 +222,13 @@ async def test_message_sse_flow_and_persistence(api) -> None:
         body = (await resp.aread()).decode()
     frames = [block for block in body.split("\n\n") if block.strip()]
     events = [json.loads(frame.strip().removeprefix("data: ")) for frame in frames]
-    assert events[0]["type"] == "delta"
+    assert events[0]["type"] == "user_stored"  # 落库回执是流内首事件
+    assert events[1]["type"] == "delta"
     assert events[-1] == {"type": "done", "reply": "pong"}
     rows = (await api.get(f"/api/tasks/{task['id']}/messages")).json()["messages"]
     assert [r["kind"] for r in rows] == ["user", "assistant"]
+    assert events[0]["id"] == rows[0]["id"]
+    assert events[0]["created_at"] == rows[0]["created_at"]
 
 
 async def test_message_on_missing_task_404(api) -> None:
@@ -296,3 +299,74 @@ def test_sse_ping_encodes_as_comment() -> None:
     # ping 只是探活不是聊天事件：编码成 SSE comment 帧，前端 parseSseBlock 天然忽略。
     assert _sse({"type": "ping"}) == ": keep-alive\n\n"
     assert _sse({"type": "delta", "text": "你"}) == 'data: {"type": "delta", "text": "你"}\n\n'
+
+
+async def test_delete_turn_removes_tail_turn_via_api(api) -> None:
+    task = (await api.post("/api/tasks", json={"agent_type": "react"})).json()
+    async with api.stream("POST", f"/api/tasks/{task['id']}/messages", json={"content": "问"}) as resp:
+        await resp.aread()
+    rows = (await api.get(f"/api/tasks/{task['id']}/messages")).json()["messages"]
+    user_row = next(r for r in rows if r["kind"] == "user")
+
+    resp = await api.delete(f"/api/tasks/{task['id']}/messages/{user_row['id']}")
+    assert resp.status_code == 204
+    assert (await api.get(f"/api/tasks/{task['id']}/messages")).json()["messages"] == []
+
+
+async def test_delete_turn_rejects_assistant_row_and_missing_task(api) -> None:
+    task = (await api.post("/api/tasks", json={"agent_type": "react"})).json()
+    async with api.stream("POST", f"/api/tasks/{task['id']}/messages", json={"content": "问"}) as resp:
+        await resp.aread()
+    rows = (await api.get(f"/api/tasks/{task['id']}/messages")).json()["messages"]
+    assistant_row = next(r for r in rows if r["kind"] == "assistant")
+    # assistant 行不是轮次锚点 → 404；任务不存在同样 404
+    assert (await api.delete(f"/api/tasks/{task['id']}/messages/{assistant_row['id']}")).status_code == 404
+    assert (await api.delete(f"/api/tasks/{task['id']}/messages/999999")).status_code == 404
+    assert (await api.delete("/api/tasks/nope/messages/1")).status_code == 404
+
+
+async def test_delete_turn_evicts_cached_agent_so_next_reply_replays_trimmed_history(
+    tmp_path, scripted_client
+) -> None:
+    # 删除轮次后立即发新消息：缓存 agent 的 transcript 仍记着吃进被删内容（服务端状态依赖
+    # DB 重放恢复）。端点删除后必须 evict，否则被删内容会复活进模型上下文。
+    seen: list[list[dict]] = []
+    client = scripted_client(tool_completions=[])
+    client.model_name = "mock-model"
+
+    async def spy_astream_with_tools(messages, tools, on_text_delta=None, **kwargs):
+        seen.append(list(messages))
+        completion = ToolCompletion(text="记录在案", requested_tools=[], model_id="mock-model")
+        if on_text_delta is not None:
+            for ch in completion.text:
+                await on_text_delta(ch)
+        return completion
+
+    client.astream_with_tools = spy_astream_with_tools  # type: ignore[method-assign]
+    runtime = ChatRuntime(
+        ChatStore(tmp_path / "chat.db"),
+        model_client=client,
+        skill_service_url="http://127.0.0.1:1",
+        trace_dir=tmp_path / "traces",
+    )
+    local = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app(runtime)), base_url="http://test"
+    )
+    task = (await local.post("/api/tasks", json={"agent_type": "react"})).json()
+    async with local.stream(
+        "POST", f"/api/tasks/{task['id']}/messages", json={"content": "暗号是foo"}
+    ) as resp:
+        await resp.aread()
+    rows = (await local.get(f"/api/tasks/{task['id']}/messages")).json()["messages"]
+    user_row = next(r for r in rows if r["kind"] == "user")
+    assert (await local.delete(f"/api/tasks/{task['id']}/messages/{user_row['id']}")).status_code == 204
+
+    async with local.stream(
+        "POST", f"/api/tasks/{task['id']}/messages", json={"content": "暗号是什么"}
+    ) as resp:
+        await resp.aread()
+
+    transcript = json.dumps(seen[-1], ensure_ascii=False)
+    assert "暗号是foo" not in transcript  # 被删轮次不复活
+    assert "记录在案" not in transcript
+    assert "暗号是什么" in transcript

@@ -73,6 +73,43 @@ def test_append_unknown_kind_raises(store: ChatStore) -> None:
         store.append_message(task["id"], "system", "x")
 
 
+def _seed_two_turns(store: ChatStore) -> tuple[dict, list[dict]]:
+    task = store.create_task("react")
+    rows = [
+        store.append_message(task["id"], "user", "一问"),
+        store.append_message(task["id"], "tool", '{"name":"echo","arguments":{},"result":"r","ok":true}'),
+        store.append_message(task["id"], "assistant", "一答"),
+        store.append_message(task["id"], "user", "二问"),
+        store.append_message(task["id"], "assistant", "二答"),
+        store.append_message(task["id"], "stopped", ""),
+    ]
+    return task, rows
+
+
+def test_delete_turn_removes_tail_turn(store: ChatStore) -> None:
+    task, rows = _seed_two_turns(store)
+    assert store.delete_turn(task["id"], rows[3]["id"]) is True  # 「二问」起的轮次
+    remaining = [(r["kind"], r["content"]) for r in store.list_messages(task["id"])]
+    assert remaining == [("user", "一问"), ("tool", rows[1]["content"]), ("assistant", "一答")]
+
+
+def test_delete_turn_removes_mid_turn_and_keeps_turn_boundary(store: ChatStore) -> None:
+    task, rows = _seed_two_turns(store)
+    assert store.delete_turn(task["id"], rows[0]["id"]) is True  # 「一问」起的轮次
+    remaining = [(r["kind"], r["content"]) for r in store.list_messages(task["id"])]
+    assert remaining == [("user", "二问"), ("assistant", "二答"), ("stopped", "")]
+
+
+def test_delete_turn_rejects_non_user_or_foreign_row(store: ChatStore) -> None:
+    task, rows = _seed_two_turns(store)
+    other = store.create_task("react")
+    before = store.list_messages(task["id"])
+    assert store.delete_turn(task["id"], rows[1]["id"]) is False  # tool 行不是轮次锚点
+    assert store.delete_turn(task["id"], 999999) is False  # 不存在
+    assert store.delete_turn(other["id"], rows[0]["id"]) is False  # 行不属于该任务
+    assert store.list_messages(task["id"]) == before  # 三次拒绝均一行未删
+
+
 def test_list_tasks_orders_by_updated_at_desc(store: ChatStore) -> None:
     first = store.create_task("react")
     second = store.create_task("toolcall")

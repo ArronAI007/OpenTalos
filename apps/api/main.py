@@ -169,6 +169,16 @@ def create_app(runtime: ChatRuntime | None = None) -> FastAPI:
             raise HTTPException(404, "task not found")
         return {"messages": store.list_messages(task_id)}
 
+    @app.delete("/api/tasks/{task_id}/messages/{message_id}", status_code=204)
+    async def delete_turn(task_id: str, message_id: int) -> None:
+        if store.get_task(task_id) is None:
+            raise HTTPException(404, "task not found")
+        # 删除目标轮（user 行 + 其后直到下一 user 前的所有行）；目标非 user 行/不存在 → 404。
+        if not store.delete_turn(task_id, message_id):
+            raise HTTPException(404, "user message not found")
+        # 缓存 agent 的 transcript 仍含被删内容，逐出强制下轮从 DB 重放。
+        runtime.evict(task_id)
+
     @app.post("/api/tasks/{task_id}/messages")
     async def post_message(task_id: str, request: PostMessageRequest) -> StreamingResponse:
         if store.get_task(task_id) is None:

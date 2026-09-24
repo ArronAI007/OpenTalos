@@ -208,3 +208,22 @@ export function ChevronRightIcon(props: IconProps) {
     </Icon>
   );
 }
+
+export function EllipsisIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <circle cx={5} cy={12} r={1} />
+      <circle cx={12} cy={12} r={1} />
+      <circle cx={19} cy={12} r={1} />
+    </Icon>
+  );
+}
+
+export function CornerUpRightIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="m15 14 5-5-5-5" />
+      <path d="M4 20v-7a4 4 0 0 1 4-4h12" />
+    </Icon>
+  );
+}

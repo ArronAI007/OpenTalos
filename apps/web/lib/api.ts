@@ -58,6 +58,13 @@ export async function deleteTask(id: string): Promise<void> {
 export async function listMessages(taskId: string): Promise<StoredMessage[]> {
   return fetchJson<{ messages: StoredMessage[] }>(`${API_URL}/api/tasks/${taskId}/messages`, { cache: "no-store" }).then((d) => d.messages);
 }
+export async function deleteTurn(taskId: string, messageId: number): Promise<void> {
+  // 删整轮（user 行 + 其后直到下一 user 前的所有行）；204 无响应体，仅校验状态码（同 deleteTask）。
+  const res = await fetch(`${API_URL}/api/tasks/${taskId}/messages/${messageId}`, { method: "DELETE" });
+  if (!res.ok) {
+    throw new Error(`API ${res.status} ${res.statusText}`);
+  }
+}
 export async function listProjects(): Promise<Project[]> {
   return fetchJson<{ projects: Project[] }>(`${API_URL}/api/projects`, { cache: "no-store" }).then((d) => d.projects);
 }

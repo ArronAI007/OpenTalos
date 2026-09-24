@@ -44,6 +44,23 @@ def test_stream_plain_reply_deltas_and_persists(store, scripted_client, tmp_path
     assert store.get_task(task["id"])["title"] == "hi"
 
 
+def test_user_stored_receipt_reports_persisted_row_identity(store, scripted_client, tmp_path) -> None:
+    # user 行落库后回送 row id 与写入时间：前端据此把 live-N 泡换成 row-N 身份（删除轮次要 id），
+    # 时间戳也校准为服务端时钟——两个进程谁的时钟准，以写库者为准。
+    client = scripted_client(tool_completions=[
+        ToolCompletion(text="好的", requested_tools=[], model_id="mock-model"),
+    ])
+    runtime = _runtime(store, client, tmp_path)
+    task = store.create_task("react")
+
+    events = asyncio.run(_collect(runtime, task["id"], "登记我"))
+
+    assert events[0]["type"] == "user_stored"  # 必为流内首事件（producer 启动前发出）
+    user_rows = [r for r in store.list_messages(task["id"]) if r["kind"] == "user"]
+    assert events[0]["id"] == user_rows[0]["id"]
+    assert events[0]["created_at"] == user_rows[0]["created_at"]
+
+
 def test_disconnect_mid_stream_persists_partial(store, scripted_client, tmp_path) -> None:
     # 前端"停止"会 abort fetch；SSE 断开时消费循环被中断，正常完成路径的落库不可达。
     # 期望：已流出的部分内容兜底落库，刷新后仍可见。
@@ -55,9 +72,11 @@ def test_disconnect_mid_stream_persists_partial(store, scripted_client, tmp_path
 
     async def consume_one_delta_then_close() -> str:
         gen = runtime.stream_reply(task["id"], "hi")
-        first = await gen.__anext__()
-        assert first["type"] == "delta"
-        partial = first["text"]
+        receipt = await gen.__anext__()
+        assert receipt["type"] == "user_stored"  # 落库回执是流内首事件
+        first_delta = await gen.__anext__()
+        assert first_delta["type"] == "delta"
+        partial = first_delta["text"]
         await gen.aclose()  # 模拟客户端中途断开（关闭 SSE）
         return partial
 
@@ -83,8 +102,10 @@ def test_disconnect_before_any_delta_persists_stopped_marker(store, scripted_cli
     runtime = _runtime(store, client, tmp_path)
     task = store.create_task("react")
 
-    async def close_before_first_event() -> None:
+    async def close_before_first_delta() -> None:
         gen = runtime.stream_reply(task["id"], "hi")
+        receipt = await gen.__anext__()
+        assert receipt["type"] == "user_stored"  # 落库回执先行，之后才是模型事件
         reader = asyncio.create_task(gen.__anext__())
         await asyncio.sleep(0.05)  # 让消费循环进入 queue.get() 等待（producer 被 sleep 阻塞）
         reader.cancel()
@@ -92,7 +113,7 @@ def test_disconnect_before_any_delta_persists_stopped_marker(store, scripted_cli
             await reader
         await gen.aclose()
 
-    asyncio.run(close_before_first_event())
+    asyncio.run(close_before_first_delta())
 
     rows = store.list_messages(task["id"])
     assert [r["kind"] for r in rows] == ["user", "stopped"]
@@ -140,15 +161,18 @@ def test_idle_stream_emits_keepalive_ping(store, scripted_client, tmp_path) -> N
     runtime = _runtime(store, client, tmp_path)
     task = store.create_task("react")
 
-    async def first_event() -> dict[str, Any]:
+    async def first_two_events() -> list[dict[str, Any]]:
         gen = runtime.stream_reply(task["id"], "hi")
         try:
-            return await asyncio.wait_for(gen.__anext__(), timeout=5)
+            receipt = await asyncio.wait_for(gen.__anext__(), timeout=5)
+            ping = await asyncio.wait_for(gen.__anext__(), timeout=5)
+            return [receipt, ping]
         finally:
             await gen.aclose()
 
-    first = asyncio.run(first_event())
-    assert first["type"] == "ping"
+    receipt, ping = asyncio.run(first_two_events())
+    assert receipt["type"] == "user_stored"
+    assert ping["type"] == "ping"
 
 
 def test_stream_tool_call_events_and_tool_row(store, scripted_client, echo_tool_registry, tmp_path) -> None:

@@ -202,8 +202,11 @@ class ChatRuntime:
             # 取舍：user 消息先落库，agent transcript 要到 arespond 末尾才补录。若流在这两步
             # 之间被取消，DB 会多出这条 user 行而缓存 agent 的 transcript 缺失；下一轮缓存命中
             # 不重放，上下文会短暂缺这一句，直到 evict/重启后从 DB 重放恢复。接受此取舍。
-            await asyncio.to_thread(self._store.append_message, task_id, "user", content)
+            user_row = await asyncio.to_thread(self._store.append_message, task_id, "user", content)
             await asyncio.to_thread(self._store.set_title_if_empty, task_id, _truncate_title(content))
+            # 回送落库行的身份：前端据此把 live-N user 泡换成 row-N（删除轮次需要服务端 id），
+            # completedAt 也校准为服务端写入时间。事件发生在 producer 启动前，必为流内首事件。
+            yield {"type": "user_stored", "id": user_row["id"], "created_at": user_row["created_at"]}
             pending_calls: list[dict[str, Any]] = []
             parts: list[str] = []
             error: str | None = None

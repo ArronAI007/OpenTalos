@@ -122,6 +122,31 @@ class ChatStore:
             rows = conn.execute("SELECT * FROM messages WHERE task_id = ? ORDER BY id", (task_id,)).fetchall()
         return [dict(row) for row in rows]
 
+    def delete_turn(self, task_id: str, message_id: int) -> bool:
+        """删除一整轮问答：目标 user 行 + 其后直到下一条 user 行之前的所有行。
+
+        目标行必须存在、属于该任务、且 kind == 'user'，否则不删任何行返回 False。
+        不动 tasks.updated_at：删除是清理操作，不改变会话的活动排序。
+        """
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT id, kind FROM messages WHERE id = ? AND task_id = ?", (message_id, task_id),
+            ).fetchone()
+            if row is None or row["kind"] != "user":
+                return False
+            next_user = conn.execute(
+                "SELECT MIN(id) AS n FROM messages WHERE task_id = ? AND id > ? AND kind = 'user'",
+                (task_id, message_id),
+            ).fetchone()["n"]
+            if next_user is None:
+                conn.execute("DELETE FROM messages WHERE task_id = ? AND id >= ?", (task_id, message_id))
+            else:
+                conn.execute(
+                    "DELETE FROM messages WHERE task_id = ? AND id >= ? AND id < ?",
+                    (task_id, message_id, next_user),
+                )
+            return True
+
     def update_task(self, task_id: str, **fields: str | int | None) -> dict | None:
         """通用字段更新通道，返回更新后的任务；任务不存在返回 None。
 

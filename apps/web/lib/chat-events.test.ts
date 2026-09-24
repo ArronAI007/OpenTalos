@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   appendStoppedNotice,
   dropStoppedNotice,
+  dropTurn,
   finalizeStreaming,
   parseSseBlock,
   reduceChatEvent,
@@ -139,5 +140,62 @@ describe("stopped notice", () => {
     msgs = appendStoppedNotice(msgs);
     const dropped = dropStoppedNotice(msgs);
     expect(dropped.map((m) => m.id)).toEqual(["row-9", "row-10", "row-11"]);
+  });
+});
+
+describe("user_stored event", () => {
+  it("rewrites the latest live user bubble to its stored row id and stamps the server time", () => {
+    const msgs: UiMessage[] = [
+      { id: "row-1", kind: "user", content: "旧问", completedAt: 1700000000000 },
+      { id: "live-1", kind: "user", content: "新问", completedAt: 1700000000001 },
+    ];
+    const next = reduceChatEvent(msgs, { type: "user_stored", id: 42, created_at: "2026-09-24T11:23:00.000000" });
+    expect(next[0]).toBe(msgs[0]); // 历史行不动
+    expect(next[1]).toEqual({
+      id: "row-42",
+      kind: "user",
+      content: "新问",
+      completedAt: new Date(2026, 8, 24, 11, 23).getTime(), // 无时区后缀按本地解析
+    });
+  });
+
+  it("no-ops with the same reference when no live user bubble exists (e.g. late event after refresh)", () => {
+    const msgs: UiMessage[] = [{ id: "row-1", kind: "user", content: "问" }];
+    expect(reduceChatEvent(msgs, { type: "user_stored", id: 2, created_at: "2026-09-24T11:23:00.000000" })).toBe(msgs);
+  });
+});
+
+describe("dropTurn", () => {
+  it("drops the user bubble plus everything up to (not incl.) the next user bubble", () => {
+    const msgs: UiMessage[] = [
+      { id: "row-1", kind: "user", content: "一" },
+      { id: "row-2", kind: "assistant", content: "答一" },
+      { id: "row-3", kind: "user", content: "二" },
+      { id: "live-1", kind: "tool", name: "echo", arguments: {}, ok: true, result: "..." },
+      { id: "row-4", kind: "assistant", content: "答二" },
+      { id: "live-2", kind: "stopped" },
+    ];
+    expect(dropTurn(msgs, "row-3").map((m) => m.id)).toEqual(["row-1", "row-2"]);
+  });
+
+  it("mid-conversation turn dies while earlier and later turns survive", () => {
+    const msgs: UiMessage[] = [
+      { id: "row-1", kind: "user", content: "一" },
+      { id: "row-2", kind: "assistant", content: "答一" },
+      { id: "row-3", kind: "user", content: "二" },
+      { id: "row-4", kind: "assistant", content: "答二" },
+      { id: "row-5", kind: "user", content: "三" },
+      { id: "row-6", kind: "assistant", content: "答三" },
+    ];
+    expect(dropTurn(msgs, "row-3").map((m) => m.id)).toEqual(["row-1", "row-2", "row-5", "row-6"]);
+  });
+
+  it("no-ops with the same reference on unknown id or non-user target", () => {
+    const msgs: UiMessage[] = [
+      { id: "row-1", kind: "user", content: "一" },
+      { id: "row-2", kind: "assistant", content: "答一" },
+    ];
+    expect(dropTurn(msgs, "row-99")).toBe(msgs);
+    expect(dropTurn(msgs, "row-2")).toBe(msgs); // 目标是 assistant：不发生删除
   });
 });

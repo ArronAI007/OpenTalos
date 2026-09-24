@@ -13,3 +13,21 @@ export function formatDateTimeCN(ms: number): string {
   const d = new Date(ms);
   return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${formatHM(ms)}`;
 }
+
+// 用户消息时间（Manus 式相对日）：今天 → 「今天 HH:MM」；昨天 → 「昨天 HH:MM」；
+// 今年更早 → 「M月D日 HH:MM」；跨年 → 「YYYY年M月D日 HH:MM」。
+// 比较全用本地年月日字段，now 可注入保证测试确定性。
+function isSameDay(a: Date, b: Date): boolean {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+
+export function formatRelativeDay(ms: number, now = new Date()): string {
+  const d = new Date(ms);
+  const hm = formatHM(ms);
+  if (isSameDay(d, now)) return `今天 ${hm}`;
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (isSameDay(d, yesterday)) return `昨天 ${hm}`;
+  if (d.getFullYear() === now.getFullYear()) return `${d.getMonth() + 1}月${d.getDate()}日 ${hm}`;
+  return formatDateTimeCN(ms);
+}
