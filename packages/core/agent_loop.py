@@ -118,6 +118,7 @@ async def execute_model_step(
     recorder: RunRecorder | None = None,
     step: int | None = None,
     on_text_delta: Callable[[str], Awaitable[None]] | None = None,
+    on_reasoning_delta: Callable[[str], Awaitable[None]] | None = None,
     cancellation: CancellationToken | None = None,
     handle_invocation: ToolInvocationHandler,
     **kwargs: Any,
@@ -136,8 +137,10 @@ async def execute_model_step(
     if cancellation is not None:
         cancellation.raise_if_cancelled()
 
-    if on_text_delta is not None:
-        completion = await model_client.astream_with_tools(messages, tools, on_text_delta=on_text_delta, **kwargs)
+    if on_text_delta is not None or on_reasoning_delta is not None:
+        completion = await model_client.astream_with_tools(
+            messages, tools, on_text_delta=on_text_delta, on_reasoning_delta=on_reasoning_delta, **kwargs
+        )
     else:
         completion = await model_client.acomplete_with_tools(messages, tools, **kwargs)
     _record_usage(cancellation, completion.token_usage)
@@ -165,6 +168,7 @@ async def run_tool_turn(
     max_iterations: int,
     recorder: RunRecorder | None = None,
     on_text_delta: Callable[[str], Awaitable[None]] | None = None,
+    on_reasoning_delta: Callable[[str], Awaitable[None]] | None = None,
     cancellation: CancellationToken | None = None,
     trimmer: OutputTrimmer | None = None,
     **kwargs: Any,
@@ -199,6 +203,7 @@ async def run_tool_turn(
             recorder=recorder,
             step=step,
             on_text_delta=on_text_delta,
+            on_reasoning_delta=on_reasoning_delta,
             cancellation=cancellation,
             handle_invocation=handle_invocation,
             **kwargs,

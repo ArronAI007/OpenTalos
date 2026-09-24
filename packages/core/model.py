@@ -52,6 +52,7 @@ class ModelBackend(ABC):
         tools: list[dict],
         *,
         on_text_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_reasoning_delta: Callable[[str], Awaitable[None]] | None = None,
         **kwargs: Any,
     ) -> ToolCompletion: ...
 
@@ -108,6 +109,7 @@ class FakeModelBackend(ModelBackend):
         tools: list[dict],
         *,
         on_text_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_reasoning_delta: Callable[[str], Awaitable[None]] | None = None,
         **kwargs: Any,
     ) -> ToolCompletion:
         response = self._resolve_response(messages)
@@ -197,6 +199,7 @@ class OpenAICompatibleBackend(ModelBackend):
         *,
         tool_choice: str | dict = "auto",
         on_text_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_reasoning_delta: Callable[[str], Awaitable[None]] | None = None,
         **kwargs: Any,
     ) -> ToolCompletion:
         # 逐 chunk 累积文本增量和按 index 分片的 tool_call 增量（OpenAI 流式协议里，一次 tool_call
@@ -213,6 +216,11 @@ class OpenAICompatibleBackend(ModelBackend):
             if not chunk.choices:
                 continue
             delta = chunk.choices[0].delta
+            # 推理模型（kimi-k3 等）先吐 reasoning_content 增量再吐正文——单独通道转出去，
+            # 不混进 text_parts（正文要原样拼回，思维链混入会污染最终回复与工具回合上下文）。
+            reasoning = getattr(delta, "reasoning_content", None)
+            if reasoning and on_reasoning_delta is not None:
+                await on_reasoning_delta(reasoning)
             content = getattr(delta, "content", None)
             if content:
                 text_parts.append(content)
@@ -348,9 +356,11 @@ class ClaudeBackend(ModelBackend):
         max_tokens: int = 4096,
         tool_choice: str | dict = "auto",
         on_text_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_reasoning_delta: Callable[[str], Awaitable[None]] | None = None,
         **kwargs: Any,
     ) -> ToolCompletion:
         # Anthropic 的流式 SDK 已经把 tool_use 块的增量 JSON 拼好了，get_final_message() 拿到的
+        # （on_reasoning_delta 仅 openai-compatible 推理模型接线；Anthropic 思考块协议不同，暂不转发）
         # content 数组跟非流式 acomplete_with_tools 的响应形状一致，直接复用同一套解析逻辑即可。
         start = time.monotonic()
         system_prompt, rest = self._extract_system_prompt(messages)
@@ -405,6 +415,7 @@ class ModelClient:
         timeout: int | None = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        reasoning_effort: str | None = None,
     ) -> None:
         self.provider = provider or os.getenv("MODEL_PROVIDER")
         if not self.provider:
@@ -432,6 +443,10 @@ class ModelClient:
         self.temperature = temperature if temperature is not None else (float(temperature_env) if temperature_env else None)
         self.max_tokens = max_tokens
 
+        # 推理强度（kimi-k3 等 always-on thinking 模型用它控制思维链长度）：未配置就不发这个字段，
+        # 让服务端用自己的默认档——跟 temperature 同一取舍，框架不替用户挑值。
+        self.reasoning_effort = reasoning_effort or os.getenv("MODEL_REASONING_EFFORT") or None
+
         self._backend: ModelBackend = create_model_backend(
             self.provider, api_key=self.api_key, base_url=self.base_url, timeout=self.timeout, model_name=self.model_name
         )
@@ -446,6 +461,9 @@ class ModelClient:
         max_tokens = kwargs.pop("max_tokens", self.max_tokens)
         if max_tokens is not None:
             call_kwargs["max_tokens"] = max_tokens
+        reasoning_effort = kwargs.pop("reasoning_effort", self.reasoning_effort)
+        if reasoning_effort is not None:
+            call_kwargs["reasoning_effort"] = reasoning_effort
         call_kwargs.update(kwargs)
         return call_kwargs
 
@@ -470,11 +488,14 @@ class ModelClient:
         tools: list[dict],
         tool_choice: str | dict = "auto",
         on_text_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_reasoning_delta: Callable[[str], Awaitable[None]] | None = None,
         **kwargs: Any,
     ) -> ToolCompletion:
         call_kwargs = self._build_call_kwargs(kwargs)
         call_kwargs["tool_choice"] = tool_choice
-        return await self._backend.astream_with_tools(messages, tools, on_text_delta=on_text_delta, **call_kwargs)
+        return await self._backend.astream_with_tools(
+            messages, tools, on_text_delta=on_text_delta, on_reasoning_delta=on_reasoning_delta, **call_kwargs
+        )
 
     def complete(self, messages: list[dict], **kwargs: Any) -> Completion:
         return asyncio.run(self.acomplete(messages, **kwargs))

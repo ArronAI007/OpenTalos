@@ -223,6 +223,7 @@ class ChatRuntime:
                     reply = await agent.arespond(
                         content,
                         on_text_delta=lambda chunk: emit({"type": "delta", "text": chunk}),
+                        on_reasoning_delta=lambda chunk: emit({"type": "reasoning", "text": chunk}),
                     )
                 except Exception as exc:  # noqa: BLE001 - 转成 error 事件交给前端
                     error = str(exc)

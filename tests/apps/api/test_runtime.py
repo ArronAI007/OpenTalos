@@ -339,6 +339,31 @@ def test_concurrent_tasks_do_not_cross_streams(store, scripted_client, echo_tool
             assert "BBB" in payload and "AAA" not in payload
 
 
+def test_reasoning_deltas_stream_as_events_before_content(store, scripted_client, tmp_path) -> None:
+    # 推理模型（kimi-k3 等）的思维链增量以独立 reasoning 事件流出：先于正文 delta，
+    # 让前端在等待期就有可见反馈；思维链只是 UI 反馈，不落库。
+    client = scripted_client(tool_completions=[])
+
+    async def fake_astream_with_tools(messages, tools, on_text_delta=None, on_reasoning_delta=None, **kwargs):
+        assert on_reasoning_delta is not None, "runtime 必须把 reasoning 回调接进 agent 调用"
+        await on_reasoning_delta("在想")
+        await on_text_delta("答")
+        return ToolCompletion(text="答", requested_tools=[], model_id="mock")
+
+    client.astream_with_tools = fake_astream_with_tools  # type: ignore[method-assign]
+    runtime = _runtime(store, client, tmp_path)
+    task = store.create_task("react")
+
+    events = asyncio.run(_collect(runtime, task["id"], "想想"))
+
+    types = [e["type"] for e in events]
+    assert "reasoning" in types
+    assert types.index("reasoning") < types.index("delta")
+    assert "".join(e["text"] for e in events if e["type"] == "reasoning") == "在想"
+    rows = store.list_messages(task["id"])
+    assert [r["kind"] for r in rows] == ["user", "assistant"]
+
+
 def test_followup_suggestions_emitted_after_done(store, scripted_client, tmp_path) -> None:
     # 回复正常完成后，流内追加一次跟进问题推荐（done 之后、流尾）；
     # 推荐走独立 acomplete 调用（completions 队列），不影响 agent 的 toolcall 流。

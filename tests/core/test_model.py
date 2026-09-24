@@ -180,6 +180,62 @@ async def test_openai_compatible_backend_astream_with_tools_forwards_text_and_ac
     assert result.requested_tools[0].arguments_json == '{"q":"x"}'
 
 
+async def test_openai_compatible_backend_astream_with_tools_forwards_reasoning_deltas(monkeypatch):
+    # kimi-k3 这类推理模型流式先吐 reasoning_content 增量再吐 content——两条增量要分通道转发，
+    # reasoning 进 on_reasoning_delta、正文进 on_text_delta，互不混淆。
+    async def fake_stream():
+        yield SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=None, reasoning_content="想一"))])
+        yield SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=None, reasoning_content="想二"))])
+        yield SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=None, reasoning_content=None, tool_calls=None))])
+        yield SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="答", reasoning_content=None, tool_calls=None))])
+
+    fake_client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=AsyncMock(return_value=fake_stream())))
+    )
+    monkeypatch.setattr("core.model.AsyncOpenAI", lambda **kwargs: fake_client)
+
+    backend = OpenAICompatibleBackend(api_key="k", base_url=None, timeout=60, model_name="gpt-test")
+    reasoning_seen: list[str] = []
+    text_seen: list[str] = []
+
+    async def on_text_delta(chunk: str) -> None:
+        text_seen.append(chunk)
+
+    async def on_reasoning_delta(chunk: str) -> None:
+        reasoning_seen.append(chunk)
+
+    result = await backend.astream_with_tools(
+        [{"role": "user", "content": "hi"}],
+        tools=[{"type": "function", "function": {"name": "search"}}],
+        on_text_delta=on_text_delta,
+        on_reasoning_delta=on_reasoning_delta,
+    )
+
+    assert reasoning_seen == ["想一", "想二"]
+    assert text_seen == ["答"]
+    assert result.text == "答"
+
+
+def test_model_client_reads_reasoning_effort_from_env(monkeypatch):
+    monkeypatch.setenv("MODEL_REASONING_EFFORT", "low")
+    client = ModelClient(provider="mock")
+    assert client.reasoning_effort == "low"
+
+
+def test_unset_reasoning_effort_is_omitted_from_the_request(monkeypatch):
+    monkeypatch.delenv("MODEL_REASONING_EFFORT", raising=False)
+    client = ModelClient(provider="mock")
+    assert "reasoning_effort" not in client._build_call_kwargs({})
+
+
+def test_configured_reasoning_effort_is_sent_and_per_call_overrides_win(monkeypatch):
+    monkeypatch.delenv("MODEL_REASONING_EFFORT", raising=False)
+    monkeypatch.delenv("MODEL_TEMPERATURE", raising=False)
+    client = ModelClient(provider="mock", reasoning_effort="low")
+    assert client._build_call_kwargs({}) == {"reasoning_effort": "low"}
+    assert client._build_call_kwargs({"reasoning_effort": "max"}) == {"reasoning_effort": "max"}
+
+
 def test_create_model_backend_returns_openai_compatible_backend_for_that_provider(monkeypatch):
     monkeypatch.setattr("core.model.AsyncOpenAI", lambda **kwargs: SimpleNamespace())
     backend = create_model_backend("openai-compatible", api_key="k", base_url=None, timeout=60, model_name="gpt-test")
@@ -334,18 +390,21 @@ def test_model_client_explicit_temperature_overrides_env(monkeypatch):
 
 def test_unset_temperature_and_max_tokens_are_omitted_from_the_request(monkeypatch):
     monkeypatch.delenv("MODEL_TEMPERATURE", raising=False)
+    monkeypatch.delenv("MODEL_REASONING_EFFORT", raising=False)
     client = ModelClient(provider="mock")
     assert client._build_call_kwargs({}) == {}
 
 
 def test_configured_temperature_and_max_tokens_are_sent(monkeypatch):
     monkeypatch.delenv("MODEL_TEMPERATURE", raising=False)
+    monkeypatch.delenv("MODEL_REASONING_EFFORT", raising=False)
     client = ModelClient(provider="mock", temperature=0.3, max_tokens=256)
     assert client._build_call_kwargs({}) == {"temperature": 0.3, "max_tokens": 256}
 
 
 def test_per_call_overrides_win_over_the_client_defaults(monkeypatch):
     monkeypatch.delenv("MODEL_TEMPERATURE", raising=False)
+    monkeypatch.delenv("MODEL_REASONING_EFFORT", raising=False)
     client = ModelClient(provider="mock", temperature=0.3)
     assert client._build_call_kwargs({"temperature": 0.9, "max_tokens": 16}) == {"temperature": 0.9, "max_tokens": 16}
 

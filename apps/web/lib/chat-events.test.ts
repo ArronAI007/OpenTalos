@@ -7,6 +7,7 @@ import {
   finalizeStreaming,
   parseSseBlock,
   reduceChatEvent,
+  shouldShowThinkingHint,
   type UiMessage,
 } from "./chat-events";
 
@@ -212,6 +213,78 @@ describe("dropTurn", () => {
     ];
     expect(dropTurn(msgs, "row-99")).toBe(msgs);
     expect(dropTurn(msgs, "row-2")).toBe(msgs); // 目标是 assistant：不发生删除
+  });
+});
+
+describe("reasoning（思维链）", () => {
+  it("reasoning events accumulate into one streaming bubble", () => {
+    let msgs: UiMessage[] = [];
+    msgs = reduceChatEvent(msgs, { type: "reasoning", text: "先想" });
+    msgs = reduceChatEvent(msgs, { type: "reasoning", text: "再想" });
+    expect(msgs).toEqual([{ id: "live-1", kind: "reasoning", content: "先想再想", streaming: true }]);
+  });
+
+  it("first content delta settles the reasoning bubble and starts a fresh assistant bubble", () => {
+    let msgs = reduceChatEvent([], { type: "reasoning", text: "想了想" });
+    msgs = reduceChatEvent(msgs, { type: "delta", text: "答" });
+    expect(msgs).toEqual([
+      { id: "live-1", kind: "reasoning", content: "想了想", streaming: false },
+      { id: "live-2", kind: "assistant", content: "答", streaming: true },
+    ]);
+  });
+
+  it("done settles the reasoning bubble too (reply without any streamed content)", () => {
+    const msgs = reduceChatEvent([], { type: "reasoning", text: "想了想" });
+    const next = reduceChatEvent(msgs, { type: "done", reply: "整段" }, 1700000000005);
+    expect(next[0]).toEqual({ id: "live-1", kind: "reasoning", content: "想了想", streaming: false });
+    expect(next[1]).toMatchObject({ kind: "assistant", content: "整段", streaming: false });
+  });
+
+  it("settling is idempotent by reference: a second delta leaves the reasoning row untouched", () => {
+    let msgs = reduceChatEvent([], { type: "reasoning", text: "想" });
+    msgs = reduceChatEvent(msgs, { type: "delta", text: "一" });
+    const reasoningRow = msgs[0];
+    msgs = reduceChatEvent(msgs, { type: "delta", text: "二" });
+    expect(msgs[0]).toBe(reasoningRow);
+  });
+
+  it("finalizeStreaming settles the reasoning bubble as well (user stops mid-thought)", () => {
+    let msgs = reduceChatEvent([], { type: "reasoning", text: "想到一半" });
+    msgs = finalizeStreaming(msgs, 1700000000006);
+    expect(msgs[0]).toEqual({ id: "live-1", kind: "reasoning", content: "想到一半", streaming: false });
+  });
+
+  it("dropTurn removes the reasoning row with the rest of the turn", () => {
+    const msgs: UiMessage[] = [
+      { id: "row-1", kind: "user", content: "问" },
+      { id: "live-1", kind: "reasoning", content: "想", streaming: false },
+      { id: "row-2", kind: "assistant", content: "答" },
+    ];
+    expect(dropTurn(msgs, "row-1")).toEqual([]);
+  });
+});
+
+describe("shouldShowThinkingHint", () => {
+  it("shows while busy with nothing streaming yet", () => {
+    const msgs: UiMessage[] = [{ id: "live-1", kind: "user", content: "问" }];
+    expect(shouldShowThinkingHint(msgs, true)).toBe(true);
+  });
+
+  it("hides once reasoning or content starts streaming, and when not busy", () => {
+    const reasoning: UiMessage[] = [{ id: "live-1", kind: "reasoning", content: "想", streaming: true }];
+    expect(shouldShowThinkingHint(reasoning, true)).toBe(false);
+    const delta: UiMessage[] = [{ id: "live-1", kind: "assistant", content: "答", streaming: true }];
+    expect(shouldShowThinkingHint(delta, true)).toBe(false);
+    expect(shouldShowThinkingHint([], false)).toBe(false);
+  });
+
+  it("settled bubbles from a previous turn do not suppress the hint", () => {
+    const msgs: UiMessage[] = [
+      { id: "row-1", kind: "reasoning", content: "旧想", streaming: false },
+      { id: "row-2", kind: "assistant", content: "旧答", streaming: false },
+      { id: "live-1", kind: "user", content: "新问" },
+    ];
+    expect(shouldShowThinkingHint(msgs, true)).toBe(true);
   });
 });
 

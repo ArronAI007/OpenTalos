@@ -1,5 +1,6 @@
 export type ChatEvent =
   | { type: "delta"; text: string }
+  | { type: "reasoning"; text: string }
   | { type: "tool_call"; name: string; arguments: Record<string, unknown> }
   | { type: "tool_result"; name: string; result: string; ok: boolean }
   | { type: "done"; reply: string }
@@ -21,6 +22,9 @@ export type UiMessage =
     }
   | { kind: "tool"; id: string; name: string; arguments: Record<string, unknown>; result?: string; ok?: boolean }
   | { kind: "error"; id: string; content: string }
+  // 思维链（kimi-k3 等推理模型的 reasoning_content 增量）：session-only 反馈行，不落库；
+  // 首个正文 delta（或 done/停止）到达即定稿，渲染层把它并入同轮 assistant 块——品牌头一轮一个。
+  | { kind: "reasoning"; id: string; content: string; streaming?: boolean }
   // 停止提示是纯本地 UI 行（不来自服务端、不入库）：kind 只携带语义，文案在渲染层（MessageList）。
   | { kind: "stopped"; id: string }
   // 跟进问题推荐：本会话 UI 行（服务端 done 后追加；不落库、不进历史）。
@@ -28,6 +32,7 @@ export type UiMessage =
   | { kind: "suggestions"; id: string; items: string[] };
 
 type AssistantMessage = { kind: "assistant"; id: string; content: string; streaming?: boolean };
+type ReasoningMessage = { kind: "reasoning"; id: string; content: string; streaming?: boolean };
 
 // 本会话新产生的消息用 live-N 命名空间；历史行在 fromStored 用 row-N，互不碰撞。
 export function nextUiId(prev: UiMessage[]): string {
@@ -52,10 +57,26 @@ export function parseSseBlock(block: string): ChatEvent | null {
 // 让 setMessages 走 React bail-out 快路径（不触发多余渲染）。
 // now 默认 Date.now()，测试注入固定值保持确定性。
 export function finalizeStreaming(prev: UiMessage[], now = Date.now()): UiMessage[] {
-  if (!prev.some((m) => m.kind === "assistant" && m.streaming)) return prev;
-  return prev.map((m) =>
-    m.kind === "assistant" && m.streaming ? { ...m, streaming: false, completedAt: now } : m,
-  );
+  const isStreaming = (m: UiMessage) => (m.kind === "assistant" || m.kind === "reasoning") && m.streaming;
+  if (!prev.some(isStreaming)) return prev;
+  return prev.map((m) => {
+    if (!isStreaming(m)) return m;
+    return m.kind === "assistant" ? { ...m, streaming: false, completedAt: now } : { ...m, streaming: false };
+  });
+}
+
+// 流式思维链定稿：首个正文 delta / done 到达即落地（streaming→false）。
+// 无流式思维链时返回原引用——后续 delta 不会重复制造 map 开销，也不触发多余渲染。
+function settleReasoning(prev: UiMessage[]): UiMessage[] {
+  if (!prev.some((m) => m.kind === "reasoning" && m.streaming)) return prev;
+  return prev.map((m) => (m.kind === "reasoning" && m.streaming ? { ...m, streaming: false } : m));
+}
+
+// 「正在思考…」占位的显示条件：本轮已发出（busy）但还没有任何流式气泡（思维链或正文）。
+// 覆盖的是请求→首个 SSE chunk 之间的空白；一旦思维链开始滚动即让位。
+export function shouldShowThinkingHint(messages: UiMessage[], busy: boolean): boolean {
+  if (!busy) return false;
+  return !messages.some((m) => (m.kind === "assistant" || m.kind === "reasoning") && m.streaming);
 }
 
 // 停止流式后追加提示行（幂等：本会话已有 live 提示则返回原引用，防止双击停止叠加）。
@@ -113,14 +134,25 @@ export function reduceChatEvent(prev: UiMessage[], event: ChatEvent, now = Date.
       ];
     }
     case "delta": {
-      const current = prev.find(
+      const calmed = settleReasoning(prev);
+      const current = calmed.find(
         (m): m is AssistantMessage => m.kind === "assistant" && m.streaming === true,
+      );
+      const rest = calmed.filter((m) => m !== current);
+      if (current) {
+        return [...rest, { ...current, content: current.content + event.text, streaming: true }];
+      }
+      return [...rest, { id: nextUiId(rest), kind: "assistant", content: event.text, streaming: true }];
+    }
+    case "reasoning": {
+      const current = prev.find(
+        (m): m is ReasoningMessage => m.kind === "reasoning" && m.streaming === true,
       );
       const rest = prev.filter((m) => m !== current);
       if (current) {
         return [...rest, { ...current, content: current.content + event.text, streaming: true }];
       }
-      return [...rest, { id: nextUiId(rest), kind: "assistant", content: event.text, streaming: true }];
+      return [...rest, { id: nextUiId(rest), kind: "reasoning", content: event.text, streaming: true }];
     }
     case "tool_call":
       return [...prev, { id: nextUiId(prev), kind: "tool", name: event.name, arguments: event.arguments, result: undefined }];
@@ -134,10 +166,11 @@ export function reduceChatEvent(prev: UiMessage[], event: ChatEvent, now = Date.
       return [...prev.slice(0, at), { ...message, result: event.result, ok: event.ok }, ...prev.slice(at + 1)];
     }
     case "done": {
-      const current = prev.find(
+      const calmed = settleReasoning(prev);
+      const current = calmed.find(
         (m): m is AssistantMessage => m.kind === "assistant" && m.streaming === true,
       );
-      const rest = prev.filter((m) => m !== current);
+      const rest = calmed.filter((m) => m !== current);
       if (current) {
         return [...rest, { ...current, content: event.reply, streaming: false, completedAt: now }];
       }

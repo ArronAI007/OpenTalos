@@ -258,6 +258,29 @@ async def test_run_tool_turn_uses_streaming_backend_call_when_tools_and_on_text_
     assert seen == ["partial"]
 
 
+async def test_run_tool_turn_forwards_reasoning_deltas_when_tools_and_callback_are_given(echo_tool_registry):
+    client = ModelClient(provider="mock")
+
+    async def fake_astream_with_tools(messages, tools, tool_choice="auto", on_text_delta=None, on_reasoning_delta=None, **kwargs):
+        assert on_reasoning_delta is not None
+        await on_reasoning_delta("想一下")
+        return ToolCompletion(text="done", requested_tools=[], model_id="mock")
+
+    client.astream_with_tools = fake_astream_with_tools
+
+    reasoning: list[str] = []
+
+    async def collect_reasoning(chunk: str) -> None:
+        reasoning.append(chunk)
+
+    answer = await run_tool_turn(
+        client, [{"role": "user", "content": "hi"}], echo_tool_registry, 3, on_reasoning_delta=collect_reasoning
+    )
+
+    assert answer == "done"
+    assert reasoning == ["想一下"]
+
+
 async def test_run_tool_turn_raises_when_already_cancelled_without_a_registry():
     client = ModelClient(provider="mock")
     token = CancellationToken()

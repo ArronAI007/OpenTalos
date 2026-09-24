@@ -76,9 +76,11 @@ class PlanExecuteAgent(Agent):
         if cancellation is not None:
             cancellation.raise_if_cancelled()
 
-        # propose_steps 是强制 function-call、无文本可流的规划阶段，cancellation/on_text_delta
-        # 只对后面 _run_steps 里的 run_tool_turn 调用有意义，这里要先摘掉再转发给后端。
-        backend_kwargs = {k: v for k, v in kwargs.items() if k not in ("cancellation", "on_text_delta")}
+        # propose_steps 是强制 function-call、无文本可流的规划阶段，cancellation/on_text_delta/
+        # on_reasoning_delta 只对后面 _run_steps 里的 run_tool_turn 调用有意义，这里要先摘掉再转发给后端。
+        backend_kwargs = {
+            k: v for k, v in kwargs.items() if k not in ("cancellation", "on_text_delta", "on_reasoning_delta")
+        }
         messages = [
             {"role": "system", "content": self.system_prompt},
             {"role": "user", "content": f"Produce a step-by-step plan for:\n\n{question}"},

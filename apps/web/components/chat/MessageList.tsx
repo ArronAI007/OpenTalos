@@ -4,11 +4,13 @@ import { useLayoutEffect, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { UiMessage } from "@/lib/chat-events";
+import { shouldShowThinkingHint } from "@/lib/chat-events";
 import { isNearBottom, scrollToBottom } from "@/lib/scroll-stick";
 import { LogoMark } from "@/components/sidebar/Logo";
 import { CirclePauseIcon } from "@/components/ui/icons";
 import { formatDateTimeCN } from "@/lib/format-time";
 import { CopyReplyButton } from "./CopyReplyButton";
+import { ReasoningBubble } from "./ReasoningBubble";
 import { UserActionRow } from "./UserActionRow";
 
 function ToolBubble({ message }: { message: Extract<UiMessage, { kind: "tool" }> }) {
@@ -106,11 +108,15 @@ export function MessageList({
         if (message.kind === "assistant") {
           // 紧跟其后的 stopped（本轮有内容流出后被停止）并入本回复块渲染，品牌头一轮只出现一次
           const followedByStopped = messages[index + 1]?.kind === "stopped";
+          // 紧邻前一条的思维链并入本回复块（品牌头之后、正文之前），reasoning 行本身不再单列
+          const prevLine = index > 0 ? messages[index - 1] : undefined;
+          const reasoning = prevLine?.kind === "reasoning" ? prevLine : undefined;
           return (
             <li key={message.id} className={`${rowCls} group`}>
               <div className="max-w-[85%] text-base leading-6">
                 {/* 每条回复带品牌头（流式与历史同等处理），对齐 Manus 版式 */}
                 <BrandHeader />
+                {reasoning && <ReasoningBubble content={reasoning.content} streaming={reasoning.streaming} />}
                 <div className="md">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
                 </div>
@@ -138,10 +144,32 @@ export function MessageList({
             </li>
           );
         }
+        if (message.kind === "reasoning") {
+          // 紧跟 assistant 的思维链已并入该回复块，这里不再单列；孤立的思维链（思考中被停止、
+          // 正文尚未流出）自成一行——此时它是本轮唯一可见的响应块，带头（与孤立 stopped 同处理），
+          // 紧跟的停止提示也并入本块收尾，品牌头仍只出现一次
+          const followedByStopped = messages[index + 1]?.kind === "stopped";
+          if (!followedByStopped && messages[index + 1]?.kind === "assistant") return null;
+          return (
+            <li key={message.id} className={rowCls}>
+              <div className="max-w-[85%] text-base leading-6">
+                <BrandHeader />
+                <ReasoningBubble content={message.content} streaming={message.streaming} />
+                {followedByStopped && (
+                  <div className="mt-1.5 flex items-center gap-2 text-amber-600">
+                    <CirclePauseIcon />
+                    OpenTalos已停止 — 发送消息以继续
+                  </div>
+                )}
+              </div>
+            </li>
+          );
+        }
         if (message.kind === "stopped") {
-          // 紧跟 assistant（有内容流出后被停止）的提示已并入该回复块，这里不再单列；
-          // 仅立即停止（尚无内容流出）的孤立提示自成一行——那时它是唯一可见的响应块，带头
-          if (messages[index - 1]?.kind === "assistant") return null;
+          // 紧跟 assistant/reasoning（已有内容流出后被停止）的提示已并入该回复块，这里不再单列；
+          // 仅立即停止（毫无内容流出）的孤立提示自成一行——那时它是唯一可见的响应块，带头
+          const prevKind = messages[index - 1]?.kind;
+          if (prevKind === "assistant" || prevKind === "reasoning") return null;
           return (
             <li key={message.id} className={rowCls}>
               <div className="max-w-[85%] text-base leading-6">
@@ -185,6 +213,26 @@ export function MessageList({
           </li>
         );
       })}
+      {/* 等待占位：本轮已发出但思维链/正文都还没开始流——盖住请求→首个 SSE chunk 的空白 */}
+      {shouldShowThinkingHint(messages, busy) && (
+        <li className={rowCls}>
+          <div className="max-w-[85%] text-base leading-6">
+            <BrandHeader />
+            <div className="flex items-center gap-2 text-sm text-text-secondary">
+              <span className="flex items-center gap-1" aria-hidden>
+                {[0, 150, 300].map((ms) => (
+                  <span
+                    key={ms}
+                    className="h-1.5 w-1.5 animate-bounce rounded-full bg-text-secondary"
+                    style={{ animationDelay: `${ms}ms` }}
+                  />
+                ))}
+              </span>
+              正在思考…
+            </div>
+          </div>
+        </li>
+      )}
     </ol>
   );
 }
