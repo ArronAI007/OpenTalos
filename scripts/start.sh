@@ -1,70 +1,81 @@
 #!/usr/bin/env bash
 #
-# OpenTalos 一键启动（单一模式）：skill 服务 + 聊天 API + Web 前端。
-#   ./scripts/start.sh        拉起三个进程；Ctrl-C 全部停止
-#   已有健康（返回 {"status":"ok"}）的 skill/api 会被复用，不重复拉起。
-# 调试既有服务：先手动启动，再跑 ./scripts/start.sh 验证复用路径。
-# 脚本化停止请对脚本进程组发 TERM（kill -TERM -- -<PGID>）；交互 Ctrl-C 即发组信号，天然覆盖。
+# OpenTalos 一键启动（后台模式）：skill 服务 + 聊天 API + Web 前端。
+#   ./scripts/start.sh        拉起三个进程到后台（日志 .data/logs/，pid 记录 .data/pids/），
+#                             全部健康后打印地址并退出，终端立即归还
+#   ./scripts/stop.sh         停止本脚本拉起的进程（复用的外部进程不动）
+#   tail -f .data/logs/web.log  查看某一路日志
+# 已有健康（返回 {"status":"ok"}）的 skill/api（或首页可访问的 web）会被复用，不重复拉起，
+# 也不归 stop.sh 管理。
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 SKILL_URL="http://localhost:8321"
 API_URL="http://localhost:8400"
+WEB_PORT="${PORT:-3010}"
+LOG_DIR=".data/logs"
+PID_DIR=".data/pids"
+mkdir -p "$LOG_DIR" "$PID_DIR"
 
-# CORS 白名单默认跟随 web 端口（API 端按 Origin 精确匹配）：裸跑 ./scripts/start.sh 即自洽；
-# 需要别的来源时显式传 CORS_ORIGINS 覆盖。注意：若复用已在跑的旧 API 进程，CORS 以旧进程启动时的值为准。
-export CORS_ORIGINS="${CORS_ORIGINS:-http://localhost:${PORT:-3010}}"
+# CORS 白名单默认跟随 web 端口（API 端按 Origin 精确匹配）。注意：若复用已在跑的旧 API 进程，
+# CORS 以旧进程启动时的值为准。
+export CORS_ORIGINS="${CORS_ORIGINS:-http://localhost:${WEB_PORT}}"
 
-spawned_ports=()
-spawned_pids=()
-cleanup() {
-  trap - EXIT INT TERM
-  for pid in "${spawned_pids[@]:-}"; do
-    [ -n "$pid" ] || continue
-    kill -0 "$pid" 2>/dev/null && kill "$pid" 2>/dev/null || true
-  done
-  for port in "${spawned_ports[@]:-}"; do
-    [ -n "$port" ] || continue
-    pid="$(lsof -nP -iTCP:"$port" -sTCP:LISTEN -t | head -1 || true)"
-    [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
-  done
-}
-trap cleanup EXIT
-trap 'cleanup; exit 130' INT
-trap 'cleanup; exit 143' TERM
-
-ensure_service() {  # $1=名称 $2=端口 $3=健康检查 URL；后面是启动命令
-  local name="$1" port="$2" health_url="$3"
-  shift 3
+# 等待健康检查，就绪后把 pid/端口记录到 .data/pids/ 供 stop.sh 精确停止。
+ensure_service() {  # $1=名称 $2=端口 $3=日志文件 $4=健康检查 URL；后面是启动命令
+  local name="$1" port="$2" log_file="$3" health_url="$4"
+  shift 4
   if curl -sf "$health_url" 2>/dev/null | grep -q '"status":"ok"'; then
-    echo "$name already running on :$port — reusing it"
+    echo "$name already running on :$port — reusing it (not managed by stop.sh)"
     return 0
   fi
-  echo "starting $name on :$port ..."
-  "$@" &
-  local wrapper_pid=$!
-  spawned_pids+=("$wrapper_pid")
+  echo "starting $name on :$port ... (log: $log_file)"
+  "$@" >>"$log_file" 2>&1 &
+  local pid=$!
+  echo "$pid" > "$PID_DIR/$name.pid"
+  echo "$port" > "$PID_DIR/$name.port"
   local attempt
   for attempt in $(seq 1 60); do
     if curl -sf "$health_url" 2>/dev/null | grep -q '"status":"ok"'; then
-      spawned_ports+=("$port")
       echo "$name is up"
       return 0
     fi
-    kill -0 "$wrapper_pid" 2>/dev/null || { echo "error: $name exited during startup" >&2; exit 1; }
+    kill -0 "$pid" 2>/dev/null || { echo "error: $name died during startup — see $log_file" >&2; exit 1; }
     sleep 0.5
   done
-  echo "error: $name did not become healthy within 30s" >&2
+  echo "error: $name did not become healthy within 30s — see $log_file" >&2
   exit 1
 }
 
-ensure_service "skill service" 8321 "$SKILL_URL/health" \
+ensure_service "skill" 8321 "$LOG_DIR/skill.log" "$SKILL_URL/health" \
   env PYTHONPATH=packages uv run uvicorn skill.main:app --host 0.0.0.0 --port 8321
 
-ensure_service "chat API" 8400 "$API_URL/health" \
+ensure_service "api" 8400 "$LOG_DIR/api.log" "$API_URL/health" \
   env PYTHONPATH=packages uv run uvicorn main:app --app-dir apps/api --host 0.0.0.0 --port 8400
 
-echo "starting web frontend on :${PORT:-3010} ..."
-cd apps/web
-[ -d node_modules ] || pnpm install
-NEXT_PUBLIC_API_URL="$API_URL" pnpm dev -p "${PORT:-3010}"   # 前台不用 exec（exec 使 EXIT trap 失效）；-p 固定端口，被占即 fail-fast 防 CORS 漂移
+# web：next dev 无 /health，首页 200 即视为就绪；首次编译可能几十秒。
+if curl -sf "http://localhost:${WEB_PORT}" >/dev/null 2>&1; then
+  echo "web already running on :$WEB_PORT — reusing it (not managed by stop.sh)"
+else
+  [ -d apps/web/node_modules ] || (cd apps/web && pnpm install)
+  echo "starting web frontend on :$WEB_PORT ... (log: $LOG_DIR/web.log)"
+  # -p 固定端口，被占即 fail-fast；子 shell 整体后台，日志入文件
+  (cd apps/web && NEXT_PUBLIC_API_URL="$API_URL" pnpm dev -p "$WEB_PORT") >>"$LOG_DIR/web.log" 2>&1 &
+  echo $! > "$PID_DIR/web.pid"
+  echo "$WEB_PORT" > "$PID_DIR/web.port"
+  for attempt in $(seq 1 120); do
+    if curl -sf "http://localhost:${WEB_PORT}" >/dev/null 2>&1; then
+      echo "web is up"
+      break
+    fi
+    kill -0 "$(cat "$PID_DIR/web.pid")" 2>/dev/null || { echo "error: web died during startup — see $LOG_DIR/web.log" >&2; exit 1; }
+    sleep 0.5
+  done
+fi
+
+echo
+echo "OpenTalos is up:"
+echo "  web    http://localhost:$WEB_PORT"
+echo "  api    $API_URL"
+echo "  skill  $SKILL_URL"
+echo "logs: tail -f $LOG_DIR/{skill,api,web}.log    stop: ./scripts/stop.sh"
