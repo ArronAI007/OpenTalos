@@ -646,8 +646,8 @@ def test_ensure_skills_only_advertises_added_skills(store, scripted_client, tmp_
 
         async def list_skills(self):
             return [
-                SkillSummary(name="date", description="dates", added=True),
-                SkillSummary(name="csv-to-json", description="csv", added=False),
+                SkillSummary(name="date", description="dates", added=True, tags=[], usage_count=0),
+                SkillSummary(name="csv-to-json", description="csv", added=False, tags=[], usage_count=0),
             ]
 
     monkeypatch.setattr(runtime_module, "SkillClient", _FakeSkillClient)
@@ -689,7 +689,7 @@ def test_ensure_skills_refetches_for_each_new_task(store, scripted_client, tmp_p
         async def list_skills(self):
             nonlocal call_count
             call_count += 1
-            return [SkillSummary(name="date", description="dates", added=True)]
+            return [SkillSummary(name="date", description="dates", added=True, tags=[], usage_count=0)]
 
     monkeypatch.setattr(runtime_module, "SkillClient", _FakeSkillClient)
 
