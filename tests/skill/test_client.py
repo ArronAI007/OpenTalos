@@ -156,3 +156,27 @@ async def test_upload_skill_raises_with_the_service_detail_on_failure():
 
     with pytest.raises(SkillServiceError, match="没有 SKILL.md"):
         await _build_client(handler).upload_skill(b"fake zip bytes", "bad.zip")
+
+
+async def test_preview_skill_returns_full_detail():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/skills/date/detail"
+        return httpx.Response(200, json={
+            "name": "date", "description": "dates", "content": "# date\n\nusage...",
+            "tags": ["编程"], "usage_count": 3, "added": False, "updated_at": "2026-09-28T10:00:00",
+        })
+
+    detail = await _build_client(handler).preview_skill("date")
+
+    assert detail.name == "date"
+    assert detail.content == "# date\n\nusage..."
+    assert detail.added is False
+    assert detail.updated_at == "2026-09-28T10:00:00"
+
+
+async def test_preview_skill_raises_with_the_service_detail_on_failure():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"detail": 'Unknown skill "nope".'})
+
+    with pytest.raises(SkillServiceError, match='Unknown skill "nope"'):
+        await _build_client(handler).preview_skill("nope")
