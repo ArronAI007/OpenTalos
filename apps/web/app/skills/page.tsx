@@ -4,8 +4,8 @@ import { useEffect, useState } from "react";
 import { listSkills, addMySkill, removeMySkill, type SkillsResponse } from "@/lib/api";
 import { filterSkills, filterSkillsByCategory } from "@/lib/skills-filter";
 import { skillCardTint } from "@/lib/skills-color";
-import { CheckIcon, GithubIcon, PuzzleIcon, SearchIcon } from "@/components/ui/icons";
-import { GithubImportModal } from "@/components/skills/GithubImportModal";
+import { CheckIcon, PuzzleIcon, SearchIcon } from "@/components/ui/icons";
+import { CreateSkillMenu } from "@/components/skills/CreateSkillMenu";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { LogoMark } from "@/components/sidebar/Logo";
 
@@ -14,7 +14,6 @@ const CATEGORY_TABS = ["全部", "编程", "数据", "自动化", "商业", "设
 export default function SkillsPage() {
   const [payload, setPayload] = useState<SkillsResponse | null>(null);
   const [query, setQuery] = useState("");
-  const [importOpen, setImportOpen] = useState(false);
   const [myOnly, setMyOnly] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState("全部");
 
@@ -76,14 +75,7 @@ export default function SkillsPage() {
           >
             {myOnly ? "全部技能" : "我的技能"}
           </button>
-          <button
-            type="button"
-            onClick={() => setImportOpen(true)}
-            className="flex items-center gap-1.5 rounded-lg border border-border bg-white px-3 py-1.5 text-sm font-medium hover:bg-gray-50"
-          >
-            <GithubIcon width={16} height={16} />
-            从 GitHub 导入
-          </button>
+          <CreateSkillMenu onImported={refresh} />
         </div>
       </div>
 
@@ -168,8 +160,6 @@ export default function SkillsPage() {
           })}
         </ul>
       )}
-
-      <GithubImportModal open={importOpen} onClose={() => setImportOpen(false)} onImported={refresh} />
     </section>
   );
 }
