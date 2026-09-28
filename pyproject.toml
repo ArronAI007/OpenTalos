@@ -9,7 +9,6 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
     "tiktoken>=0.8",
-    "gradio>=5.0",
     "python-dotenv>=1.0",
 ]
 
