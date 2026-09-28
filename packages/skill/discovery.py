@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from pathlib import Path
 
+from .frontmatter import parse_frontmatter
+
 
 @dataclass
 class Skill:
@@ -11,8 +13,13 @@ class Skill:
 
 
 def _extract_description(content: str) -> str:
-    """取 SKILL.md 里第一个一级标题之后的第一行非空文本作为简短描述。"""
-    lines = content.splitlines()
+    """优先取 SKILL.md 开头 YAML frontmatter 里的 description 字段；没有 frontmatter 或没有
+    这个字段时，退回到取正文里第一个一级标题之后的第一行非空文本作为简短描述。"""
+    frontmatter, body = parse_frontmatter(content)
+    description = frontmatter.get("description")
+    if isinstance(description, str) and description.strip():
+        return description.strip()
+    lines = body.splitlines()
     for i, line in enumerate(lines):
         if line.startswith("# "):
             for next_line in lines[i + 1 :]:

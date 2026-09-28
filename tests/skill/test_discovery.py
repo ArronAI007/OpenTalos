@@ -45,3 +45,14 @@ def test_discover_skills_returns_the_full_skill_md_content(tmp_path: Path) -> No
 
 def test_discover_skills_returns_empty_list_for_a_nonexistent_directory(tmp_path: Path) -> None:
     assert discover_skills(tmp_path / "does-not-exist") == []
+
+
+def test_discover_skills_prefers_frontmatter_description_when_present(tmp_path: Path) -> None:
+    skill_dir = tmp_path / "alpha"
+    skill_dir.mkdir()
+    content = "---\nname: alpha\ndescription: From frontmatter.\n---\n# alpha\n\nFrom heading instead.\n"
+    (skill_dir / "SKILL.md").write_text(content, encoding="utf-8")
+
+    skills = discover_skills(tmp_path)
+
+    assert skills[0].description == "From frontmatter."
