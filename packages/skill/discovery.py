@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from .frontmatter import parse_frontmatter
@@ -10,6 +11,7 @@ class Skill:
     description: str
     content: str
     dir: Path
+    updated_at: str
 
 
 def _extract_description(content: str) -> str:
@@ -41,5 +43,9 @@ def discover_skills(skills_root: Path) -> list[Skill]:
         if not skill_md.is_file():
             continue
         content = skill_md.read_text(encoding="utf-8")
-        skills.append(Skill(name=entry.name, description=_extract_description(content), content=content, dir=entry))
+        updated_at = datetime.fromtimestamp(skill_md.stat().st_mtime).strftime("%Y-%m-%dT%H:%M:%S")
+        skills.append(Skill(
+            name=entry.name, description=_extract_description(content), content=content,
+            dir=entry, updated_at=updated_at,
+        ))
     return skills

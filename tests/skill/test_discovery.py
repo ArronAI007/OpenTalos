@@ -1,3 +1,5 @@
+import os
+from datetime import datetime
 from pathlib import Path
 
 from skill.discovery import discover_skills
@@ -56,3 +58,17 @@ def test_discover_skills_prefers_frontmatter_description_when_present(tmp_path: 
     skills = discover_skills(tmp_path)
 
     assert skills[0].description == "From frontmatter."
+
+
+def test_discover_skills_includes_updated_at_from_file_mtime(tmp_path: Path) -> None:
+    skill_dir = tmp_path / "alpha"
+    skill_dir.mkdir()
+    skill_md = skill_dir / "SKILL.md"
+    skill_md.write_text("# alpha\n\nDoes alpha things.\n", encoding="utf-8")
+    fixed_timestamp = 1700000000
+    os.utime(skill_md, (fixed_timestamp, fixed_timestamp))
+
+    skills = discover_skills(tmp_path)
+
+    expected = datetime.fromtimestamp(fixed_timestamp).strftime("%Y-%m-%dT%H:%M:%S")
+    assert skills[0].updated_at == expected
