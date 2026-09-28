@@ -1,7 +1,7 @@
 import httpx
 from pydantic import ValidationError
 
-from .models import SearchResponse
+from .models import ExtractResponse, SearchResponse
 
 DEFAULT_TIMEOUT_SECONDS = 30.0
 _BASE_URL = "https://api.tavily.com"
@@ -35,6 +35,13 @@ class TavilyClient:
             return SearchResponse.model_validate(data)
         except ValidationError as error:
             raise WebSearchServiceError(f"Unexpected search response shape: {error}") from error
+
+    async def extract(self, urls: list[str]) -> ExtractResponse:
+        data = await self._request("/extract", {"urls": urls})
+        try:
+            return ExtractResponse.model_validate(data)
+        except ValidationError as error:
+            raise WebSearchServiceError(f"Unexpected extract response shape: {error}") from error
 
     async def _request(self, path: str, json_body: dict) -> dict:
         try:

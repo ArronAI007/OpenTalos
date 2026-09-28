@@ -58,3 +58,47 @@ async def test_an_unreachable_service_raises_a_clear_error():
 
     with pytest.raises(WebSearchServiceError, match="unreachable"):
         await _build_client(handler).search("x")
+
+
+async def test_extract_returns_parsed_pages():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/extract"
+        assert json.loads(request.content) == {"urls": ["https://example.com/a"]}
+        return httpx.Response(
+            200,
+            json={
+                "results": [{"url": "https://example.com/a", "raw_content": "Full article text."}],
+                "failed_results": [],
+            },
+        )
+
+    response = await _build_client(handler).extract(["https://example.com/a"])
+
+    assert response.results[0].url == "https://example.com/a"
+    assert response.results[0].raw_content == "Full article text."
+    assert response.failed_results == []
+
+
+async def test_extract_reports_partial_failures_alongside_successes():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "results": [{"url": "https://example.com/ok", "raw_content": "ok content"}],
+                "failed_results": [{"url": "https://example.com/bad", "error": "Timeout while fetching."}],
+            },
+        )
+
+    response = await _build_client(handler).extract(["https://example.com/ok", "https://example.com/bad"])
+
+    assert len(response.results) == 1
+    assert len(response.failed_results) == 1
+    assert response.failed_results[0].error == "Timeout while fetching."
+
+
+async def test_extract_http_error_raises_service_error():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(432, json={"detail": {"error": "URL is not crawlable."}})
+
+    with pytest.raises(WebSearchServiceError, match="not crawlable"):
+        await _build_client(handler).extract(["https://example.com/blocked"])

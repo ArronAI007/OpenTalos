@@ -11,3 +11,18 @@ class SearchResult(BaseModel):
 class SearchResponse(BaseModel):
     query: str
     results: list[SearchResult]
+
+
+class ExtractedPage(BaseModel):
+    url: str
+    raw_content: str
+
+
+class FailedExtraction(BaseModel):
+    url: str
+    error: str
+
+
+class ExtractResponse(BaseModel):
+    results: list[ExtractedPage]
+    failed_results: list[FailedExtraction]
