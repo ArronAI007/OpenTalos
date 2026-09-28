@@ -133,6 +133,33 @@ def test_list_skills_reports_added_status(client: TestClient) -> None:
     assert skills["csv-to-json"] is True
 
 
+def test_add_my_skill_marks_it_added(client: TestClient) -> None:
+    # client fixture 给的是全新临时 MY_SKILLS_PATH，首次访问会自动把所有内置技能标成已添加——
+    # 先显式移除一次，才能真正验证 POST 让它从"未添加"变回"已添加"，而不是本来就是添加状态。
+    client.delete("/my-skills/date")
+
+    response = client.post("/my-skills/date")
+
+    assert response.status_code == 200
+    assert response.json() == {"added": True}
+    assert client.get("/skills/date").status_code == 200
+
+
+def test_add_my_skill_returns_404_for_an_unknown_skill(client: TestClient) -> None:
+    response = client.post("/my-skills/does-not-exist")
+
+    assert response.status_code == 404
+
+
+def test_remove_my_skill_is_idempotent(client: TestClient) -> None:
+    first = client.delete("/my-skills/date")
+    second = client.delete("/my-skills/date")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json() == {"added": False}
+
+
 def test_github_import_returns_imported_and_skipped_on_success(client: TestClient, monkeypatch) -> None:
     import skill.main as main_module
 

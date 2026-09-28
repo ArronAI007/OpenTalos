@@ -8,7 +8,7 @@ from fastapi import FastAPI, HTTPException
 from skill.discovery import discover_skills
 from skill.execution import PathValidationError, execute_script, resolve_interpreter, resolve_script_path
 from skill.github_import import GithubImportError, import_github_skills, scan_github_repo, validate_repo_url
-from skill.my_skills import load_my_skills
+from skill.my_skills import add_my_skill, load_my_skills, remove_my_skill
 from skill.models import (
     GithubImportRequest,
     GithubImportResponse,
@@ -116,3 +116,19 @@ async def import_github(request: GithubImportRequest) -> GithubImportResponse:
     except GithubImportError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
     return GithubImportResponse(imported=imported, skipped=skipped)
+
+
+@app.post("/my-skills/{name}")
+async def add_my_skill_route(name: str) -> dict:
+    all_names = [s.name for s in discover_skills(SKILLS_ROOT)]
+    added = add_my_skill(MY_SKILLS_PATH, all_names, name)
+    if not added:
+        raise HTTPException(status_code=404, detail=f'Unknown skill "{name}".')
+    return {"added": True}
+
+
+@app.delete("/my-skills/{name}")
+async def remove_my_skill_route(name: str) -> dict:
+    all_names = [s.name for s in discover_skills(SKILLS_ROOT)]
+    remove_my_skill(MY_SKILLS_PATH, all_names, name)
+    return {"added": False}
