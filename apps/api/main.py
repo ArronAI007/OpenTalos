@@ -230,6 +230,24 @@ def create_app(runtime: ChatRuntime | None = None) -> FastAPI:
         except SkillServiceError as error:
             raise HTTPException(502, str(error))
 
+    @app.post("/api/my-skills/{name}")
+    async def add_my_skill_route(name: str) -> dict:
+        from skill.client import SkillClient, SkillServiceError
+        try:
+            added = await SkillClient(runtime.skill_service_url).add_my_skill(name)
+            return {"added": added}
+        except SkillServiceError as error:
+            raise HTTPException(502, str(error))
+
+    @app.delete("/api/my-skills/{name}")
+    async def remove_my_skill_route(name: str) -> dict:
+        from skill.client import SkillClient, SkillServiceError
+        try:
+            added = await SkillClient(runtime.skill_service_url).remove_my_skill(name)
+            return {"added": added}
+        except SkillServiceError as error:
+            raise HTTPException(502, str(error))
+
     return app
 
 
