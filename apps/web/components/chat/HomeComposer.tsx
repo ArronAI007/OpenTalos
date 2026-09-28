@@ -1,17 +1,27 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Composer } from "./Composer";
 import { createTask } from "@/lib/api";
 import { readAgentType } from "@/lib/agent-type";
-import { stashPendingMessage } from "@/lib/pending-message";
+import { stashPendingMessage, takeHomeDraft } from "@/lib/pending-message";
 
 export function HomeComposer() {
   const router = useRouter();
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [focusNonce, setFocusNonce] = useState(0);
+
+  // 从技能详情弹窗的"推荐用法"点过来的草稿：挂载时取一次（take-once），聚焦到末尾方便直接编辑。
+  useEffect(() => {
+    const pending = takeHomeDraft();
+    if (pending === null) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDraft(pending);
+    setFocusNonce((n) => n + 1);
+  }, []);
 
   const handleSend = async (text: string) => {
     if (busy) return;
@@ -39,6 +49,7 @@ export function HomeComposer() {
         onChange={setDraft}
         onSend={(text) => void handleSend(text)}
         disabled={busy}
+        focusNonce={focusNonce}
       />
     </>
   );
