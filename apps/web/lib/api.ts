@@ -16,6 +16,9 @@ export interface Project { id: string; name: string; created_at: string }
 export interface StoredMessage { id: number; kind: "user" | "assistant" | "tool" | "stopped"; content: string; created_at: string }
 export interface AppConfig { model_name: string | null; agent_types: string[]; skills_reachable: boolean | null }
 export interface SkillsResponse { reachable: boolean; skills: { name: string; description: string }[]; error?: string }
+export interface SkillCandidate { relative_path: string; name: string; description: string }
+export interface GithubImportSkipped { name: string; reason: string }
+export interface GithubImportResult { imported: string[]; skipped: GithubImportSkipped[] }
 
 async function fetchJson<T>(input: string, init?: RequestInit): Promise<T> {
   const res = await fetch(input, init);
@@ -76,4 +79,33 @@ export async function createProject(name: string): Promise<Project> {
 }
 export async function listSkills(): Promise<SkillsResponse> {
   return fetchJson<SkillsResponse>(`${API_URL}/api/skills`, { cache: "no-store" });
+}
+
+// 这两个函数手动读一次非 2xx 响应体里的 detail 展示给用户（400/502 时比通用 fetchJson 的
+// "API 状态码 状态文本"更有用），不改 fetchJson 的通用行为，避免影响其他调用点。
+async function postJsonWithDetail<T>(url: string, body: unknown): Promise<T> {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    const detail = data && typeof data.detail === "string" ? data.detail : null;
+    throw new Error(detail ?? `请求失败（HTTP ${res.status}）`);
+  }
+  return res.json() as Promise<T>;
+}
+
+export async function scanGithubSkills(repoUrl: string): Promise<SkillCandidate[]> {
+  return postJsonWithDetail<{ candidates: SkillCandidate[] }>(`${API_URL}/api/skills/github/scan`, {
+    repo_url: repoUrl,
+  }).then((d) => d.candidates);
+}
+
+export async function importGithubSkills(repoUrl: string, relativePaths: string[]): Promise<GithubImportResult> {
+  return postJsonWithDetail<GithubImportResult>(`${API_URL}/api/skills/github/import`, {
+    repo_url: repoUrl,
+    relative_paths: relativePaths,
+  });
 }
