@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { listSkills, type SkillsResponse } from "@/lib/api";
+import { listSkills, addMySkill, removeMySkill, type SkillsResponse } from "@/lib/api";
 import { filterSkills } from "@/lib/skills-filter";
 import { skillCardTint } from "@/lib/skills-color";
-import { GithubIcon, PuzzleIcon, SearchIcon } from "@/components/ui/icons";
+import { CheckIcon, GithubIcon, PuzzleIcon, SearchIcon } from "@/components/ui/icons";
 import { GithubImportModal } from "@/components/skills/GithubImportModal";
+import { Tooltip } from "@/components/ui/Tooltip";
 
 const CATEGORY_TABS = ["全部", "编程", "数据", "自动化", "商业", "设计", "媒体", "内容"];
 
@@ -13,6 +14,7 @@ export default function SkillsPage() {
   const [payload, setPayload] = useState<SkillsResponse | null>(null);
   const [query, setQuery] = useState("");
   const [importOpen, setImportOpen] = useState(false);
+  const [myOnly, setMyOnly] = useState(false);
 
   const refresh = () => {
     listSkills()
@@ -34,20 +36,52 @@ export default function SkillsPage() {
     );
   }
 
-  const filtered = filterSkills(payload.skills, query);
+  const handleToggleAdded = async (name: string, currentlyAdded: boolean) => {
+    // 乐观更新：先翻转本地状态，请求失败再翻回去。
+    setPayload((prev) =>
+      prev
+        ? { ...prev, skills: prev.skills.map((s) => (s.name === name ? { ...s, added: !currentlyAdded } : s)) }
+        : prev
+    );
+    try {
+      if (currentlyAdded) {
+        await removeMySkill(name);
+      } else {
+        await addMySkill(name);
+      }
+    } catch {
+      setPayload((prev) =>
+        prev
+          ? { ...prev, skills: prev.skills.map((s) => (s.name === name ? { ...s, added: currentlyAdded } : s)) }
+          : prev
+      );
+    }
+  };
+
+  const searched = filterSkills(payload.skills, query);
+  const filtered = myOnly ? searched.filter((s) => s.added) : searched;
 
   return (
     <section className="p-6">
       <div className="mb-4 flex items-center justify-between">
         <h1 className="text-xl font-semibold">技能</h1>
-        <button
-          type="button"
-          onClick={() => setImportOpen(true)}
-          className="flex items-center gap-1.5 rounded-lg border border-border bg-white px-3 py-1.5 text-sm font-medium hover:bg-gray-50"
-        >
-          <GithubIcon width={16} height={16} />
-          从 GitHub 导入
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setMyOnly((v) => !v)}
+            className="rounded-lg border border-border bg-white px-3 py-1.5 text-sm font-medium hover:bg-gray-50"
+          >
+            {myOnly ? "全部技能" : "我的技能"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setImportOpen(true)}
+            className="flex items-center gap-1.5 rounded-lg border border-border bg-white px-3 py-1.5 text-sm font-medium hover:bg-gray-50"
+          >
+            <GithubIcon width={16} height={16} />
+            从 GitHub 导入
+          </button>
+        </div>
       </div>
 
       <div className="mb-4 flex items-center gap-2 rounded-lg border border-border bg-white px-3 py-2">
@@ -81,20 +115,32 @@ export default function SkillsPage() {
 
       {filtered.length === 0 ? (
         <p className="text-sm text-text-secondary">
-          {query.trim() === "" ? "还没有技能。" : "没有匹配的技能。"}
+          {myOnly ? "还没有添加任何技能。" : query.trim() === "" ? "还没有技能。" : "没有匹配的技能。"}
         </p>
       ) : (
         <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
           {filtered.map((skill) => {
             const tint = skillCardTint(skill.name);
             return (
-              <li key={skill.name} className="overflow-hidden rounded-xl border border-border bg-white">
+              <li key={skill.name} className="group relative overflow-hidden rounded-xl border border-border bg-white">
                 <div className={`flex h-24 items-center justify-center ${tint.bg}`}>
                   <PuzzleIcon width={32} height={32} className={tint.icon} />
                 </div>
                 <div className="p-3">
                   <p className="text-sm font-medium">{skill.name}</p>
                   <p className="mt-1 line-clamp-2 text-xs text-text-secondary">{skill.description}</p>
+                </div>
+                <div className="absolute bottom-3 right-3 opacity-0 transition-opacity group-hover:opacity-100">
+                  <Tooltip label={skill.added ? "从我的技能移除" : "添加到我的技能"}>
+                    <button
+                      type="button"
+                      aria-label={skill.added ? `从我的技能移除 ${skill.name}` : `添加 ${skill.name} 到我的技能`}
+                      onClick={() => void handleToggleAdded(skill.name, skill.added)}
+                      className="flex h-7 w-7 items-center justify-center rounded-lg border border-border bg-white text-lg leading-none text-text hover:bg-gray-50"
+                    >
+                      {skill.added ? <CheckIcon width={14} height={14} /> : "+"}
+                    </button>
+                  </Tooltip>
                 </div>
               </li>
             );

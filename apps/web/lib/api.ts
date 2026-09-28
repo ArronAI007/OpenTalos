@@ -15,7 +15,7 @@ export interface TaskPatch { title?: string; pinned?: boolean; starred?: boolean
 export interface Project { id: string; name: string; created_at: string }
 export interface StoredMessage { id: number; kind: "user" | "assistant" | "tool" | "stopped"; content: string; created_at: string }
 export interface AppConfig { model_name: string | null; agent_types: string[]; skills_reachable: boolean | null }
-export interface SkillsResponse { reachable: boolean; skills: { name: string; description: string }[]; error?: string }
+export interface SkillsResponse { reachable: boolean; skills: { name: string; description: string; added: boolean }[]; error?: string }
 export interface SkillCandidate { relative_path: string; name: string; description: string }
 export interface GithubImportSkipped { name: string; reason: string }
 export interface GithubImportResult { imported: string[]; skipped: GithubImportSkipped[] }
@@ -108,4 +108,14 @@ export async function importGithubSkills(repoUrl: string, relativePaths: string[
     repo_url: repoUrl,
     relative_paths: relativePaths,
   });
+}
+
+export async function addMySkill(name: string): Promise<void> {
+  const res = await fetch(`${API_URL}/api/my-skills/${encodeURIComponent(name)}`, { method: "POST" });
+  if (!res.ok) throw new Error(`API ${res.status} ${res.statusText}`);
+}
+
+export async function removeMySkill(name: string): Promise<void> {
+  const res = await fetch(`${API_URL}/api/my-skills/${encodeURIComponent(name)}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(`API ${res.status} ${res.statusText}`);
 }
