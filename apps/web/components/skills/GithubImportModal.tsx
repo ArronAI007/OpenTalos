@@ -118,8 +118,8 @@ export function GithubImportModal({ open, onClose, onImported }: GithubImportMod
 
         {step.kind === "input" && (
           <>
-            <h2 className="text-lg font-semibold">从 GitHub 导入</h2>
-            <p className="mt-1 text-sm text-text-secondary">直接从公开的 GitHub 仓库中导入技能。</p>
+            <h2 className="text-center text-lg font-semibold">从 GitHub 导入</h2>
+            <p className="mt-1 text-center text-sm text-text-secondary">直接从公开的 GitHub 仓库中导入技能。</p>
             <label className="mt-4 block text-xs font-medium text-text-secondary">URL</label>
             <input
               value={url}
