@@ -1,8 +1,17 @@
+import asyncio
 from pathlib import Path
 
 import pytest
 
-from skill.github_import import GithubImportError, import_selected, scan_repo, validate_repo_url
+from skill.github_import import (
+    GithubImportError,
+    clone_repo,
+    import_github_skills,
+    import_selected,
+    scan_github_repo,
+    scan_repo,
+    validate_repo_url,
+)
 
 
 def test_validate_repo_url_accepts_a_plain_repo_url():
@@ -116,3 +125,47 @@ def test_import_selected_handles_a_mix_of_success_and_conflict(tmp_path: Path):
 
     assert imported == ["alpha"]
     assert [s.name for s in skipped] == ["beta"]
+
+
+class _FakeProcess:
+    def __init__(self, returncode: int, stderr: bytes = b"") -> None:
+        self.returncode = returncode
+        self._stderr = stderr
+
+    async def communicate(self) -> tuple[bytes, bytes]:
+        return b"", self._stderr
+
+
+async def test_clone_repo_raises_a_clear_error_when_git_fails(monkeypatch, tmp_path: Path):
+    async def fake_create_subprocess_exec(*args, **kwargs):
+        return _FakeProcess(returncode=128, stderr=b"fatal: repository not found")
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+
+    with pytest.raises(GithubImportError, match="repository not found"):
+        await clone_repo("https://github.com/owner/does-not-exist", tmp_path / "dest")
+
+
+async def test_scan_github_repo_clones_then_scans(monkeypatch):
+    async def fake_clone_repo(repo_url: str, dest: Path) -> None:
+        _write_skill(dest, "skills/alpha", "# alpha\n\nAlpha thing.\n")
+
+    monkeypatch.setattr("skill.github_import.clone_repo", fake_clone_repo)
+
+    candidates = await scan_github_repo("https://github.com/owner/repo")
+
+    assert [c.name for c in candidates] == ["alpha"]
+
+
+async def test_import_github_skills_clones_then_imports(monkeypatch, tmp_path: Path):
+    async def fake_clone_repo(repo_url: str, dest: Path) -> None:
+        _write_skill(dest, "skills/alpha", "# alpha\n\nAlpha thing.\n")
+
+    monkeypatch.setattr("skill.github_import.clone_repo", fake_clone_repo)
+    skills_root = tmp_path / "skills_root"
+    skills_root.mkdir()
+
+    imported, skipped = await import_github_skills("https://github.com/owner/repo", ["skills/alpha"], skills_root)
+
+    assert imported == ["alpha"]
+    assert skipped == []

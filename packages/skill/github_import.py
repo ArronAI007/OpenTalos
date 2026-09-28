@@ -1,5 +1,7 @@
+import asyncio
 import re
 import shutil
+import tempfile
 from pathlib import Path
 
 from .discovery import _extract_description
@@ -54,3 +56,33 @@ def import_selected(
         shutil.copytree(source, destination)
         imported.append(name)
     return imported, skipped
+
+
+async def clone_repo(repo_url: str, dest: Path) -> None:
+    validate_repo_url(repo_url)
+    process = await asyncio.create_subprocess_exec(
+        "git", "clone", "--depth", "1", repo_url, str(dest),
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await process.communicate()
+    if process.returncode != 0:
+        raise GithubImportError(f"git clone 失败：{stderr.decode(errors='replace').strip()}")
+
+
+async def scan_github_repo(repo_url: str) -> list[GithubSkillCandidate]:
+    with tempfile.TemporaryDirectory() as tmp:
+        # .resolve()：macOS 的系统临时目录在 /var/... 下，是 /private/var/... 的符号链接。
+        # resolve_script_path 对 skill_dir 做纯文本前缀比对——不先解析这层符号链接，
+        # 之后 import_selected 里的路径校验会把合法路径误判成"跳出根目录"。
+        tmp_path = Path(tmp).resolve()
+        await clone_repo(repo_url, tmp_path)
+        return scan_repo(tmp_path)
+
+
+async def import_github_skills(
+    repo_url: str, relative_paths: list[str], skills_root: Path
+) -> tuple[list[str], list[GithubImportSkipped]]:
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp).resolve()  # 同上，避免符号链接导致路径前缀校验误判。
+        await clone_repo(repo_url, tmp_path)
+        return import_selected(tmp_path, relative_paths, skills_root)
