@@ -245,6 +245,26 @@ def test_get_skill_detail_works_even_when_not_added(client: TestClient) -> None:
     assert "updated_at" in body
 
 
+def test_get_skill_detail_strips_frontmatter_from_content(client: TestClient, monkeypatch, tmp_path) -> None:
+    import skill.main as main_module
+
+    skill_dir = tmp_path / "with-frontmatter"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: with-frontmatter\ndescription: Has frontmatter.\n---\n# with-frontmatter\n\nBody text.\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(main_module, "SKILLS_ROOT", tmp_path)
+
+    response = client.get("/skills/with-frontmatter/detail")
+
+    assert response.status_code == 200
+    content = response.json()["content"]
+    assert "---" not in content
+    assert "name: with-frontmatter" not in content
+    assert content.startswith("# with-frontmatter")
+
+
 def test_get_skill_detail_returns_404_for_an_unknown_skill(client: TestClient) -> None:
     response = client.get("/skills/does-not-exist/detail")
 

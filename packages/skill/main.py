@@ -7,6 +7,7 @@ from fastapi import FastAPI, HTTPException, UploadFile
 
 from skill.discovery import discover_skills
 from skill.execution import PathValidationError, execute_script, resolve_interpreter, resolve_script_path
+from skill.frontmatter import parse_frontmatter
 from skill.github_import import GithubImportError, import_github_skills, scan_github_repo, validate_repo_url
 from skill.my_skills import add_my_skill, load_my_skills, remove_my_skill
 from skill.skill_tags import load_tags
@@ -98,10 +99,13 @@ async def get_skill_detail(name: str) -> SkillPreview:
     my_skills = load_my_skills(MY_SKILLS_PATH, all_names)
     tags_by_name = load_tags(SKILL_TAGS_PATH)
     usage_by_name = load_usage(SKILL_USAGE_PATH)
+    # frontmatter 已经拆成了 description/tags 等结构化字段，正文预览不需要再带一遍——
+    # 而且裸 YAML frontmatter 直接喂给 Markdown 渲染器会被误判成分隔线+Setext 标题，很难看。
+    _, body = parse_frontmatter(skill.content)
     return SkillPreview(
         name=skill.name,
         description=skill.description,
-        content=skill.content,
+        content=body,
         tags=tags_by_name.get(skill.name, []),
         usage_count=usage_by_name.get(skill.name, 0),
         added=skill.name in my_skills,
