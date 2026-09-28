@@ -142,3 +142,25 @@ export async function uploadSkill(file: File): Promise<{ name: string }> {
   }
   return res.json();
 }
+
+export interface SkillDetail {
+  name: string;
+  description: string;
+  content: string;
+  tags: string[];
+  usage_count: number;
+  added: boolean;
+  updated_at: string;
+}
+
+export async function getSkillDetail(name: string): Promise<SkillDetail> {
+  return fetchJson<SkillDetail>(`${API_URL}/api/skills/${encodeURIComponent(name)}`, { cache: "no-store" });
+}
+
+export async function suggestSkillUsage(name: string, description: string): Promise<string[]> {
+  const data = await fetchJson<{ items: string[] }>(
+    `${API_URL}/api/skills/${encodeURIComponent(name)}/usage-examples`,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ description }) }
+  );
+  return data.items;
+}
