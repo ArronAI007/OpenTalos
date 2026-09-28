@@ -63,6 +63,14 @@ class SkillClient:
         data = await self._request("POST", f"/skills/{skill_name}/run-script", json=payload)
         return RunScriptResponse.model_validate(data)
 
+    async def add_my_skill(self, name: str) -> bool:
+        data = await self._request("POST", f"/my-skills/{name}")
+        return bool(data["added"])
+
+    async def remove_my_skill(self, name: str) -> bool:
+        data = await self._request("DELETE", f"/my-skills/{name}")
+        return bool(data["added"])
+
     async def scan_github(self, repo_url: str) -> list[GithubSkillCandidate]:
         data = await self._request("POST", "/github-import/scan", json={"repo_url": repo_url})
         return GithubScanResponse.model_validate(data).candidates

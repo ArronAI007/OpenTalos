@@ -93,6 +93,36 @@ async def test_scan_github_raises_with_the_service_detail_on_failure():
         await _build_client(handler).scan_github("garbage")
 
 
+async def test_add_my_skill_returns_true_on_success():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        assert request.url.path == "/my-skills/date"
+        return httpx.Response(200, json={"added": True})
+
+    result = await _build_client(handler).add_my_skill("date")
+
+    assert result is True
+
+
+async def test_add_my_skill_raises_with_the_service_detail_for_unknown_skills():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"detail": 'Unknown skill "nope".'})
+
+    with pytest.raises(SkillServiceError, match='Unknown skill "nope"'):
+        await _build_client(handler).add_my_skill("nope")
+
+
+async def test_remove_my_skill_returns_false():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "DELETE"
+        assert request.url.path == "/my-skills/date"
+        return httpx.Response(200, json={"added": False})
+
+    result = await _build_client(handler).remove_my_skill("date")
+
+    assert result is False
+
+
 async def test_import_github_returns_imported_and_skipped():
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/github-import/import"
