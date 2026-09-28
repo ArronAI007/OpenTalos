@@ -51,6 +51,10 @@ class GithubImportBody(BaseModel):
     relative_paths: list[str]
 
 
+class SkillUsageExamplesBody(BaseModel):
+    description: str
+
+
 # 任务的布尔 flag 字段：PATCH 端点按下表统一装配，新增 flag 只需在此处与模型各加一行。
 _FLAG_FIELDS = ("pinned", "starred", "archived")
 
@@ -266,6 +270,11 @@ def create_app(runtime: ChatRuntime | None = None) -> FastAPI:
             return detail.model_dump()
         except SkillServiceError as error:
             raise HTTPException(502, str(error))
+
+    @app.post("/api/skills/{name}/usage-examples")
+    async def suggest_skill_usage_route(name: str, request: SkillUsageExamplesBody) -> dict:
+        items = await runtime.suggest_skill_usage(name, request.description)
+        return {"items": items}
 
     return app
 

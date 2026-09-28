@@ -24,7 +24,7 @@ from websearch.client import TavilyClient
 from websearch.tools import WebExtractorTool, WebSearchTool
 
 from db import ChatStore
-from suggest import suggest_followups
+from suggest import suggest_followups, suggest_skill_usage_examples
 
 EventSink = Callable[[dict[str, Any]], Awaitable[None]]
 
@@ -135,6 +135,9 @@ class ChatRuntime:
         if self._model_client is None:
             self._model_client = ModelClient()
         return self._model_client
+
+    async def suggest_skill_usage(self, name: str, description: str) -> list[str]:
+        return await suggest_skill_usage_examples(self._client(), name, description)
 
     async def _ensure_skills(self) -> None:
         # 不做"只算一次"的永久缓存——只有这样，我的技能里添加/移除才能在下一个新建的 task 里

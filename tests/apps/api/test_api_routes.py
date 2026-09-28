@@ -406,3 +406,35 @@ async def test_delete_turn_evicts_cached_agent_so_next_reply_replays_trimmed_his
     assert "暗号是foo" not in transcript  # 被删轮次不复活
     assert "记录在案" not in transcript
     assert "暗号是什么" in transcript
+
+
+async def test_skill_usage_examples_route_returns_generated_items(tmp_path, scripted_client) -> None:
+    from core.protocol import Completion
+
+    client = scripted_client(
+        tool_completions=[ToolCompletion(text="pong", requested_tools=[], model_id="mock-model")],
+        completions=[Completion(text='["示例问题A", "示例问题B"]', model_id="mock-model")],
+    )
+    client.model_name = "mock-model"
+    runtime = ChatRuntime(
+        ChatStore(tmp_path / "chat.db"),
+        model_client=client,
+        skill_service_url="http://127.0.0.1:1",
+        trace_dir=tmp_path / "traces",
+    )
+    app = create_app(runtime)
+    api = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+
+    resp = await api.post("/api/skills/date/usage-examples", json={"description": "计算相对于今天的日期。"})
+
+    assert resp.status_code == 200
+    assert resp.json() == {"items": ["示例问题A", "示例问题B"]}
+
+
+async def test_skill_usage_examples_route_degrades_to_empty_on_model_failure(api) -> None:
+    # 复用共享 api fixture——它的 scripted_client 没有喂 completions 队列，
+    # acomplete 一旦被调用会因队列空而抛异常，验证的正是"降级为空列表"这条路径。
+    resp = await api.post("/api/skills/date/usage-examples", json={"description": "desc"})
+
+    assert resp.status_code == 200
+    assert resp.json() == {"items": []}
