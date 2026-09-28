@@ -232,6 +232,25 @@ def test_github_import_returns_imported_and_skipped_on_success(client: TestClien
     assert response.json() == {"imported": ["alpha"], "skipped": []}
 
 
+def test_get_skill_detail_works_even_when_not_added(client: TestClient) -> None:
+    client.delete("/my-skills/date")
+
+    response = client.get("/skills/date/detail")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["name"] == "date"
+    assert body["added"] is False
+    assert "content" in body
+    assert "updated_at" in body
+
+
+def test_get_skill_detail_returns_404_for_an_unknown_skill(client: TestClient) -> None:
+    response = client.get("/skills/does-not-exist/detail")
+
+    assert response.status_code == 404
+
+
 def test_skill_upload_returns_the_extracted_name_on_success(client: TestClient, monkeypatch) -> None:
     import skill.main as main_module
 

@@ -21,6 +21,7 @@ from skill.models import (
     RunScriptResponse,
     SkillDetailResponse,
     SkillListResponse,
+    SkillPreview,
     SkillSummary,
 )
 
@@ -84,6 +85,28 @@ async def get_skill(name: str) -> SkillDetailResponse:
     if name not in load_my_skills(MY_SKILLS_PATH, all_names):
         raise HTTPException(status_code=404, detail=f'Unknown skill "{name}".')
     return SkillDetailResponse(name=skill.name, content=skill.content)
+
+
+@app.get("/skills/{name}/detail", response_model=SkillPreview)
+async def get_skill_detail(name: str) -> SkillPreview:
+    """人工预览用——不像 get_skill 那样要求"已添加"。agent 侧调用权限（get_skill/run_script）
+    完全不受这条路由影响。"""
+    skill = _find_skill(name)
+    if skill is None:
+        raise HTTPException(status_code=404, detail=f'Unknown skill "{name}".')
+    all_names = [s.name for s in discover_skills(SKILLS_ROOT)]
+    my_skills = load_my_skills(MY_SKILLS_PATH, all_names)
+    tags_by_name = load_tags(SKILL_TAGS_PATH)
+    usage_by_name = load_usage(SKILL_USAGE_PATH)
+    return SkillPreview(
+        name=skill.name,
+        description=skill.description,
+        content=skill.content,
+        tags=tags_by_name.get(skill.name, []),
+        usage_count=usage_by_name.get(skill.name, 0),
+        added=skill.name in my_skills,
+        updated_at=skill.updated_at,
+    )
 
 
 @app.post("/skills/{name}/run-script", response_model=RunScriptResponse)

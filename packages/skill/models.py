@@ -73,3 +73,13 @@ class GithubImportRequest(BaseModel):
 class GithubImportResponse(BaseModel):
     imported: list[str]
     skipped: list[GithubImportSkipped]
+
+
+class SkillPreview(BaseModel):
+    name: str
+    description: str
+    content: str
+    tags: list[str]
+    usage_count: int
+    added: bool
+    updated_at: str
