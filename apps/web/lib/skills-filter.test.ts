@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { filterSkills } from "./skills-filter";
+import { filterSkills, filterSkillsByCategory } from "./skills-filter";
 
 interface Skill { name: string; description: string }
 
@@ -29,5 +29,32 @@ describe("filterSkills", () => {
 
   it("首尾空格不影响匹配", () => {
     expect(filterSkills(skills, "  date  ").map((s) => s.name)).toEqual(["date"]);
+  });
+});
+
+interface TaggedSkill { name: string; tags: string[] }
+
+describe("filterSkillsByCategory", () => {
+  const skills: TaggedSkill[] = [
+    { name: "date", tags: ["编程"] },
+    { name: "csv-to-json", tags: ["数据", "编程"] },
+    { name: "text-to-table", tags: ["数据"] },
+  ];
+
+  it("分类是全部时原样返回", () => {
+    expect(filterSkillsByCategory(skills, "全部")).toBe(skills);
+  });
+
+  it("按标签精确匹配", () => {
+    expect(filterSkillsByCategory(skills, "编程").map((s) => s.name)).toEqual(["date", "csv-to-json"]);
+  });
+
+  it("没有匹配返回空数组", () => {
+    expect(filterSkillsByCategory(skills, "设计")).toEqual([]);
+  });
+
+  it("没有标签的技能在任何具体分类下都不匹配", () => {
+    const untagged: TaggedSkill[] = [{ name: "alpha", tags: [] }];
+    expect(filterSkillsByCategory(untagged, "编程")).toEqual([]);
   });
 });
