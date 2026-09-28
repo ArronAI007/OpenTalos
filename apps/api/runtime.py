@@ -137,8 +137,8 @@ class ChatRuntime:
         return self._model_client
 
     async def _ensure_skills(self) -> None:
-        if self._skills_reachable is not None:
-            return
+        # 不做"只算一次"的永久缓存——只有这样，我的技能里添加/移除才能在下一个新建的 task 里
+        # 立刻生效，不用重启进程。_get_agent() 只在新建 agent 时才调用这里，不是每条消息都拉。
         try:
             client = SkillClient(self._skill_service_url)
             skills = await client.list_skills()
@@ -146,7 +146,8 @@ class ChatRuntime:
                 ReadSkillTool(SkillClient(self._skill_service_url)),
                 RunSkillScriptTool(SkillClient(self._skill_service_url)),
             ]
-            self._skills_suffix = format_skills_for_system_prompt(skills) or None
+            added_skills = [s for s in skills if s.added]
+            self._skills_suffix = format_skills_for_system_prompt(added_skills) or None
             self._skills_reachable = True
         except SkillServiceError:
             self._skills_suffix = None

@@ -634,3 +634,74 @@ def test_websearch_tools_registered_with_an_api_key(store, scripted_client, echo
     tool_names = [fn["function"]["name"] for tools in seen_tools for fn in tools]
     assert "web_search" in tool_names
     assert "web_extractor" in tool_names
+
+
+def test_ensure_skills_only_advertises_added_skills(store, scripted_client, tmp_path, monkeypatch) -> None:
+    import runtime as runtime_module
+    from skill.models import SkillSummary
+
+    class _FakeSkillClient:
+        def __init__(self, url: str) -> None:
+            pass
+
+        async def list_skills(self):
+            return [
+                SkillSummary(name="date", description="dates", added=True),
+                SkillSummary(name="csv-to-json", description="csv", added=False),
+            ]
+
+    monkeypatch.setattr(runtime_module, "SkillClient", _FakeSkillClient)
+
+    seen_messages: list[list[dict]] = []
+    client = scripted_client(tool_completions=[])
+
+    async def spy_astream_with_tools(messages, tools, on_text_delta=None, **kwargs):
+        seen_messages.append(list(messages))
+        completion = ToolCompletion(text="ok", requested_tools=[], model_id="mock-model")
+        if on_text_delta is not None:
+            for ch in completion.text:
+                await on_text_delta(ch)
+        return completion
+
+    client.astream_with_tools = spy_astream_with_tools  # type: ignore[method-assign]
+    runtime = _runtime(store, client, tmp_path)
+    task = store.create_task("toolcall")
+
+    asyncio.run(_collect(runtime, task["id"], "hello"))
+
+    system_text = "\n".join(
+        m["content"] for msgs in seen_messages for m in msgs if m["role"] == "system"
+    )
+    assert "<name>date</name>" in system_text
+    assert "<name>csv-to-json</name>" not in system_text
+
+
+def test_ensure_skills_refetches_for_each_new_task(store, scripted_client, tmp_path, monkeypatch) -> None:
+    import runtime as runtime_module
+    from skill.models import SkillSummary
+
+    call_count = 0
+
+    class _FakeSkillClient:
+        def __init__(self, url: str) -> None:
+            pass
+
+        async def list_skills(self):
+            nonlocal call_count
+            call_count += 1
+            return [SkillSummary(name="date", description="dates", added=True)]
+
+    monkeypatch.setattr(runtime_module, "SkillClient", _FakeSkillClient)
+
+    client = scripted_client(tool_completions=[
+        ToolCompletion(text="ok", requested_tools=[], model_id="mock-model"),
+        ToolCompletion(text="ok", requested_tools=[], model_id="mock-model"),
+    ])
+    runtime = _runtime(store, client, tmp_path)
+    task_a = store.create_task("toolcall")
+    task_b = store.create_task("toolcall")
+
+    asyncio.run(_collect(runtime, task_a["id"], "hi"))
+    asyncio.run(_collect(runtime, task_b["id"], "hi"))
+
+    assert call_count == 2
