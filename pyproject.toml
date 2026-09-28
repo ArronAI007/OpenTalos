@@ -10,6 +10,7 @@ dependencies = [
     "uvicorn[standard]>=0.32",
     "tiktoken>=0.8",
     "python-dotenv>=1.0",
+    "pyyaml>=6.0",
 ]
 
 [dependency-groups]

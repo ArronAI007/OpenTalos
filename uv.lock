@@ -497,6 +497,7 @@ dependencies = [
     { name = "openai" },
     { name = "pydantic" },
     { name = "python-dotenv" },
+    { name = "pyyaml" },
     { name = "tiktoken" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -515,6 +516,7 @@ requires-dist = [
     { name = "openai", specifier = ">=1.54" },
     { name = "pydantic", specifier = ">=2.9" },
     { name = "python-dotenv", specifier = ">=1.0" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "tiktoken", specifier = ">=0.8" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
 ]
