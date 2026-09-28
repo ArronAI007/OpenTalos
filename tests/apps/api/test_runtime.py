@@ -585,3 +585,52 @@ def test_rebuild_restores_summary_checkpoint_and_skips_folded(store, scripted_cl
     payload = json.dumps(messages, ensure_ascii=False)
     assert "近期问题 B" in payload and "新问题 C" in payload
     assert "早期问题 A" not in payload
+
+
+def test_websearch_tools_not_registered_without_an_api_key(store, scripted_client, echo_tool_registry, tmp_path) -> None:
+    seen_tools: list[list[dict]] = []
+    client = scripted_client(tool_completions=[])
+
+    async def spy_astream_with_tools(messages, tools, on_text_delta=None, **kwargs):
+        seen_tools.append(list(tools))
+        completion = ToolCompletion(text="ok", requested_tools=[], model_id="mock-model")
+        if on_text_delta is not None:
+            for ch in completion.text:
+                await on_text_delta(ch)
+        return completion
+
+    client.astream_with_tools = spy_astream_with_tools  # type: ignore[method-assign]
+    runtime = _runtime(store, client, tmp_path, tool_registry_factory=lambda: echo_tool_registry)
+    task = store.create_task("toolcall")
+
+    asyncio.run(_collect(runtime, task["id"], "search something"))
+
+    tool_names = [fn["function"]["name"] for tools in seen_tools for fn in tools]
+    assert "echo" in tool_names
+    assert "web_search" not in tool_names
+    assert "web_extractor" not in tool_names
+
+
+def test_websearch_tools_registered_with_an_api_key(store, scripted_client, echo_tool_registry, tmp_path) -> None:
+    seen_tools: list[list[dict]] = []
+    client = scripted_client(tool_completions=[])
+
+    async def spy_astream_with_tools(messages, tools, on_text_delta=None, **kwargs):
+        seen_tools.append(list(tools))
+        completion = ToolCompletion(text="ok", requested_tools=[], model_id="mock-model")
+        if on_text_delta is not None:
+            for ch in completion.text:
+                await on_text_delta(ch)
+        return completion
+
+    client.astream_with_tools = spy_astream_with_tools  # type: ignore[method-assign]
+    runtime = _runtime(
+        store, client, tmp_path, tool_registry_factory=lambda: echo_tool_registry, tavily_api_key="tvly-test"
+    )
+    task = store.create_task("toolcall")
+
+    asyncio.run(_collect(runtime, task["id"], "search something"))
+
+    tool_names = [fn["function"]["name"] for tools in seen_tools for fn in tools]
+    assert "web_search" in tool_names
+    assert "web_extractor" in tool_names

@@ -20,6 +20,8 @@ from skill.tools import ReadSkillTool, RunSkillScriptTool
 from tool.outcome import ToolOutcome
 from tool.registry import ToolRegistry
 from tool.tool import Tool
+from websearch.client import TavilyClient
+from websearch.tools import WebExtractorTool, WebSearchTool
 
 from db import ChatStore
 from suggest import suggest_followups
@@ -89,6 +91,7 @@ class ChatRuntime:
         *,
         model_client: ModelClient | None = None,
         skill_service_url: str = "http://localhost:8321",
+        tavily_api_key: str | None = None,
         trace_dir: Path | None = None,
         tool_registry_factory: Callable[[], ToolRegistry] | None = None,
         compaction_token_limit: int | None = None,
@@ -107,6 +110,10 @@ class ChatRuntime:
         self._skill_tools: list[Any] = []
         self._skills_suffix: str | None = None
         self._skills_reachable: bool | None = None
+        self._websearch_tools: list[Any] = []
+        if tavily_api_key:
+            _tavily_client = TavilyClient(tavily_api_key)
+            self._websearch_tools = [WebSearchTool(_tavily_client), WebExtractorTool(_tavily_client)]
 
     @property
     def store(self) -> ChatStore:
@@ -148,6 +155,8 @@ class ChatRuntime:
     def _build_registry(self, task_id: str) -> ToolRegistry | None:
         inner = self._tool_registry_factory() if self._tool_registry_factory else ToolRegistry()
         for tool in self._skill_tools:
+            inner.register(tool)
+        for tool in self._websearch_tools:
             inner.register(tool)
         if not inner.function_schemas():
             return None
