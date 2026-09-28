@@ -11,6 +11,7 @@ dependencies = [
     "tiktoken>=0.8",
     "python-dotenv>=1.0",
     "pyyaml>=6.0",
+    "python-multipart>=0.0.9",
 ]
 
 [dependency-groups]

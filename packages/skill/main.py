@@ -3,13 +3,14 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile
 
 from skill.discovery import discover_skills
 from skill.execution import PathValidationError, execute_script, resolve_interpreter, resolve_script_path
 from skill.github_import import GithubImportError, import_github_skills, scan_github_repo, validate_repo_url
 from skill.my_skills import add_my_skill, load_my_skills, remove_my_skill
 from skill.skill_tags import load_tags
+from skill.skill_upload import SkillUploadError, extract_uploaded_skill
 from skill.skill_usage import increment_usage, load_usage
 from skill.models import (
     GithubImportRequest,
@@ -149,3 +150,13 @@ async def remove_my_skill_route(name: str) -> dict:
     all_names = [s.name for s in discover_skills(SKILLS_ROOT)]
     remove_my_skill(MY_SKILLS_PATH, all_names, name)
     return {"added": False}
+
+
+@app.post("/skill-upload")
+async def upload_skill(file: UploadFile) -> dict:
+    content = await file.read()
+    try:
+        name = extract_uploaded_skill(content, SKILLS_ROOT)
+    except SkillUploadError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    return {"name": name}

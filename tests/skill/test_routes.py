@@ -230,3 +230,38 @@ def test_github_import_returns_imported_and_skipped_on_success(client: TestClien
     )
     assert response.status_code == 200
     assert response.json() == {"imported": ["alpha"], "skipped": []}
+
+
+def test_skill_upload_returns_the_extracted_name_on_success(client: TestClient, monkeypatch) -> None:
+    import skill.main as main_module
+
+    def fake_extract_uploaded_skill(file_bytes: bytes, skills_root):
+        return "my-skill"
+
+    monkeypatch.setattr(main_module, "extract_uploaded_skill", fake_extract_uploaded_skill)
+
+    response = client.post(
+        "/skill-upload",
+        files={"file": ("my-skill.zip", b"fake zip bytes", "application/zip")},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"name": "my-skill"}
+
+
+def test_skill_upload_returns_422_on_validation_failure(client: TestClient, monkeypatch) -> None:
+    import skill.main as main_module
+    from skill.skill_upload import SkillUploadError
+
+    def fake_extract_uploaded_skill(file_bytes: bytes, skills_root):
+        raise SkillUploadError("压缩包根目录下没有 SKILL.md。")
+
+    monkeypatch.setattr(main_module, "extract_uploaded_skill", fake_extract_uploaded_skill)
+
+    response = client.post(
+        "/skill-upload",
+        files={"file": ("bad.zip", b"fake zip bytes", "application/zip")},
+    )
+
+    assert response.status_code == 422
+    assert "SKILL.md" in response.json()["detail"]
