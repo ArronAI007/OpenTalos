@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 from core.protocol import Completion
-from suggest import _parse_items, suggest_followups
+from suggest import _parse_items, suggest_followups, suggest_skill_usage_examples
 
 
 def _history(*contents: str) -> list[dict[str, Any]]:
@@ -96,3 +96,31 @@ class TestSuggestFollowups:
         assert "第2轮问" in user_prompt
         assert ("长" * 500) in user_prompt
         assert ("长" * 501) not in user_prompt  # 单行内容截断 500 字符
+
+
+class TestSuggestSkillUsageExamples:
+    def test_returns_items_on_success(self, scripted_client) -> None:
+        client = scripted_client(completions=[
+            Completion(text='["帮我算一下今天是几号", "下周三是几号"]', model_id="mock-model"),
+        ])
+        items = asyncio.run(suggest_skill_usage_examples(client, "date", "计算相对于今天的日期。"))
+        assert items == ["帮我算一下今天是几号", "下周三是几号"]
+
+    def test_model_error_degrades_to_empty(self, scripted_client) -> None:
+        client = scripted_client()
+
+        async def raising(_messages: list[dict[str, Any]], **_kwargs: Any) -> Completion:
+            raise RuntimeError("model down")
+
+        client.acomplete = raising  # type: ignore[method-assign]
+        assert asyncio.run(suggest_skill_usage_examples(client, "date", "desc")) == []
+
+    def test_timeout_degrades_to_empty(self, scripted_client) -> None:
+        client = scripted_client()
+
+        async def slow(_messages: list[dict[str, Any]], **_kwargs: Any) -> Completion:
+            await asyncio.sleep(0.3)
+            return Completion(text='["x"]', model_id="mock-model")
+
+        client.acomplete = slow  # type: ignore[method-assign]
+        assert asyncio.run(suggest_skill_usage_examples(client, "date", "desc", timeout=0.05)) == []

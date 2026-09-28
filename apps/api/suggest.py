@@ -66,3 +66,33 @@ async def suggest_followups(
     except Exception:  # noqa: BLE001 - 推荐失败静默降级，绝不影响已完成的回复
         return []
     return _parse_items(completion.text)
+
+
+_SKILL_USAGE_TIMEOUT_S = 15.0
+_SKILL_USAGE_SYSTEM = (
+    "你是 OpenTalos 的技能推荐助手。给定一个技能的名称和描述，生成 3 个用户可能会问的、"
+    "能够用上这个技能的具体请求示例。每个示例是一句自然的中文用户提问或指令，不要解释，"
+    "只返回 JSON 字符串数组。"
+)
+
+
+async def suggest_skill_usage_examples(
+    client: ModelClient,
+    skill_name: str,
+    skill_description: str,
+    *,
+    timeout: float = _SKILL_USAGE_TIMEOUT_S,
+) -> list[str]:
+    """给技能详情弹窗用的"推荐用法"示例——纯装饰性内容，失败静默为空，不影响弹窗其余部分。"""
+    prompt = f"技能名称：{skill_name}\n技能描述：{skill_description}"
+    try:
+        completion = await asyncio.wait_for(
+            client.acomplete([
+                {"role": "system", "content": _SKILL_USAGE_SYSTEM},
+                {"role": "user", "content": prompt},
+            ]),
+            timeout=timeout,
+        )
+    except Exception:  # noqa: BLE001 - 和 suggest_followups 同样的静默降级哲学
+        return []
+    return _parse_items(completion.text)
