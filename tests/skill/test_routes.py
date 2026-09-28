@@ -160,6 +160,25 @@ def test_remove_my_skill_is_idempotent(client: TestClient) -> None:
     assert first.json() == {"added": False}
 
 
+def test_get_skill_returns_404_when_not_added(client: TestClient) -> None:
+    client.delete("/my-skills/date")
+
+    response = client.get("/skills/date")
+
+    assert response.status_code == 404
+
+
+def test_run_script_returns_422_when_not_added(client: TestClient) -> None:
+    client.delete("/my-skills/csv-to-json")
+
+    response = client.post(
+        "/skills/csv-to-json/run-script",
+        json={"script_relative_path": "convert.py", "args": [], "input_text": "a,b\n1,2\n"},
+    )
+
+    assert response.status_code == 422
+
+
 def test_github_import_returns_imported_and_skipped_on_success(client: TestClient, monkeypatch) -> None:
     import skill.main as main_module
 

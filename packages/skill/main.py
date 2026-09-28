@@ -69,6 +69,9 @@ async def get_skill(name: str) -> SkillDetailResponse:
     skill = _find_skill(name)
     if skill is None:
         raise HTTPException(status_code=404, detail=f'Unknown skill "{name}".')
+    all_names = [s.name for s in discover_skills(SKILLS_ROOT)]
+    if name not in load_my_skills(MY_SKILLS_PATH, all_names):
+        raise HTTPException(status_code=404, detail=f'Unknown skill "{name}".')
     return SkillDetailResponse(name=skill.name, content=skill.content)
 
 
@@ -76,6 +79,9 @@ async def get_skill(name: str) -> SkillDetailResponse:
 async def run_script(name: str, request: RunScriptRequest) -> RunScriptResponse:
     skill = _find_skill(name)
     if skill is None:
+        raise HTTPException(status_code=422, detail=f'Unknown skill "{name}".')
+    all_names = [s.name for s in discover_skills(SKILLS_ROOT)]
+    if name not in load_my_skills(MY_SKILLS_PATH, all_names):
         raise HTTPException(status_code=422, detail=f'Unknown skill "{name}".')
 
     try:
