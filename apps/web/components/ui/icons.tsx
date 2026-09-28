@@ -236,3 +236,13 @@ export function GithubIcon(props: IconProps) {
     </Icon>
   );
 }
+
+export function UploadIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M12 3v12" />
+      <path d="m7 8 5-5 5 5" />
+      <path d="M5 21h14" />
+    </Icon>
+  );
+}

@@ -123,3 +123,15 @@ export async function removeMySkill(name: string): Promise<void> {
   const res = await fetch(`${API_URL}/api/my-skills/${encodeURIComponent(name)}`, { method: "DELETE" });
   if (!res.ok) throw new Error(`API ${res.status} ${res.statusText}`);
 }
+
+export async function uploadSkill(file: File): Promise<{ name: string }> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await fetch(`${API_URL}/api/skill-upload`, { method: "POST", body: formData });
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    const detail = data && typeof data.detail === "string" ? data.detail : null;
+    throw new Error(detail ?? `请求失败（HTTP ${res.status}）`);
+  }
+  return res.json();
+}
