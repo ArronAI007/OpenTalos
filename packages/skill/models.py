@@ -41,3 +41,14 @@ class SkillListResponse(BaseModel):
 class SkillDetailResponse(BaseModel):
     name: str
     content: str
+
+
+class GithubSkillCandidate(BaseModel):
+    relative_path: str
+    name: str
+    description: str
+
+
+class GithubImportSkipped(BaseModel):
+    name: str
+    reason: str
