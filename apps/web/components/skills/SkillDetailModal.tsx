@@ -6,7 +6,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { getSkillDetail, suggestSkillUsage, type SkillSummary } from "@/lib/api";
 import { stashHomeDraft } from "@/lib/pending-message";
-import { CheckIcon, MessageCircleIcon } from "@/components/ui/icons";
+import { CheckIcon, FileTextIcon, MessageCircleIcon } from "@/components/ui/icons";
 import { LogoMark } from "@/components/sidebar/Logo";
 
 interface SkillDetailModalProps {
@@ -21,6 +21,7 @@ export function SkillDetailModal({ open, onClose, skill, onToggleAdded }: SkillD
   const [content, setContent] = useState<string | null>(null);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [examples, setExamples] = useState<string[] | null>(null);
+  const [contentOpen, setContentOpen] = useState(false);
   const requestedForRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -30,6 +31,7 @@ export function SkillDetailModal({ open, onClose, skill, onToggleAdded }: SkillD
     setContent(null);
     setUpdatedAt(null);
     setExamples(null);
+    setContentOpen(false);
 
     getSkillDetail(skill.name)
       .then((detail) => {
@@ -50,11 +52,16 @@ export function SkillDetailModal({ open, onClose, skill, onToggleAdded }: SkillD
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.isComposing) return;
-      if (e.key === "Escape") onClose();
+      if (e.key !== "Escape") return;
+      if (contentOpen) {
+        setContentOpen(false);
+      } else {
+        onClose();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  }, [open, onClose, contentOpen]);
 
   if (!open) return null;
 
@@ -102,26 +109,26 @@ export function SkillDetailModal({ open, onClose, skill, onToggleAdded }: SkillD
           <span>已使用 {skill.usage_count} 次</span>
         </div>
 
-        <button
-          type="button"
-          onClick={() => void onToggleAdded(skill.name, skill.added)}
-          className="mt-4 flex items-center gap-1.5 rounded-lg bg-text px-3 py-1.5 text-sm font-medium text-white"
-        >
-          {skill.added ? <CheckIcon width={14} height={14} /> : "+"}
-          {skill.added ? "已添加到我的技能" : "添加到我的技能"}
-        </button>
-
-        <p className="mt-4 text-sm text-text-secondary">{skill.description}</p>
-
-        <div className="mt-4 border-t border-border pt-4">
-          {content === null ? (
-            <p className="text-sm text-text-secondary">加载中…</p>
-          ) : (
-            <div className="md">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
-            </div>
-          )}
+        <div className="mt-4 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void onToggleAdded(skill.name, skill.added)}
+            className="flex items-center gap-1.5 rounded-lg bg-text px-3 py-1.5 text-sm font-medium text-white"
+          >
+            {skill.added ? <CheckIcon width={14} height={14} /> : "+"}
+            {skill.added ? "已添加到我的技能" : "添加到我的技能"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setContentOpen(true)}
+            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm font-medium hover:bg-gray-50"
+          >
+            <FileTextIcon width={16} height={16} />
+            查看详情
+          </button>
         </div>
+
+        <p className="mt-4 border-t border-border pt-4 text-sm text-text-secondary">{skill.description}</p>
 
         {examples === null ? null : examples.length === 0 ? null : (
           <div className="mt-4 space-y-2">
@@ -140,6 +147,37 @@ export function SkillDetailModal({ open, onClose, skill, onToggleAdded }: SkillD
           </div>
         )}
       </div>
+
+      {contentOpen && (
+        <div className="fixed inset-0 z-[60] flex items-start justify-center overflow-y-auto px-4">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setContentOpen(false)} aria-hidden="true" />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={`${skill.name} 详情`}
+            className="relative z-10 mt-[8vh] w-full max-w-2xl rounded-2xl bg-white p-6 shadow-2xl"
+          >
+            <button
+              type="button"
+              aria-label="关闭"
+              onClick={() => setContentOpen(false)}
+              className="absolute right-4 top-4 text-text-secondary hover:text-text"
+            >
+              ✕
+            </button>
+            <h2 className="text-lg font-semibold">{skill.name}</h2>
+            <div className="mt-4 border-t border-border pt-4">
+              {content === null ? (
+                <p className="text-sm text-text-secondary">加载中…</p>
+              ) : (
+                <div className="md">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
