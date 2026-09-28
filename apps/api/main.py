@@ -4,7 +4,7 @@ import os
 import sys
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -245,6 +245,16 @@ def create_app(runtime: ChatRuntime | None = None) -> FastAPI:
         try:
             added = await SkillClient(runtime.skill_service_url).remove_my_skill(name)
             return {"added": added}
+        except SkillServiceError as error:
+            raise HTTPException(502, str(error))
+
+    @app.post("/api/skill-upload")
+    async def upload_skill_route(file: UploadFile) -> dict:
+        from skill.client import SkillClient, SkillServiceError
+        content = await file.read()
+        try:
+            name = await SkillClient(runtime.skill_service_url).upload_skill(content, file.filename or "skill.zip")
+            return {"name": name}
         except SkillServiceError as error:
             raise HTTPException(502, str(error))
 
