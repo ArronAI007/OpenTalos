@@ -122,7 +122,7 @@ export default function SkillsPage() {
           {filtered.map((skill) => {
             const tint = skillCardTint(skill.name);
             return (
-              <li key={skill.name} className="group relative overflow-hidden rounded-xl border border-border bg-white">
+              <li key={skill.name} className="group overflow-hidden rounded-xl border border-border bg-white">
                 <div className={`flex h-24 items-center justify-center ${tint.bg}`}>
                   <PuzzleIcon width={32} height={32} className={tint.icon} />
                 </div>
@@ -130,7 +130,7 @@ export default function SkillsPage() {
                   <p className="text-sm font-medium">{skill.name}</p>
                   <p className="mt-1 line-clamp-2 text-xs text-text-secondary">{skill.description}</p>
                 </div>
-                <div className="absolute bottom-3 right-3 opacity-0 transition-opacity group-hover:opacity-100">
+                <div className="flex justify-center border-t border-border py-1.5 opacity-0 transition-opacity group-hover:opacity-100">
                   <Tooltip label={skill.added ? "从我的技能移除" : "添加到我的技能"}>
                     <button
                       type="button"
