@@ -7,7 +7,12 @@ from fastapi import FastAPI, HTTPException
 
 from skill.discovery import discover_skills
 from skill.execution import PathValidationError, execute_script, resolve_interpreter, resolve_script_path
+from skill.github_import import GithubImportError, import_github_skills, scan_github_repo, validate_repo_url
 from skill.models import (
+    GithubImportRequest,
+    GithubImportResponse,
+    GithubScanRequest,
+    GithubScanResponse,
     RunScriptRequest,
     RunScriptResponse,
     SkillDetailResponse,
@@ -80,3 +85,29 @@ async def run_script(name: str, request: RunScriptRequest) -> RunScriptResponse:
     return RunScriptResponse(
         stdout=result.stdout, stderr=result.stderr, exit_code=result.exit_code, timed_out=result.timed_out
     )
+
+
+@app.post("/github-import/scan", response_model=GithubScanResponse)
+async def scan_github(request: GithubScanRequest) -> GithubScanResponse:
+    try:
+        validate_repo_url(request.repo_url)
+    except GithubImportError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    try:
+        candidates = await scan_github_repo(request.repo_url)
+    except GithubImportError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    return GithubScanResponse(candidates=candidates)
+
+
+@app.post("/github-import/import", response_model=GithubImportResponse)
+async def import_github(request: GithubImportRequest) -> GithubImportResponse:
+    try:
+        validate_repo_url(request.repo_url)
+    except GithubImportError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    try:
+        imported, skipped = await import_github_skills(request.repo_url, request.relative_paths, SKILLS_ROOT)
+    except GithubImportError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    return GithubImportResponse(imported=imported, skipped=skipped)

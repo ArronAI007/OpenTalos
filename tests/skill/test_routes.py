@@ -79,3 +79,59 @@ def test_run_script_rejects_oversized_input_text(client: TestClient) -> None:
     )
     assert response.status_code == 422
     assert "too large" in response.text
+
+
+def test_github_scan_rejects_an_invalid_repo_url(client: TestClient) -> None:
+    response = client.post("/github-import/scan", json={"repo_url": "not-a-url"})
+    assert response.status_code == 400
+
+
+def test_github_scan_returns_502_when_clone_fails(client: TestClient, monkeypatch) -> None:
+    import skill.main as main_module
+
+    async def fake_scan_github_repo(repo_url: str):
+        from skill.github_import import GithubImportError
+        raise GithubImportError("git clone 失败：boom")
+
+    monkeypatch.setattr(main_module, "scan_github_repo", fake_scan_github_repo)
+
+    response = client.post("/github-import/scan", json={"repo_url": "https://github.com/owner/repo"})
+    assert response.status_code == 502
+    assert "boom" in response.json()["detail"]
+
+
+def test_github_scan_returns_candidates_on_success(client: TestClient, monkeypatch) -> None:
+    import skill.main as main_module
+    from skill.models import GithubSkillCandidate
+
+    async def fake_scan_github_repo(repo_url: str):
+        return [GithubSkillCandidate(relative_path="skills/alpha", name="alpha", description="Alpha thing.")]
+
+    monkeypatch.setattr(main_module, "scan_github_repo", fake_scan_github_repo)
+
+    response = client.post("/github-import/scan", json={"repo_url": "https://github.com/owner/repo"})
+    assert response.status_code == 200
+    assert response.json()["candidates"] == [
+        {"relative_path": "skills/alpha", "name": "alpha", "description": "Alpha thing."}
+    ]
+
+
+def test_github_import_rejects_an_invalid_repo_url(client: TestClient) -> None:
+    response = client.post("/github-import/import", json={"repo_url": "not-a-url", "relative_paths": []})
+    assert response.status_code == 400
+
+
+def test_github_import_returns_imported_and_skipped_on_success(client: TestClient, monkeypatch) -> None:
+    import skill.main as main_module
+
+    async def fake_import_github_skills(repo_url: str, relative_paths: list[str], skills_root):
+        return ["alpha"], []
+
+    monkeypatch.setattr(main_module, "import_github_skills", fake_import_github_skills)
+
+    response = client.post(
+        "/github-import/import",
+        json={"repo_url": "https://github.com/owner/repo", "relative_paths": ["skills/alpha"]},
+    )
+    assert response.status_code == 200
+    assert response.json() == {"imported": ["alpha"], "skipped": []}
