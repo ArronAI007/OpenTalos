@@ -6,7 +6,6 @@ import { filterSkills } from "@/lib/skills-filter";
 import { skillCardTint } from "@/lib/skills-color";
 import { CheckIcon, GithubIcon, PuzzleIcon, SearchIcon } from "@/components/ui/icons";
 import { GithubImportModal } from "@/components/skills/GithubImportModal";
-import { Tooltip } from "@/components/ui/Tooltip";
 
 const CATEGORY_TABS = ["全部", "编程", "数据", "自动化", "商业", "设计", "媒体", "内容"];
 
@@ -122,26 +121,31 @@ export default function SkillsPage() {
           {filtered.map((skill) => {
             const tint = skillCardTint(skill.name);
             return (
-              <li key={skill.name} className="group overflow-hidden rounded-xl border border-border bg-white">
-                <div className={`flex h-24 items-center justify-center ${tint.bg}`}>
+              <li key={skill.name} className="group relative rounded-xl border border-border bg-white">
+                <div className={`flex h-24 items-center justify-center overflow-hidden rounded-t-xl ${tint.bg}`}>
                   <PuzzleIcon width={32} height={32} className={tint.icon} />
                 </div>
                 <div className="p-3">
                   <p className="text-sm font-medium">{skill.name}</p>
                   <p className="mt-1 line-clamp-2 text-xs text-text-secondary">{skill.description}</p>
                 </div>
-                <div className="flex justify-center border-t border-border py-1.5 opacity-0 transition-opacity group-hover:opacity-100">
-                  <Tooltip label={skill.added ? "从我的技能移除" : "添加到我的技能"}>
-                    <button
-                      type="button"
-                      aria-label={skill.added ? `从我的技能移除 ${skill.name}` : `添加 ${skill.name} 到我的技能`}
-                      onClick={() => void handleToggleAdded(skill.name, skill.added)}
-                      className="flex h-7 w-7 items-center justify-center rounded-lg border border-border bg-white text-lg leading-none text-text hover:bg-gray-50"
-                    >
-                      {skill.added ? <CheckIcon width={14} height={14} /> : "+"}
-                    </button>
-                  </Tooltip>
-                </div>
+
+                {/* tooltip 相对整张卡片居中，而不是相对按钮居中——按钮贴在右下角，
+                    如果 tooltip 跟着按钮居中会贴着卡片右边缘，容易被右侧相邻卡片盖住。 */}
+                <span
+                  role="tooltip"
+                  className="pointer-events-none absolute bottom-12 left-1/2 z-20 -translate-x-1/2 whitespace-nowrap rounded-md bg-text px-1.5 py-0.5 text-xs text-surface opacity-0 shadow-md transition-opacity duration-150 group-hover:opacity-100"
+                >
+                  {skill.added ? "从我的技能移除" : "添加到我的技能"}
+                </span>
+                <button
+                  type="button"
+                  aria-label={skill.added ? `从我的技能移除 ${skill.name}` : `添加 ${skill.name} 到我的技能`}
+                  onClick={() => void handleToggleAdded(skill.name, skill.added)}
+                  className="absolute bottom-3 right-3 flex h-7 w-7 items-center justify-center rounded-lg border border-border bg-white text-lg leading-none text-text opacity-0 transition-opacity hover:bg-gray-50 group-hover:opacity-100"
+                >
+                  {skill.added ? <CheckIcon width={14} height={14} /> : "+"}
+                </button>
               </li>
             );
           })}
