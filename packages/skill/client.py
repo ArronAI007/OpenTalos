@@ -1,7 +1,14 @@
 import httpx
 from pydantic import ValidationError
 
-from .models import RunScriptRequest, RunScriptResponse, SkillSummary
+from .models import (
+    GithubImportResponse,
+    GithubScanResponse,
+    GithubSkillCandidate,
+    RunScriptRequest,
+    RunScriptResponse,
+    SkillSummary,
+)
 
 DEFAULT_TIMEOUT_SECONDS = 60.0
 
@@ -55,6 +62,17 @@ class SkillClient:
             raise SkillServiceError(str(error)) from error
         data = await self._request("POST", f"/skills/{skill_name}/run-script", json=payload)
         return RunScriptResponse.model_validate(data)
+
+    async def scan_github(self, repo_url: str) -> list[GithubSkillCandidate]:
+        data = await self._request("POST", "/github-import/scan", json={"repo_url": repo_url})
+        return GithubScanResponse.model_validate(data).candidates
+
+    async def import_github(self, repo_url: str, relative_paths: list[str]) -> GithubImportResponse:
+        data = await self._request(
+            "POST", "/github-import/import",
+            json={"repo_url": repo_url, "relative_paths": relative_paths},
+        )
+        return GithubImportResponse.model_validate(data)
 
     async def _request(self, method: str, path: str, **kwargs: object) -> dict:
         try:

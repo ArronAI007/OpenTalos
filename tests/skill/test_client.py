@@ -70,3 +70,38 @@ async def test_an_unreachable_service_raises_a_clear_error():
 
     with pytest.raises(SkillServiceError, match="unreachable"):
         await _build_client(handler).list_skills()
+
+
+async def test_scan_github_returns_candidates():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/github-import/scan"
+        assert json.loads(request.content) == {"repo_url": "https://github.com/owner/repo"}
+        return httpx.Response(200, json={
+            "candidates": [{"relative_path": "skills/alpha", "name": "alpha", "description": "Alpha thing."}]
+        })
+
+    candidates = await _build_client(handler).scan_github("https://github.com/owner/repo")
+
+    assert candidates[0].name == "alpha"
+
+
+async def test_scan_github_raises_with_the_service_detail_on_failure():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, json={"detail": "不是一个合法的 GitHub 仓库 URL"})
+
+    with pytest.raises(SkillServiceError, match="不是一个合法的 GitHub 仓库 URL"):
+        await _build_client(handler).scan_github("garbage")
+
+
+async def test_import_github_returns_imported_and_skipped():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/github-import/import"
+        assert json.loads(request.content) == {
+            "repo_url": "https://github.com/owner/repo", "relative_paths": ["skills/alpha"]
+        }
+        return httpx.Response(200, json={"imported": ["alpha"], "skipped": []})
+
+    result = await _build_client(handler).import_github("https://github.com/owner/repo", ["skills/alpha"])
+
+    assert result.imported == ["alpha"]
+    assert result.skipped == []
