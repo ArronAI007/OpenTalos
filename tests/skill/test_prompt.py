@@ -8,8 +8,8 @@ def test_empty_skill_list_renders_nothing():
 
 def test_renders_available_skills_block_with_names_and_descriptions():
     skills = [
-        SkillSummary(name="date", description="计算相对于今天的日期。", added=True),
-        SkillSummary(name="csv-to-json", description="Convert CSV text to JSON.", added=True),
+        SkillSummary(name="date", description="计算相对于今天的日期。", added=True, tags=[], usage_count=0),
+        SkillSummary(name="csv-to-json", description="Convert CSV text to JSON.", added=True, tags=[], usage_count=0),
     ]
 
     text = format_skills_for_system_prompt(skills)
@@ -22,14 +22,16 @@ def test_renders_available_skills_block_with_names_and_descriptions():
 
 
 def test_prompt_tells_the_model_how_to_load_and_run_skills():
-    text = format_skills_for_system_prompt([SkillSummary(name="date", description="dates", added=True)])
+    text = format_skills_for_system_prompt(
+        [SkillSummary(name="date", description="dates", added=True, tags=[], usage_count=0)]
+    )
 
     assert "read_skill" in text
     assert "run_skill_script" in text
 
 
 def test_escapes_xml_special_characters_in_names_and_descriptions():
-    skills = [SkillSummary(name="d<a>te", description='a < b & "c"', added=True)]
+    skills = [SkillSummary(name="d<a>te", description='a < b & "c"', added=True, tags=[], usage_count=0)]
 
     text = format_skills_for_system_prompt(skills)
 

@@ -33,6 +33,8 @@ class SkillSummary(BaseModel):
     name: str
     description: str
     added: bool
+    tags: list[str]
+    usage_count: int
 
 
 class SkillListResponse(BaseModel):

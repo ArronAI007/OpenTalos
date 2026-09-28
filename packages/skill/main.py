@@ -9,6 +9,8 @@ from skill.discovery import discover_skills
 from skill.execution import PathValidationError, execute_script, resolve_interpreter, resolve_script_path
 from skill.github_import import GithubImportError, import_github_skills, scan_github_repo, validate_repo_url
 from skill.my_skills import add_my_skill, load_my_skills, remove_my_skill
+from skill.skill_tags import load_tags
+from skill.skill_usage import load_usage
 from skill.models import (
     GithubImportRequest,
     GithubImportResponse,
@@ -25,6 +27,8 @@ DEFAULT_MAX_CONCURRENCY = 4
 # packages/skill/main.py -> packages/skill -> packages -> 仓库根目录
 SKILLS_ROOT = Path(__file__).resolve().parent.parent.parent / "skills"
 MY_SKILLS_PATH = Path(__file__).resolve().parent.parent.parent / ".data" / "my_skills.json"
+SKILL_TAGS_PATH = Path(__file__).resolve().parent.parent.parent / ".data" / "skill_tags.json"
+SKILL_USAGE_PATH = Path(__file__).resolve().parent.parent.parent / ".data" / "skill_usage.json"
 
 _semaphore: asyncio.Semaphore | None = None
 
@@ -59,8 +63,14 @@ async def health() -> dict[str, str]:
 async def list_skills() -> SkillListResponse:
     skills = discover_skills(SKILLS_ROOT)
     my_skills = load_my_skills(MY_SKILLS_PATH, [s.name for s in skills])
+    tags_by_name = load_tags(SKILL_TAGS_PATH)
+    usage_by_name = load_usage(SKILL_USAGE_PATH)
     return SkillListResponse(skills=[
-        SkillSummary(name=s.name, description=s.description, added=s.name in my_skills) for s in skills
+        SkillSummary(
+            name=s.name, description=s.description, added=s.name in my_skills,
+            tags=tags_by_name.get(s.name, []), usage_count=usage_by_name.get(s.name, 0),
+        )
+        for s in skills
     ])
 
 

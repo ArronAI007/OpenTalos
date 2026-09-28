@@ -8,6 +8,8 @@ from skill.main import app
 def client(monkeypatch, tmp_path):
     import skill.main as main_module
     monkeypatch.setattr(main_module, "MY_SKILLS_PATH", tmp_path / "my_skills.json")
+    monkeypatch.setattr(main_module, "SKILL_TAGS_PATH", tmp_path / "skill_tags.json")
+    monkeypatch.setattr(main_module, "SKILL_USAGE_PATH", tmp_path / "skill_usage.json")
     with TestClient(app) as test_client:
         yield test_client
 
@@ -177,6 +179,16 @@ def test_run_script_returns_422_when_not_added(client: TestClient) -> None:
     )
 
     assert response.status_code == 422
+
+
+def test_list_skills_reports_tags_and_usage_count(client: TestClient) -> None:
+    response = client.get("/skills")
+
+    skills = {s["name"]: s for s in response.json()["skills"]}
+    # client fixture 给的是全新的临时存储，还没写过任何 tags/usage 数据，
+    # 所以这里应该都是默认值：空标签、0 次使用。
+    assert skills["date"]["tags"] == []
+    assert skills["date"]["usage_count"] == 0
 
 
 def test_github_import_returns_imported_and_skipped_on_success(client: TestClient, monkeypatch) -> None:
