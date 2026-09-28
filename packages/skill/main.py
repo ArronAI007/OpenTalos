@@ -10,7 +10,7 @@ from skill.execution import PathValidationError, execute_script, resolve_interpr
 from skill.github_import import GithubImportError, import_github_skills, scan_github_repo, validate_repo_url
 from skill.my_skills import add_my_skill, load_my_skills, remove_my_skill
 from skill.skill_tags import load_tags
-from skill.skill_usage import load_usage
+from skill.skill_usage import increment_usage, load_usage
 from skill.models import (
     GithubImportRequest,
     GithubImportResponse,
@@ -103,6 +103,7 @@ async def run_script(name: str, request: RunScriptRequest) -> RunScriptResponse:
     # 信号量只约束并发子进程数——脚本在宿主机直跑（沙箱后续专门重做），没有别的资源闸口。
     async with get_semaphore():
         result = await execute_script(script_path, request.args, request.input_text, request.timeout_ms)
+    increment_usage(SKILL_USAGE_PATH, name)
     return RunScriptResponse(
         stdout=result.stdout, stderr=result.stderr, exit_code=result.exit_code, timed_out=result.timed_out
     )

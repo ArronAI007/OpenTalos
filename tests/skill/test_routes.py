@@ -191,6 +191,31 @@ def test_list_skills_reports_tags_and_usage_count(client: TestClient) -> None:
     assert skills["date"]["usage_count"] == 0
 
 
+def test_run_script_increments_usage_count(client: TestClient) -> None:
+    payload = {"script_relative_path": "convert.py", "args": [], "input_text": "a,b\n1,2\n"}
+
+    client.post("/skills/csv-to-json/run-script", json=payload)
+    client.post("/skills/csv-to-json/run-script", json=payload)
+
+    response = client.get("/skills")
+    skills = {s["name"]: s for s in response.json()["skills"]}
+    assert skills["csv-to-json"]["usage_count"] == 2
+
+
+def test_run_script_does_not_increment_usage_when_not_added(client: TestClient) -> None:
+    client.delete("/my-skills/csv-to-json")
+
+    client.post(
+        "/skills/csv-to-json/run-script",
+        json={"script_relative_path": "convert.py", "args": [], "input_text": "a,b\n1,2\n"},
+    )
+
+    client.post("/my-skills/csv-to-json")  # 加回来才能在 GET /skills 里看到它（未添加会被过滤成 404）
+    response = client.get("/skills")
+    skills = {s["name"]: s for s in response.json()["skills"]}
+    assert skills["csv-to-json"]["usage_count"] == 0
+
+
 def test_github_import_returns_imported_and_skipped_on_success(client: TestClient, monkeypatch) -> None:
     import skill.main as main_module
 
