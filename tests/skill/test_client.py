@@ -13,7 +13,7 @@ def _build_client(handler) -> SkillClient:
 async def test_list_skills_returns_summaries():
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/skills"
-        return httpx.Response(200, json={"skills": [{"name": "date", "description": "dates"}]})
+        return httpx.Response(200, json={"skills": [{"name": "date", "description": "dates", "added": True}]})
 
     skills = await _build_client(handler).list_skills()
 

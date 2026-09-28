@@ -5,7 +5,9 @@ from skill.main import app
 
 
 @pytest.fixture
-def client():
+def client(monkeypatch, tmp_path):
+    import skill.main as main_module
+    monkeypatch.setattr(main_module, "MY_SKILLS_PATH", tmp_path / "my_skills.json")
     with TestClient(app) as test_client:
         yield test_client
 
@@ -119,6 +121,16 @@ def test_github_scan_returns_candidates_on_success(client: TestClient, monkeypat
 def test_github_import_rejects_an_invalid_repo_url(client: TestClient) -> None:
     response = client.post("/github-import/import", json={"repo_url": "not-a-url", "relative_paths": []})
     assert response.status_code == 400
+
+
+def test_list_skills_reports_added_status(client: TestClient) -> None:
+    response = client.get("/skills")
+
+    skills = {s["name"]: s["added"] for s in response.json()["skills"]}
+    # client fixture 给了全新的临时 MY_SKILLS_PATH，首次访问会用当前全部技能名自动初始化，
+    # 所以这几个内置技能这里应该都是 added=True。
+    assert skills["date"] is True
+    assert skills["csv-to-json"] is True
 
 
 def test_github_import_returns_imported_and_skipped_on_success(client: TestClient, monkeypatch) -> None:

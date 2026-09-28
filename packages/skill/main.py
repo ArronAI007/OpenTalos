@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException
 from skill.discovery import discover_skills
 from skill.execution import PathValidationError, execute_script, resolve_interpreter, resolve_script_path
 from skill.github_import import GithubImportError, import_github_skills, scan_github_repo, validate_repo_url
+from skill.my_skills import load_my_skills
 from skill.models import (
     GithubImportRequest,
     GithubImportResponse,
@@ -23,6 +24,7 @@ from skill.models import (
 DEFAULT_MAX_CONCURRENCY = 4
 # packages/skill/main.py -> packages/skill -> packages -> 仓库根目录
 SKILLS_ROOT = Path(__file__).resolve().parent.parent.parent / "skills"
+MY_SKILLS_PATH = Path(__file__).resolve().parent.parent.parent / ".data" / "my_skills.json"
 
 _semaphore: asyncio.Semaphore | None = None
 
@@ -56,7 +58,10 @@ async def health() -> dict[str, str]:
 @app.get("/skills", response_model=SkillListResponse)
 async def list_skills() -> SkillListResponse:
     skills = discover_skills(SKILLS_ROOT)
-    return SkillListResponse(skills=[SkillSummary(name=s.name, description=s.description) for s in skills])
+    my_skills = load_my_skills(MY_SKILLS_PATH, [s.name for s in skills])
+    return SkillListResponse(skills=[
+        SkillSummary(name=s.name, description=s.description, added=s.name in my_skills) for s in skills
+    ])
 
 
 @app.get("/skills/{name}", response_model=SkillDetailResponse)

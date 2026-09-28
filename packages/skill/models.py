@@ -32,6 +32,7 @@ class RunScriptResponse(BaseModel):
 class SkillSummary(BaseModel):
     name: str
     description: str
+    added: bool
 
 
 class SkillListResponse(BaseModel):
