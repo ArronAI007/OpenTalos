@@ -1,8 +1,10 @@
 import re
+import shutil
 from pathlib import Path
 
 from .discovery import _extract_description
-from .models import GithubSkillCandidate
+from .execution import PathValidationError, resolve_script_path
+from .models import GithubImportSkipped, GithubSkillCandidate
 
 GITHUB_REPO_URL_PATTERN = re.compile(r"^https://github\.com/[\w.\-]+/[\w.\-]+(?:\.git)?/?$")
 
@@ -29,3 +31,26 @@ def scan_repo(repo_dir: Path) -> list[GithubSkillCandidate]:
             description=_extract_description(content),
         ))
     return candidates
+
+
+def import_selected(
+    repo_dir: Path, relative_paths: list[str], skills_root: Path
+) -> tuple[list[str], list[GithubImportSkipped]]:
+    imported: list[str] = []
+    skipped: list[GithubImportSkipped] = []
+    for relative_path in relative_paths:
+        try:
+            # resolve_script_path 对"不可信相对路径必须落在某个根目录之内"完全通用，
+            # repo_dir 在这里就是那个根目录——不需要另写一套路径校验。
+            source = resolve_script_path(repo_dir, relative_path)
+        except PathValidationError:
+            skipped.append(GithubImportSkipped(name=relative_path, reason="非法路径"))
+            continue
+        name = source.name
+        destination = skills_root / name
+        if destination.exists():
+            skipped.append(GithubImportSkipped(name=name, reason="本地已存在同名技能"))
+            continue
+        shutil.copytree(source, destination)
+        imported.append(name)
+    return imported, skipped

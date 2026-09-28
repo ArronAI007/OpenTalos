@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from skill.github_import import GithubImportError, scan_repo, validate_repo_url
+from skill.github_import import GithubImportError, import_selected, scan_repo, validate_repo_url
 
 
 def test_validate_repo_url_accepts_a_plain_repo_url():
@@ -61,3 +61,58 @@ def test_scan_repo_returns_empty_list_for_a_repo_with_no_skills(tmp_path: Path):
     (tmp_path / "README.md").write_text("nothing here", encoding="utf-8")
 
     assert scan_repo(tmp_path) == []
+
+
+def test_import_selected_copies_matching_directories(tmp_path: Path):
+    repo_dir = tmp_path / "repo"
+    _write_skill(repo_dir, "skills/alpha", "# alpha\n\nAlpha thing.\n")
+    (repo_dir / "skills/alpha/script.py").write_text("print('hi')", encoding="utf-8")
+    skills_root = tmp_path / "skills_root"
+    skills_root.mkdir()
+
+    imported, skipped = import_selected(repo_dir, ["skills/alpha"], skills_root)
+
+    assert imported == ["alpha"]
+    assert skipped == []
+    assert (skills_root / "alpha" / "SKILL.md").is_file()
+    assert (skills_root / "alpha" / "script.py").is_file()
+
+
+def test_import_selected_skips_a_name_that_already_exists_locally(tmp_path: Path):
+    repo_dir = tmp_path / "repo"
+    _write_skill(repo_dir, "skills/alpha")
+    skills_root = tmp_path / "skills_root"
+    (skills_root / "alpha").mkdir(parents=True)  # 本地已有同名技能
+
+    imported, skipped = import_selected(repo_dir, ["skills/alpha"], skills_root)
+
+    assert imported == []
+    assert len(skipped) == 1
+    assert skipped[0].name == "alpha"
+    assert "已存在" in skipped[0].reason
+
+
+def test_import_selected_rejects_path_traversal(tmp_path: Path):
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    skills_root = tmp_path / "skills_root"
+    skills_root.mkdir()
+
+    imported, skipped = import_selected(repo_dir, ["../../../etc"], skills_root)
+
+    assert imported == []
+    assert len(skipped) == 1
+    assert skipped[0].reason == "非法路径"
+
+
+def test_import_selected_handles_a_mix_of_success_and_conflict(tmp_path: Path):
+    repo_dir = tmp_path / "repo"
+    _write_skill(repo_dir, "skills/alpha")
+    _write_skill(repo_dir, "skills/beta")
+    skills_root = tmp_path / "skills_root"
+    (skills_root / "beta").mkdir(parents=True)  # beta 冲突，alpha 不冲突
+
+    imported, skipped = import_selected(repo_dir, ["skills/alpha", "skills/beta"], skills_root)
+
+    assert imported == ["alpha"]
+    assert [s.name for s in skipped] == ["beta"]
