@@ -42,6 +42,15 @@ class CreateProjectRequest(BaseModel):
     name: str
 
 
+class GithubScanBody(BaseModel):
+    repo_url: str
+
+
+class GithubImportBody(BaseModel):
+    repo_url: str
+    relative_paths: list[str]
+
+
 # 任务的布尔 flag 字段：PATCH 端点按下表统一装配，新增 flag 只需在此处与模型各加一行。
 _FLAG_FIELDS = ("pinned", "starred", "archived")
 
@@ -200,6 +209,26 @@ def create_app(runtime: ChatRuntime | None = None) -> FastAPI:
             return {"reachable": True, "skills": [s.model_dump() for s in skills]}
         except SkillServiceError as error:
             return {"reachable": False, "skills": [], "error": str(error)}
+
+    @app.post("/api/skills/github/scan")
+    async def scan_github_skills(request: GithubScanBody) -> dict:
+        from skill.client import SkillClient, SkillServiceError
+        try:
+            candidates = await SkillClient(runtime.skill_service_url).scan_github(request.repo_url)
+            return {"candidates": [c.model_dump() for c in candidates]}
+        except SkillServiceError as error:
+            raise HTTPException(502, str(error))
+
+    @app.post("/api/skills/github/import")
+    async def import_github_skills_route(request: GithubImportBody) -> dict:
+        from skill.client import SkillClient, SkillServiceError
+        try:
+            result = await SkillClient(runtime.skill_service_url).import_github(
+                request.repo_url, request.relative_paths
+            )
+            return result.model_dump()
+        except SkillServiceError as error:
+            raise HTTPException(502, str(error))
 
     return app
 

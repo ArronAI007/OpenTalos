@@ -244,6 +244,19 @@ async def test_skills_proxy_degrades_when_unreachable(api) -> None:
     assert body["skills"] == []
 
 
+async def test_github_scan_proxy_returns_502_when_skill_service_unreachable(api) -> None:
+    resp = await api.post("/api/skills/github/scan", json={"repo_url": "https://github.com/owner/repo"})
+    assert resp.status_code == 502
+
+
+async def test_github_import_proxy_returns_502_when_skill_service_unreachable(api) -> None:
+    resp = await api.post(
+        "/api/skills/github/import",
+        json={"repo_url": "https://github.com/owner/repo", "relative_paths": ["skills/alpha"]},
+    )
+    assert resp.status_code == 502
+
+
 async def test_cors_origins_configurable_via_env(api, monkeypatch, tmp_path, scripted_client) -> None:
     preflight_headers = {"Access-Control-Request-Method": "POST"}
 
