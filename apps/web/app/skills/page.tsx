@@ -2,11 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { listSkills, addMySkill, removeMySkill, type SkillsResponse } from "@/lib/api";
-import { filterSkills } from "@/lib/skills-filter";
+import { filterSkills, filterSkillsByCategory } from "@/lib/skills-filter";
 import { skillCardTint } from "@/lib/skills-color";
 import { CheckIcon, GithubIcon, PuzzleIcon, SearchIcon } from "@/components/ui/icons";
 import { GithubImportModal } from "@/components/skills/GithubImportModal";
 import { Tooltip } from "@/components/ui/Tooltip";
+import { LogoMark } from "@/components/sidebar/Logo";
 
 const CATEGORY_TABS = ["全部", "编程", "数据", "自动化", "商业", "设计", "媒体", "内容"];
 
@@ -15,6 +16,7 @@ export default function SkillsPage() {
   const [query, setQuery] = useState("");
   const [importOpen, setImportOpen] = useState(false);
   const [myOnly, setMyOnly] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState("全部");
 
   const refresh = () => {
     listSkills()
@@ -59,7 +61,8 @@ export default function SkillsPage() {
   };
 
   const searched = filterSkills(payload.skills, query);
-  const filtered = myOnly ? searched.filter((s) => s.added) : searched;
+  const categoryFiltered = filterSkillsByCategory(searched, selectedCategory);
+  const filtered = myOnly ? categoryFiltered.filter((s) => s.added) : categoryFiltered;
 
   return (
     <section className="p-6">
@@ -96,26 +99,29 @@ export default function SkillsPage() {
       </div>
 
       <div className="mb-6 flex flex-wrap gap-2">
-        {CATEGORY_TABS.map((tab) =>
-          tab === "全部" ? (
-            <span key={tab} className="rounded-full bg-text px-3 py-1 text-sm font-medium text-white">
-              {tab}
-            </span>
-          ) : (
-            <span
-              key={tab}
-              aria-disabled="true"
-              className="cursor-not-allowed rounded-full px-3 py-1 text-sm text-text-secondary/50"
-            >
-              {tab}
-            </span>
-          )
-        )}
+        {CATEGORY_TABS.map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            onClick={() => setSelectedCategory(tab)}
+            className={
+              tab === selectedCategory
+                ? "rounded-full bg-text px-3 py-1 text-sm font-medium text-white"
+                : "rounded-full px-3 py-1 text-sm text-text-secondary hover:bg-gray-100"
+            }
+          >
+            {tab}
+          </button>
+        ))}
       </div>
 
       {filtered.length === 0 ? (
         <p className="text-sm text-text-secondary">
-          {myOnly ? "还没有添加任何技能。" : query.trim() === "" ? "还没有技能。" : "没有匹配的技能。"}
+          {payload.skills.length === 0
+            ? "还没有技能。"
+            : myOnly
+            ? "还没有添加任何技能。"
+            : "没有匹配的技能。"}
         </p>
       ) : (
         <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
@@ -129,6 +135,18 @@ export default function SkillsPage() {
                 <div className="p-3">
                   <p className="text-sm font-medium">{skill.name}</p>
                   <p className="mt-1 line-clamp-2 text-xs text-text-secondary">{skill.description}</p>
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    <span className="flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-xs text-text-secondary">
+                      <LogoMark size={12} />
+                      OpenTalos
+                    </span>
+                    {skill.tags.map((tag) => (
+                      <span key={tag} className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-text-secondary">
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                  <p className="mt-2 text-xs text-text-secondary">已使用 {skill.usage_count} 次</p>
                 </div>
 
                 {/* tooltip 相对按钮本身居中（Tooltip 组件内部用 relative inline-flex 包住

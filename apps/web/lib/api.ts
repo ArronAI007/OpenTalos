@@ -15,7 +15,11 @@ export interface TaskPatch { title?: string; pinned?: boolean; starred?: boolean
 export interface Project { id: string; name: string; created_at: string }
 export interface StoredMessage { id: number; kind: "user" | "assistant" | "tool" | "stopped"; content: string; created_at: string }
 export interface AppConfig { model_name: string | null; agent_types: string[]; skills_reachable: boolean | null }
-export interface SkillsResponse { reachable: boolean; skills: { name: string; description: string; added: boolean }[]; error?: string }
+export interface SkillsResponse {
+  reachable: boolean;
+  skills: { name: string; description: string; added: boolean; tags: string[]; usage_count: number }[];
+  error?: string;
+}
 export interface SkillCandidate { relative_path: string; name: string; description: string }
 export interface GithubImportSkipped { name: string; reason: string }
 export interface GithubImportResult { imported: string[]; skipped: GithubImportSkipped[] }
