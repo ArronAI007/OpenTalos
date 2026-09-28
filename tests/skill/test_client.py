@@ -137,3 +137,22 @@ async def test_import_github_returns_imported_and_skipped():
 
     assert result.imported == ["alpha"]
     assert result.skipped == []
+
+
+async def test_upload_skill_returns_the_extracted_name():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/skill-upload"
+        assert request.method == "POST"
+        return httpx.Response(200, json={"name": "my-skill"})
+
+    result = await _build_client(handler).upload_skill(b"fake zip bytes", "my-skill.zip")
+
+    assert result == "my-skill"
+
+
+async def test_upload_skill_raises_with_the_service_detail_on_failure():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(422, json={"detail": "压缩包根目录下没有 SKILL.md。"})
+
+    with pytest.raises(SkillServiceError, match="没有 SKILL.md"):
+        await _build_client(handler).upload_skill(b"fake zip bytes", "bad.zip")

@@ -82,6 +82,10 @@ class SkillClient:
         )
         return GithubImportResponse.model_validate(data)
 
+    async def upload_skill(self, file_bytes: bytes, filename: str) -> str:
+        data = await self._request("POST", "/skill-upload", files={"file": (filename, file_bytes)})
+        return data["name"]
+
     async def _request(self, method: str, path: str, **kwargs: object) -> dict:
         try:
             response = await self._client.request(method, f"{self._base_url}{path}", **kwargs)
