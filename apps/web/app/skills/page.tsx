@@ -134,7 +134,7 @@ export default function SkillsPage() {
                     如果 tooltip 跟着按钮居中会贴着卡片右边缘，容易被右侧相邻卡片盖住。 */}
                 <span
                   role="tooltip"
-                  className="pointer-events-none absolute bottom-12 left-1/2 z-20 -translate-x-1/2 whitespace-nowrap rounded-md bg-text px-1.5 py-0.5 text-xs text-surface opacity-0 shadow-md transition-opacity duration-150 group-hover:opacity-100"
+                  className="pointer-events-none absolute bottom-16 left-1/2 z-20 -translate-x-1/2 whitespace-nowrap rounded-md bg-text px-1.5 py-0.5 text-xs text-surface opacity-0 shadow-md transition-opacity duration-150 group-hover:opacity-100"
                 >
                   {skill.added ? "从我的技能移除" : "添加到我的技能"}
                 </span>
