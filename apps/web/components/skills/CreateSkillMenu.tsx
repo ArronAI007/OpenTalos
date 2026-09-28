@@ -7,9 +7,10 @@ import { UploadSkillModal } from "@/components/skills/UploadSkillModal";
 
 interface CreateSkillMenuProps {
   onImported: () => void;
+  label?: string;
 }
 
-export function CreateSkillMenu({ onImported }: CreateSkillMenuProps) {
+export function CreateSkillMenu({ onImported, label = "创建我的专属技能" }: CreateSkillMenuProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [githubOpen, setGithubOpen] = useState(false);
@@ -32,7 +33,7 @@ export function CreateSkillMenu({ onImported }: CreateSkillMenuProps) {
         onClick={() => setMenuOpen((v) => !v)}
         className="flex items-center gap-1.5 rounded-lg border border-border bg-white px-3 py-1.5 text-sm font-medium hover:bg-gray-50"
       >
-        创建我的专属技能
+        {label}
         <ChevronDownIcon width={14} height={14} />
       </button>
 
