@@ -275,6 +275,11 @@ async def test_skill_upload_proxy_returns_502_when_skill_service_unreachable(api
     assert resp.status_code == 502
 
 
+async def test_skill_detail_proxy_returns_502_when_skill_service_unreachable(api) -> None:
+    resp = await api.get("/api/skills/date")
+    assert resp.status_code == 502
+
+
 async def test_cors_origins_configurable_via_env(api, monkeypatch, tmp_path, scripted_client) -> None:
     preflight_headers = {"Access-Control-Request-Method": "POST"}
 

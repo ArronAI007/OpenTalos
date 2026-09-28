@@ -258,6 +258,15 @@ def create_app(runtime: ChatRuntime | None = None) -> FastAPI:
         except SkillServiceError as error:
             raise HTTPException(502, str(error))
 
+    @app.get("/api/skills/{name}")
+    async def get_skill_detail_route(name: str) -> dict:
+        from skill.client import SkillClient, SkillServiceError
+        try:
+            detail = await SkillClient(runtime.skill_service_url).preview_skill(name)
+            return detail.model_dump()
+        except SkillServiceError as error:
+            raise HTTPException(502, str(error))
+
     return app
 
 
