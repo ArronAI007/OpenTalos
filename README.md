@@ -9,6 +9,50 @@ Managed as a single `uv` project (not a workspace); `packages/*` are added to `s
 rather than installed, and imported as top-level modules (`from core.agent import Agent`,
 `from tool.registry import ToolRegistry`, etc.).
 
+## Screenshots
+
+**Streaming chat** — a ReAct agent calling skill and web-search tools mid-reply, with live
+tool-call bubbles and a rendered Markdown response.
+
+![Chat conversation](.github/assets/screenshots/chat.png)
+
+**Skills marketplace** — a searchable, categorized card grid of built-in, GitHub-imported, and
+uploaded skills.
+
+![Skills marketplace](.github/assets/screenshots/skills.png)
+
+**Skill detail** — a file-explorer-style view of a skill's `SKILL.md`: the raw YAML frontmatter
+in a copyable block, plus the rendered Markdown body.
+
+![Skill detail view](.github/assets/screenshots/skill-detail.png)
+
+**Your skills** — the subset of skills actually available to the agent, managed independently
+from the full marketplace.
+
+![Added skills](.github/assets/screenshots/my-skills.png)
+
+<details>
+<summary>Home page</summary>
+
+![Home page](.github/assets/screenshots/home.png)
+
+</details>
+
+## Features
+
+- **Four agent reasoning patterns**, selectable per task — tool-calling (single-turn), ReAct
+  (step-budgeted reason+act with an explicit `finish` tool), reflection (draft → critique →
+  revise), and plan-execute (plan into steps, then execute each with accumulating context).
+- **Skills marketplace** (`/skills`) — browse built-in skills, add/remove them to your own
+  toolbox (only added skills are ever advertised to the agent), import skills from any public
+  GitHub repository, or upload a `.zip`/`.skill` package with a YAML-frontmatter `SKILL.md`.
+- **Skill detail view** — click any card for its description, its full `SKILL.md` content, and
+  2-3 AI-generated usage examples you can send straight to a new task.
+- **Web search** — Tavily-backed `web_search`/`web_extractor` tools the agent can call
+  mid-conversation, with per-source failure reporting instead of silent gaps.
+- **Streaming chat** — SSE-driven replies with live tool-call bubbles, a reasoning trace,
+  stop/resume, and model-generated follow-up question suggestions.
+
 ## Architecture
 
 `packages/tool`, `packages/context`, and `packages/observability` are
@@ -65,16 +109,22 @@ cp .env.example .env   # fill in MODEL_PROVIDER/MODEL_API_KEY/MODEL_NAME, or lea
 
 uv run pytest tests/
 
-./scripts/start.sh   # skill service (:8321) + chat API (:8400) + web frontend
-                     # (http://localhost:3000) — one command starts all three,
-                     # Ctrl-C stops them all
+./scripts/start.sh   # skill service (:8321) + chat API (:8400) + web frontend (:3010)
+                     # all three spawn in the background, logs go to .data/logs/,
+                     # and the terminal is handed back once everything is healthy
 ```
 
-Then open http://localhost:3000. `./scripts/start.sh` starts the skill service (:8321), the
-chat API (:8400), and the web frontend (:3000); a service already answering
-`{"status":"ok"}` on its port is reused rather than restarted. Nothing needs `--env-file` —
+Then open http://localhost:3010. A service already answering `{"status":"ok"}` on its port
+(or, for the web frontend, already serving its homepage) is reused rather than restarted —
+and isn't touched by `stop`/`restart` either. Nothing needs `--env-file` —
 `packages/core/model.py` loads `.env` itself, see next section. To debug the skill service in
 isolation: `env PYTHONPATH=packages uv run uvicorn skill.main:app --port 8321`.
+
+```bash
+./scripts/start.sh stop      # stop everything this script started (reused external
+                              # processes are left alone)
+./scripts/start.sh restart   # stop + start
+```
 
 ## Key Environment Variables
 
