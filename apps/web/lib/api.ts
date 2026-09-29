@@ -169,3 +169,54 @@ export async function suggestSkillUsage(name: string, description: string): Prom
   );
   return data.items;
 }
+
+export interface EvalCase {
+  id: string;
+  name: string;
+  instruction: string;
+  expected_answer: string | null;
+}
+export interface EvalScore {
+  correctness: number;
+  completeness: number;
+  clarity: number;
+  comment: string;
+}
+export interface EvalResult {
+  case_id: string;
+  case_name: string;
+  agent_type: string;
+  reply: string | null;
+  score: EvalScore | null;
+  error: string | null;
+  latency_ms: number;
+}
+
+export async function listEvalCases(): Promise<EvalCase[]> {
+  return fetchJson<{ cases: EvalCase[] }>(`${API_URL}/api/eval/cases`, { cache: "no-store" }).then((d) => d.cases);
+}
+
+export async function createEvalCase(
+  name: string,
+  instruction: string,
+  expectedAnswer: string | null
+): Promise<EvalCase> {
+  return fetchJson<EvalCase>(`${API_URL}/api/eval/cases`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, instruction, expected_answer: expectedAnswer }),
+  });
+}
+
+export async function deleteEvalCase(id: string): Promise<void> {
+  const res = await fetch(`${API_URL}/api/eval/cases/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(`API ${res.status} ${res.statusText}`);
+}
+
+export async function runEval(caseIds: string[], agentTypes: string[]): Promise<EvalResult[]> {
+  const data = await postJsonWithDetail<{ results: EvalResult[] }>(`${API_URL}/api/eval/run`, {
+    case_ids: caseIds,
+    agent_types: agentTypes,
+  });
+  return data.results;
+}
