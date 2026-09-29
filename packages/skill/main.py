@@ -5,7 +5,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, UploadFile
 
-from skill.discovery import discover_skills
+from skill.discovery import discover_skills, list_skill_files
 from skill.execution import PathValidationError, execute_script, resolve_interpreter, resolve_script_path
 from skill.frontmatter import extract_frontmatter_text, parse_frontmatter
 from skill.github_import import GithubImportError, import_github_skills, scan_github_repo, validate_repo_url
@@ -21,6 +21,7 @@ from skill.models import (
     RunScriptRequest,
     RunScriptResponse,
     SkillDetailResponse,
+    SkillFile,
     SkillListResponse,
     SkillPreview,
     SkillSummary,
@@ -99,20 +100,26 @@ async def get_skill_detail(name: str) -> SkillPreview:
     my_skills = load_my_skills(MY_SKILLS_PATH, all_names)
     tags_by_name = load_tags(SKILL_TAGS_PATH)
     usage_by_name = load_usage(SKILL_USAGE_PATH)
-    # frontmatter 已经拆成了 description/tags 等结构化字段，正文预览不需要再带一遍——
+    # frontmatter 已经拆成了 description 等结构化字段，SKILL.md 的正文预览不需要再带一遍——
     # 而且裸 YAML frontmatter 直接喂给 Markdown 渲染器会被误判成分隔线+Setext 标题，很难看。
     # 原始 YAML 文本单独留一份给"技能详情"页专门展示（不经过 Markdown 渲染）。
-    _, body = parse_frontmatter(skill.content)
+    files = []
+    for relative_path, raw_content in list_skill_files(skill.dir):
+        if relative_path == "SKILL.md":
+            _, body = parse_frontmatter(skill.content)
+            files.append(SkillFile(path=relative_path, content=body))
+        else:
+            files.append(SkillFile(path=relative_path, content=raw_content))
     frontmatter_yaml = extract_frontmatter_text(skill.content)
     return SkillPreview(
         name=skill.name,
         description=skill.description,
-        content=body,
         frontmatter_yaml=frontmatter_yaml,
         tags=tags_by_name.get(skill.name, []),
         usage_count=usage_by_name.get(skill.name, 0),
         added=skill.name in my_skills,
         updated_at=skill.updated_at,
+        files=files,
     )
 
 

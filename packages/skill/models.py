@@ -75,12 +75,17 @@ class GithubImportResponse(BaseModel):
     skipped: list[GithubImportSkipped]
 
 
+class SkillFile(BaseModel):
+    path: str
+    content: str | None
+
+
 class SkillPreview(BaseModel):
     name: str
     description: str
-    content: str
     frontmatter_yaml: str | None
     tags: list[str]
     usage_count: int
     added: bool
     updated_at: str
+    files: list[SkillFile]

@@ -4,6 +4,7 @@ import httpx
 import pytest
 
 from skill.client import SkillClient, SkillServiceError
+from skill.models import SkillFile
 
 
 def _build_client(handler) -> SkillClient:
@@ -162,15 +163,16 @@ async def test_preview_skill_returns_full_detail():
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/skills/date/detail"
         return httpx.Response(200, json={
-            "name": "date", "description": "dates", "content": "# date\n\nusage...",
+            "name": "date", "description": "dates",
             "frontmatter_yaml": None, "tags": ["编程"], "usage_count": 3,
             "added": False, "updated_at": "2026-09-28T10:00:00",
+            "files": [{"path": "SKILL.md", "content": "# date\n\nusage..."}],
         })
 
     detail = await _build_client(handler).preview_skill("date")
 
     assert detail.name == "date"
-    assert detail.content == "# date\n\nusage..."
+    assert detail.files == [SkillFile(path="SKILL.md", content="# date\n\nusage...")]
     assert detail.added is False
     assert detail.updated_at == "2026-09-28T10:00:00"
 

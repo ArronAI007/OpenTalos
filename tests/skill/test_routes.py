@@ -241,11 +241,13 @@ def test_get_skill_detail_works_even_when_not_added(client: TestClient) -> None:
     body = response.json()
     assert body["name"] == "date"
     assert body["added"] is False
-    assert "content" in body
+    assert "files" in body
     assert "updated_at" in body
 
 
-def test_get_skill_detail_strips_frontmatter_from_content(client: TestClient, monkeypatch, tmp_path) -> None:
+def test_get_skill_detail_strips_frontmatter_from_the_skill_md_file_entry(
+    client: TestClient, monkeypatch, tmp_path
+) -> None:
     import skill.main as main_module
 
     skill_dir = tmp_path / "with-frontmatter"
@@ -259,10 +261,29 @@ def test_get_skill_detail_strips_frontmatter_from_content(client: TestClient, mo
     response = client.get("/skills/with-frontmatter/detail")
 
     assert response.status_code == 200
-    content = response.json()["content"]
-    assert "---" not in content
-    assert "name: with-frontmatter" not in content
-    assert content.startswith("# with-frontmatter")
+    files = {f["path"]: f["content"] for f in response.json()["files"]}
+    assert "---" not in files["SKILL.md"]
+    assert "name: with-frontmatter" not in files["SKILL.md"]
+    assert files["SKILL.md"].startswith("# with-frontmatter")
+
+
+def test_get_skill_detail_includes_every_file_in_the_skill_directory(
+    client: TestClient, monkeypatch, tmp_path
+) -> None:
+    import skill.main as main_module
+
+    skill_dir = tmp_path / "multi-file"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text("# multi-file\n", encoding="utf-8")
+    (skill_dir / "scripts").mkdir()
+    (skill_dir / "scripts" / "main.py").write_text("print('hi')\n", encoding="utf-8")
+    monkeypatch.setattr(main_module, "SKILLS_ROOT", tmp_path)
+
+    response = client.get("/skills/multi-file/detail")
+
+    assert response.status_code == 200
+    files = {f["path"]: f["content"] for f in response.json()["files"]}
+    assert files == {"SKILL.md": "# multi-file\n", "scripts/main.py": "print('hi')\n"}
 
 
 def test_get_skill_detail_reports_the_raw_frontmatter_yaml_separately(
