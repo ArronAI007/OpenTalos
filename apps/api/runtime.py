@@ -131,6 +131,10 @@ class ChatRuntime:
     def model_name(self) -> str:
         return self._client().model_name
 
+    @property
+    def model_client(self) -> ModelClient:
+        return self._client()
+
     def _client(self) -> ModelClient:
         if self._model_client is None:
             self._model_client = ModelClient()
@@ -233,7 +237,9 @@ class ChatRuntime:
         self._registries.pop(task_id, None)
         self._task_locks.pop(task_id, None)
 
-    async def stream_reply(self, task_id: str, content: str) -> AsyncIterator[dict[str, Any]]:
+    async def stream_reply(
+        self, task_id: str, content: str, *, skip_suggestions: bool = False
+    ) -> AsyncIterator[dict[str, Any]]:
         task = await asyncio.to_thread(self._store.get_task, task_id)
         if task is None:
             yield {"type": "error", "message": f"task not found: {task_id}"}
@@ -285,11 +291,17 @@ class ChatRuntime:
             # 回复正文——推荐语义=从历史+提问延伸）。回复流完时推荐通常已就绪，done 后
             # 不再串行空等第二次模型调用（实测串行耗时 ~4s：TTFT+思维链+输出）。
             # 停止/error 路径不产生推荐：统一在 finally 里 cancel，任务不泄漏。
-            suggest_task = asyncio.create_task(
-                suggest_followups(
-                    self._client(),
-                    await asyncio.to_thread(self._store.list_messages, task_id),
+            # skip_suggestions=True（评估场景）时干脆不起这个任务——省一次模型调用，
+            # 后面 await/cancel 处都判了 None，默认值保证真实聊天路径行为不变。
+            suggest_task = (
+                asyncio.create_task(
+                    suggest_followups(
+                        self._client(),
+                        await asyncio.to_thread(self._store.list_messages, task_id),
+                    )
                 )
+                if not skip_suggestions
+                else None
             )
             persisted = False
             stopped_by_user = False
@@ -342,9 +354,10 @@ class ChatRuntime:
                     yield {"type": "done", "reply": final_reply}
                     # 推荐已在 producer 旁并行预发——回复流式期间它跑完了大半，这里通常直接
                     # 拿到结果；失败静默为空（suggest_followups 出口无异常）。
-                    suggestions = await suggest_task
-                    if suggestions:
-                        yield {"type": "suggestions", "items": suggestions}
+                    if suggest_task is not None:
+                        suggestions = await suggest_task
+                        if suggestions:
+                            yield {"type": "suggestions", "items": suggestions}
                     # 压缩是优化、失败不影响对话：assistant 已落库，此处触发折叠+快照落库，
                     # DB 顺序 user → tool → assistant → summary，重放时 summary 之后无重复行。
                     try:
@@ -359,7 +372,7 @@ class ChatRuntime:
                     # 连用 await 达成的落库都会半路夭折——所以下端落库必须同步调用；
                     # producer 是独立 task，不在该 scope 内，自行收尾。
                     producer.cancel()
-                if not suggest_task.done():
+                if suggest_task is not None and not suggest_task.done():
                     suggest_task.cancel()
                 # 客户端中途断开 / 用户停止（消费循环被 GeneratorExit/CancelledError 打断、
                 # 或 stopped_by_user 提前 return）：正常完成路径的 assistant 落库不可达。

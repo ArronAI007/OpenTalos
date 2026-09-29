@@ -28,6 +28,10 @@ async def _collect(runtime: ChatRuntime, task_id: str, content: str) -> list[dic
     return [event async for event in runtime.stream_reply(task_id, content)]
 
 
+async def _collect_kw(runtime: ChatRuntime, task_id: str, content: str, **kwargs: Any) -> list[dict[str, Any]]:
+    return [event async for event in runtime.stream_reply(task_id, content, **kwargs)]
+
+
 def test_stream_plain_reply_deltas_and_persists(store, scripted_client, tmp_path) -> None:
     client = scripted_client(tool_completions=[
         ToolCompletion(text="你好，世界", requested_tools=[], model_id="mock-model"),
@@ -705,3 +709,25 @@ def test_ensure_skills_refetches_for_each_new_task(store, scripted_client, tmp_p
     asyncio.run(_collect(runtime, task_b["id"], "hi"))
 
     assert call_count == 2
+
+
+def test_stream_reply_skips_suggestions_when_requested(store, scripted_client, tmp_path) -> None:
+    client = scripted_client(
+        tool_completions=[ToolCompletion(text="你好", requested_tools=[], model_id="mock-model")],
+        completions=[Completion(text='["不应该出现的推荐"]', model_id="mock-model")],
+    )
+    runtime = _runtime(store, client, tmp_path)
+    task = store.create_task("react")
+
+    events = asyncio.run(_collect_kw(runtime, task["id"], "hi", skip_suggestions=True))
+
+    event_types = [e["type"] for e in events]
+    assert event_types[-1] == "done"
+    assert "suggestions" not in event_types
+
+
+def test_model_client_property_exposes_the_underlying_client(store, scripted_client, tmp_path) -> None:
+    client = scripted_client(tool_completions=[])
+    runtime = _runtime(store, client, tmp_path)
+
+    assert runtime.model_client is client
