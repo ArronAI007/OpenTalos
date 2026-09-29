@@ -1,4 +1,5 @@
 """聊天会话 API：浏览器前端（apps/web）的唯一后端。启动方式见 scripts/start.sh。"""
+import asyncio
 import json
 import os
 import sys
@@ -307,6 +308,20 @@ def create_app(runtime: ChatRuntime | None = None, eval_cases_path: Path | None 
     @app.delete("/api/eval/cases/{case_id}", status_code=204)
     async def delete_eval_case_route(case_id: str) -> None:
         remove_eval_case(eval_cases_path, case_id)
+
+    @app.post("/api/eval/run")
+    async def run_eval_route(request: EvalRunBody) -> dict:
+        for agent_type in request.agent_types:
+            if agent_type not in AGENT_TYPES:
+                raise HTTPException(422, f"unknown agent_type: {agent_type}")
+        all_cases = {c.id: c for c in load_eval_cases(eval_cases_path)}
+        cases = [all_cases[cid] for cid in request.case_ids if cid in all_cases]
+        results = await asyncio.gather(*[
+            run_case(runtime, agent_type, case)
+            for case in cases
+            for agent_type in request.agent_types
+        ])
+        return {"results": [r.model_dump() for r in results]}
 
     return app
 

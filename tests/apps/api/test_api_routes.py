@@ -457,3 +457,38 @@ async def test_eval_cases_crud_round_trip(api) -> None:
 
     listed_again = await api.get("/api/eval/cases")
     assert listed_again.json()["cases"] == []
+
+
+async def test_eval_run_route_returns_scored_results(tmp_path, scripted_client) -> None:
+    from core.protocol import Completion
+
+    client = scripted_client(
+        tool_completions=[ToolCompletion(text="42", requested_tools=[], model_id="mock-model")],
+        completions=[Completion(text='{"correctness": 5, "completeness": 5, "clarity": 5, "comment": "好"}', model_id="mock-model")],
+    )
+    client.model_name = "mock-model"
+    runtime = ChatRuntime(
+        ChatStore(tmp_path / "chat.db"),
+        model_client=client,
+        skill_service_url="http://127.0.0.1:1",
+        trace_dir=tmp_path / "traces",
+    )
+    app = create_app(runtime, eval_cases_path=tmp_path / "eval_cases.json")
+    local_api = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+
+    created = await local_api.post("/api/eval/cases", json={"name": "加法", "instruction": "1+1等于几"})
+    case_id = created.json()["id"]
+
+    resp = await local_api.post("/api/eval/run", json={"case_ids": [case_id], "agent_types": ["react"]})
+
+    assert resp.status_code == 200
+    results = resp.json()["results"]
+    assert len(results) == 1
+    assert results[0]["reply"] == "42"
+    assert results[0]["score"]["correctness"] == 5
+    assert runtime.store.list_tasks() == []  # 评估任务不进任务历史
+
+
+async def test_eval_run_route_rejects_an_unknown_agent_type(api) -> None:
+    resp = await api.post("/api/eval/run", json={"case_ids": [], "agent_types": ["not-a-real-type"]})
+    assert resp.status_code == 422
