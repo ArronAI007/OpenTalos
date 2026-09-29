@@ -147,6 +147,7 @@ export interface SkillDetail {
   name: string;
   description: string;
   content: string;
+  frontmatter_yaml: string | null;
   tags: string[];
   usage_count: number;
   added: boolean;

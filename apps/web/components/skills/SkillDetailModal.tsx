@@ -6,7 +6,8 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { getSkillDetail, suggestSkillUsage, type SkillSummary } from "@/lib/api";
 import { stashHomeDraft } from "@/lib/pending-message";
-import { CheckIcon, FileTextIcon, MessageCircleIcon } from "@/components/ui/icons";
+import { copyText } from "@/lib/clipboard";
+import { CheckIcon, ChevronLeftIcon, CopyIcon, FileTextIcon, MessageCircleIcon } from "@/components/ui/icons";
 import { LogoMark } from "@/components/sidebar/Logo";
 
 interface SkillDetailModalProps {
@@ -19,9 +20,11 @@ interface SkillDetailModalProps {
 export function SkillDetailModal({ open, onClose, skill, onToggleAdded }: SkillDetailModalProps) {
   const router = useRouter();
   const [content, setContent] = useState<string | null>(null);
+  const [frontmatterYaml, setFrontmatterYaml] = useState<string | null>(null);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [examples, setExamples] = useState<string[] | null>(null);
   const [contentOpen, setContentOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
   const requestedForRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -29,6 +32,7 @@ export function SkillDetailModal({ open, onClose, skill, onToggleAdded }: SkillD
     if (requestedForRef.current === skill.name) return;
     requestedForRef.current = skill.name;
     setContent(null);
+    setFrontmatterYaml(null);
     setUpdatedAt(null);
     setExamples(null);
     setContentOpen(false);
@@ -36,6 +40,7 @@ export function SkillDetailModal({ open, onClose, skill, onToggleAdded }: SkillD
     getSkillDetail(skill.name)
       .then((detail) => {
         setContent(detail.content);
+        setFrontmatterYaml(detail.frontmatter_yaml);
         setUpdatedAt(detail.updated_at);
       })
       .catch(() => {
@@ -71,6 +76,15 @@ export function SkillDetailModal({ open, onClose, skill, onToggleAdded }: SkillD
     router.push("/");
   };
 
+  const handleCopyFrontmatter = () => {
+    if (!frontmatterYaml) return;
+    void copyText(frontmatterYaml).then((ok) => {
+      if (!ok) return;
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto px-4">
       <div className="absolute inset-0 bg-black/50" onClick={onClose} aria-hidden="true" />
@@ -78,106 +92,135 @@ export function SkillDetailModal({ open, onClose, skill, onToggleAdded }: SkillD
         role="dialog"
         aria-modal="true"
         aria-label={skill.name}
-        className="relative z-10 mt-[8vh] w-full max-w-2xl rounded-2xl bg-white p-6 shadow-2xl"
+        className="relative z-10 mt-[8vh] flex max-h-[80vh] w-full max-w-2xl flex-col rounded-2xl bg-white shadow-2xl"
       >
-        <button
-          type="button"
-          aria-label="关闭"
-          onClick={onClose}
-          className="absolute right-4 top-4 text-text-secondary hover:text-text"
-        >
-          ✕
-        </button>
-
-        {skill.tags.length > 0 && (
-          <div className="mb-3 flex flex-wrap gap-1.5">
-            {skill.tags.map((tag) => (
-              <span key={tag} className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-text-secondary">
-                {tag}
-              </span>
-            ))}
-          </div>
-        )}
-
-        <h2 className="text-lg font-semibold">{skill.name}</h2>
-        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-text-secondary">
-          <span className="flex items-center gap-1">
-            <LogoMark size={12} />
-            OpenTalos
-          </span>
-          {updatedAt && <span>更新于 {updatedAt.slice(0, 10)}</span>}
-          <span>已使用 {skill.usage_count} 次</span>
-        </div>
-
-        <div className="mt-4 flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => void onToggleAdded(skill.name, skill.added)}
-            className="flex items-center gap-1.5 rounded-lg bg-text px-3 py-1.5 text-sm font-medium text-white"
-          >
-            {skill.added ? <CheckIcon width={14} height={14} /> : "+"}
-            {skill.added ? "已添加到我的技能" : "添加到我的技能"}
-          </button>
-          <button
-            type="button"
-            onClick={() => setContentOpen(true)}
-            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm font-medium hover:bg-gray-50"
-          >
-            <FileTextIcon width={16} height={16} />
-            查看详情
-          </button>
-        </div>
-
-        <p className="mt-4 border-t border-border pt-4 text-sm text-text-secondary">{skill.description}</p>
-
-        {examples === null ? null : examples.length === 0 ? null : (
-          <div className="mt-4 space-y-2">
-            <p className="text-xs font-medium text-text-secondary">推荐用法</p>
-            {examples.map((example) => (
+        {contentOpen ? (
+          <>
+            <div className="flex shrink-0 items-center justify-between border-b border-border p-4">
               <button
-                key={example}
                 type="button"
-                onClick={() => handlePickExample(example)}
-                className="flex w-full items-start gap-2 rounded-xl border border-border px-3 py-2 text-left text-sm hover:bg-gray-50"
+                onClick={() => setContentOpen(false)}
+                className="flex items-center gap-1 text-sm font-semibold hover:text-text-secondary"
               >
-                <MessageCircleIcon width={16} height={16} className="mt-0.5 shrink-0 text-text-secondary" />
-                {example}
+                <ChevronLeftIcon width={18} height={18} />
+                技能详情
               </button>
-            ))}
-          </div>
-        )}
-      </div>
+              <button type="button" aria-label="关闭" onClick={onClose} className="text-text-secondary hover:text-text">
+                ✕
+              </button>
+            </div>
 
-      {contentOpen && (
-        <div className="fixed inset-0 z-[60] flex items-start justify-center overflow-y-auto px-4">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setContentOpen(false)} aria-hidden="true" />
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-label={`${skill.name} 详情`}
-            className="relative z-10 mt-[8vh] w-full max-w-2xl rounded-2xl bg-white p-6 shadow-2xl"
-          >
+            <div className="flex flex-1 overflow-hidden">
+              <div className="w-36 shrink-0 overflow-y-auto border-r border-border p-3">
+                <p className="mb-2 px-1 text-xs font-medium text-text-secondary">文件</p>
+                <div className="flex items-center gap-2 rounded-lg bg-gray-100 px-2 py-1.5 text-sm">
+                  <FileTextIcon width={14} height={14} className="shrink-0 text-text-secondary" />
+                  <span className="truncate">SKILL.md</span>
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-6">
+                {frontmatterYaml && (
+                  <div className="mb-4 overflow-hidden rounded-lg border border-border">
+                    <div className="flex items-center justify-between bg-gray-50 px-3 py-1.5 text-xs font-medium text-text-secondary">
+                      YAML
+                      <button
+                        type="button"
+                        aria-label="复制"
+                        onClick={handleCopyFrontmatter}
+                        className="text-text-secondary hover:text-text"
+                      >
+                        <CopyIcon width={14} height={14} />
+                      </button>
+                    </div>
+                    <pre className="overflow-x-auto bg-gray-50 px-3 py-2 text-xs">
+                      <code>{frontmatterYaml}</code>
+                    </pre>
+                    {copied && <p className="bg-gray-50 px-3 pb-2 text-xs text-text-secondary">已复制</p>}
+                  </div>
+                )}
+
+                {content === null ? (
+                  <p className="text-sm text-text-secondary">加载中…</p>
+                ) : (
+                  <div className="md">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="flex-1 overflow-y-auto p-6">
             <button
               type="button"
               aria-label="关闭"
-              onClick={() => setContentOpen(false)}
+              onClick={onClose}
               className="absolute right-4 top-4 text-text-secondary hover:text-text"
             >
               ✕
             </button>
+
+            {skill.tags.length > 0 && (
+              <div className="mb-3 flex flex-wrap gap-1.5">
+                {skill.tags.map((tag) => (
+                  <span key={tag} className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-text-secondary">
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            )}
+
             <h2 className="text-lg font-semibold">{skill.name}</h2>
-            <div className="mt-4 border-t border-border pt-4">
-              {content === null ? (
-                <p className="text-sm text-text-secondary">加载中…</p>
-              ) : (
-                <div className="md">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
-                </div>
-              )}
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-text-secondary">
+              <span className="flex items-center gap-1">
+                <LogoMark size={12} />
+                OpenTalos
+              </span>
+              {updatedAt && <span>更新于 {updatedAt.slice(0, 10)}</span>}
+              <span>已使用 {skill.usage_count} 次</span>
             </div>
+
+            <div className="mt-4 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void onToggleAdded(skill.name, skill.added)}
+                className="flex items-center gap-1.5 rounded-lg bg-text px-3 py-1.5 text-sm font-medium text-white"
+              >
+                {skill.added ? <CheckIcon width={14} height={14} /> : "+"}
+                {skill.added ? "已添加到我的技能" : "添加到我的技能"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setContentOpen(true)}
+                className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm font-medium hover:bg-gray-50"
+              >
+                <FileTextIcon width={16} height={16} />
+                查看详情
+              </button>
+            </div>
+
+            <p className="mt-4 border-t border-border pt-4 text-sm text-text-secondary">{skill.description}</p>
+
+            {examples === null ? null : examples.length === 0 ? null : (
+              <div className="mt-4 space-y-2">
+                <p className="text-xs font-medium text-text-secondary">推荐用法</p>
+                {examples.map((example) => (
+                  <button
+                    key={example}
+                    type="button"
+                    onClick={() => handlePickExample(example)}
+                    className="flex w-full items-start gap-2 rounded-xl border border-border px-3 py-2 text-left text-sm hover:bg-gray-50"
+                  >
+                    <MessageCircleIcon width={16} height={16} className="mt-0.5 shrink-0 text-text-secondary" />
+                    {example}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
