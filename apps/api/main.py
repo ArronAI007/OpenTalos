@@ -16,6 +16,12 @@ if str(_PACKAGES_DIR) not in sys.path:
 
 from agents.builder import AGENT_TYPES  # noqa: E402
 from db import ChatStore  # noqa: E402
+from evaluation import (  # noqa: E402
+    add_eval_case,
+    load_eval_cases,
+    remove_eval_case,
+    run_case,
+)
 from runtime import ChatRuntime  # noqa: E402
 
 
@@ -55,6 +61,17 @@ class SkillUsageExamplesBody(BaseModel):
     description: str
 
 
+class EvalCaseBody(BaseModel):
+    name: str
+    instruction: str
+    expected_answer: str | None = None
+
+
+class EvalRunBody(BaseModel):
+    case_ids: list[str]
+    agent_types: list[str]
+
+
 # 任务的布尔 flag 字段：PATCH 端点按下表统一装配，新增 flag 只需在此处与模型各加一行。
 _FLAG_FIELDS = ("pinned", "starred", "archived")
 
@@ -67,7 +84,7 @@ def _sse(event: dict) -> str:
     return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
 
-def create_app(runtime: ChatRuntime | None = None) -> FastAPI:
+def create_app(runtime: ChatRuntime | None = None, eval_cases_path: Path | None = None) -> FastAPI:
     if runtime is None:
         runtime = ChatRuntime(
             ChatStore(_REPO_ROOT / ".data" / "chat.db"),
@@ -76,6 +93,8 @@ def create_app(runtime: ChatRuntime | None = None) -> FastAPI:
             trace_dir=_REPO_ROOT / ".data" / "traces",
             compaction_token_limit=int(os.environ.get("COMPACTION_TOKEN_LIMIT", "16000")),
         )
+    if eval_cases_path is None:
+        eval_cases_path = _REPO_ROOT / ".data" / "eval_cases.json"
     app = FastAPI(title="OpenTalos Chat API")
     app.state.runtime = runtime
     cors_origins = [
@@ -275,6 +294,19 @@ def create_app(runtime: ChatRuntime | None = None) -> FastAPI:
     async def suggest_skill_usage_route(name: str, request: SkillUsageExamplesBody) -> dict:
         items = await runtime.suggest_skill_usage(name, request.description)
         return {"items": items}
+
+    @app.get("/api/eval/cases")
+    async def list_eval_cases_route() -> dict:
+        return {"cases": [c.model_dump() for c in load_eval_cases(eval_cases_path)]}
+
+    @app.post("/api/eval/cases")
+    async def create_eval_case_route(request: EvalCaseBody) -> dict:
+        case = add_eval_case(eval_cases_path, request.name, request.instruction, request.expected_answer)
+        return case.model_dump()
+
+    @app.delete("/api/eval/cases/{case_id}", status_code=204)
+    async def delete_eval_case_route(case_id: str) -> None:
+        remove_eval_case(eval_cases_path, case_id)
 
     return app
 

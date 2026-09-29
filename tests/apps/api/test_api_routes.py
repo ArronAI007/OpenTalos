@@ -23,7 +23,7 @@ def api(tmp_path, scripted_client):
         skill_service_url="http://127.0.0.1:1",
         trace_dir=tmp_path / "traces",
     )
-    app = create_app(runtime)
+    app = create_app(runtime, eval_cases_path=tmp_path / "eval_cases.json")
     return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
 
 
@@ -438,3 +438,22 @@ async def test_skill_usage_examples_route_degrades_to_empty_on_model_failure(api
 
     assert resp.status_code == 200
     assert resp.json() == {"items": []}
+
+
+async def test_eval_cases_crud_round_trip(api) -> None:
+    created = await api.post("/api/eval/cases", json={
+        "name": "加法", "instruction": "1+1等于几", "expected_answer": "2",
+    })
+    assert created.status_code == 200
+    case = created.json()
+    assert case["name"] == "加法"
+
+    listed = await api.get("/api/eval/cases")
+    assert listed.status_code == 200
+    assert [c["id"] for c in listed.json()["cases"]] == [case["id"]]
+
+    deleted = await api.delete(f"/api/eval/cases/{case['id']}")
+    assert deleted.status_code == 204
+
+    listed_again = await api.get("/api/eval/cases")
+    assert listed_again.json()["cases"] == []
