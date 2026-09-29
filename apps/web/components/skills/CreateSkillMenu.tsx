@@ -1,9 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ChevronDownIcon, GithubIcon, UploadIcon } from "@/components/ui/icons";
+import { useRouter } from "next/navigation";
+import { ChevronDownIcon, GithubIcon, PencilSquareIcon, UploadIcon } from "@/components/ui/icons";
 import { GithubImportModal } from "@/components/skills/GithubImportModal";
 import { UploadSkillModal } from "@/components/skills/UploadSkillModal";
+import { stashHomeDraft } from "@/lib/pending-message";
+
+const CREATE_WITH_OPENTALOS_DRAFT = "帮我一起使用 /skill-creator 创建一个技能。首先问我技能应该做什么。";
 
 interface CreateSkillMenuProps {
   onImported: () => void;
@@ -11,10 +15,17 @@ interface CreateSkillMenuProps {
 }
 
 export function CreateSkillMenu({ onImported, label = "创建我的专属技能" }: CreateSkillMenuProps) {
+  const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [githubOpen, setGithubOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  const handleCreateWithOpenTalos = () => {
+    setMenuOpen(false);
+    stashHomeDraft(CREATE_WITH_OPENTALOS_DRAFT);
+    router.push("/");
+  };
 
   // 这个页面只有一个这样的下拉，不需要多菜单互斥协调——自己管 open 状态 + 点击外部关闭即可。
   useEffect(() => {
@@ -42,6 +53,15 @@ export function CreateSkillMenu({ onImported, label = "创建我的专属技能"
           role="menu"
           className="absolute right-0 z-20 mt-1 w-56 rounded-xl border border-border bg-white p-1.5 shadow-lg"
         >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={handleCreateWithOpenTalos}
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-gray-50"
+          >
+            <PencilSquareIcon width={16} height={16} />
+            使用 OpenTalos 创建技能
+          </button>
           <button
             type="button"
             role="menuitem"
