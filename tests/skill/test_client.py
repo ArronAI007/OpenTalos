@@ -163,7 +163,8 @@ async def test_preview_skill_returns_full_detail():
         assert request.url.path == "/skills/date/detail"
         return httpx.Response(200, json={
             "name": "date", "description": "dates", "content": "# date\n\nusage...",
-            "tags": ["编程"], "usage_count": 3, "added": False, "updated_at": "2026-09-28T10:00:00",
+            "frontmatter_yaml": None, "tags": ["编程"], "usage_count": 3,
+            "added": False, "updated_at": "2026-09-28T10:00:00",
         })
 
     detail = await _build_client(handler).preview_skill("date")

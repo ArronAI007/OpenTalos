@@ -79,6 +79,7 @@ class SkillPreview(BaseModel):
     name: str
     description: str
     content: str
+    frontmatter_yaml: str | None
     tags: list[str]
     usage_count: int
     added: bool
