@@ -143,15 +143,19 @@ export async function uploadSkill(file: File): Promise<{ name: string }> {
   return res.json();
 }
 
+export interface SkillFile {
+  path: string;
+  content: string | null;
+}
 export interface SkillDetail {
   name: string;
   description: string;
-  content: string;
   frontmatter_yaml: string | null;
   tags: string[];
   usage_count: number;
   added: boolean;
   updated_at: string;
+  files: SkillFile[];
 }
 
 export async function getSkillDetail(name: string): Promise<SkillDetail> {

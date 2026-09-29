@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { getSkillDetail, suggestSkillUsage, type SkillSummary } from "@/lib/api";
+import { getSkillDetail, suggestSkillUsage, type SkillFile, type SkillSummary } from "@/lib/api";
 import { stashHomeDraft } from "@/lib/pending-message";
 import { copyText } from "@/lib/clipboard";
 import { CheckIcon, ChevronLeftIcon, CopyIcon, FileTextIcon, MessageCircleIcon } from "@/components/ui/icons";
@@ -19,7 +19,8 @@ interface SkillDetailModalProps {
 
 export function SkillDetailModal({ open, onClose, skill, onToggleAdded }: SkillDetailModalProps) {
   const router = useRouter();
-  const [content, setContent] = useState<string | null>(null);
+  const [files, setFiles] = useState<SkillFile[] | null>(null);
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [frontmatterYaml, setFrontmatterYaml] = useState<string | null>(null);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [examples, setExamples] = useState<string[] | null>(null);
@@ -31,7 +32,8 @@ export function SkillDetailModal({ open, onClose, skill, onToggleAdded }: SkillD
     if (!open) return;
     if (requestedForRef.current === skill.name) return;
     requestedForRef.current = skill.name;
-    setContent(null);
+    setFiles(null);
+    setSelectedPath(null);
     setFrontmatterYaml(null);
     setUpdatedAt(null);
     setExamples(null);
@@ -39,12 +41,14 @@ export function SkillDetailModal({ open, onClose, skill, onToggleAdded }: SkillD
 
     getSkillDetail(skill.name)
       .then((detail) => {
-        setContent(detail.content);
+        setFiles(detail.files);
+        setSelectedPath(detail.files.some((f) => f.path === "SKILL.md") ? "SKILL.md" : (detail.files[0]?.path ?? null));
         setFrontmatterYaml(detail.frontmatter_yaml);
         setUpdatedAt(detail.updated_at);
       })
       .catch(() => {
-        setContent("（加载失败，请稍后重试。）");
+        setFiles([{ path: "SKILL.md", content: "（加载失败，请稍后重试。）" }]);
+        setSelectedPath("SKILL.md");
       });
 
     // 和内容请求并行发起，不等 content 回来——推荐用法只需要 description，latency 上不互相拖累。
@@ -111,42 +115,68 @@ export function SkillDetailModal({ open, onClose, skill, onToggleAdded }: SkillD
             </div>
 
             <div className="flex flex-1 overflow-hidden">
-              <div className="w-36 shrink-0 overflow-y-auto border-r border-border p-3">
+              <div className="w-36 shrink-0 space-y-0.5 overflow-y-auto p-3">
                 <p className="mb-2 px-1 text-xs font-medium text-text-secondary">文件</p>
-                <div className="flex items-center gap-2 rounded-lg bg-gray-100 px-2 py-1.5 text-sm">
-                  <FileTextIcon width={14} height={14} className="shrink-0 text-text-secondary" />
-                  <span className="truncate">SKILL.md</span>
-                </div>
+                {files === null ? (
+                  <p className="px-1 text-xs text-text-secondary">加载中…</p>
+                ) : (
+                  files.map((file) => (
+                    <button
+                      key={file.path}
+                      type="button"
+                      onClick={() => setSelectedPath(file.path)}
+                      className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm ${
+                        file.path === selectedPath ? "bg-gray-100" : "hover:bg-gray-50"
+                      }`}
+                    >
+                      <FileTextIcon width={14} height={14} className="shrink-0 text-text-secondary" />
+                      <span className="truncate">{file.path}</span>
+                    </button>
+                  ))
+                )}
               </div>
 
-              <div className="flex-1 overflow-y-auto p-6">
-                {frontmatterYaml && (
-                  <div className="mb-4 overflow-hidden rounded-lg border border-border">
-                    <div className="flex items-center justify-between bg-gray-50 px-3 py-1.5 text-xs font-medium text-text-secondary">
-                      YAML
-                      <button
-                        type="button"
-                        aria-label="复制"
-                        onClick={handleCopyFrontmatter}
-                        className="text-text-secondary hover:text-text"
-                      >
-                        <CopyIcon width={14} height={14} />
-                      </button>
-                    </div>
-                    <pre className="overflow-x-auto bg-gray-50 px-3 py-2 text-xs">
-                      <code>{frontmatterYaml}</code>
-                    </pre>
-                    {copied && <p className="bg-gray-50 px-3 pb-2 text-xs text-text-secondary">已复制</p>}
-                  </div>
-                )}
+              <div className="flex-1 overflow-y-auto border-l border-border p-6">
+                {(() => {
+                  if (files === null) return <p className="text-sm text-text-secondary">加载中…</p>;
+                  const selectedFile = files.find((f) => f.path === selectedPath);
+                  if (!selectedFile) return null;
+                  return (
+                    <>
+                      {selectedPath === "SKILL.md" && frontmatterYaml && (
+                        <div className="mb-4 overflow-hidden rounded-lg border border-border">
+                          <div className="flex items-center justify-between bg-gray-50 px-3 py-1.5 text-xs font-medium text-text-secondary">
+                            YAML
+                            <button
+                              type="button"
+                              aria-label="复制"
+                              onClick={handleCopyFrontmatter}
+                              className="text-text-secondary hover:text-text"
+                            >
+                              <CopyIcon width={14} height={14} />
+                            </button>
+                          </div>
+                          <pre className="overflow-x-auto bg-gray-50 px-3 py-2 text-xs">
+                            <code>{frontmatterYaml}</code>
+                          </pre>
+                          {copied && <p className="bg-gray-50 px-3 pb-2 text-xs text-text-secondary">已复制</p>}
+                        </div>
+                      )}
 
-                {content === null ? (
-                  <p className="text-sm text-text-secondary">加载中…</p>
-                ) : (
-                  <div className="md">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
-                  </div>
-                )}
+                      {selectedFile.content === null ? (
+                        <p className="text-sm text-text-secondary">无法预览此文件。</p>
+                      ) : selectedFile.path.toLowerCase().endsWith(".md") ? (
+                        <div className="md">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{selectedFile.content}</ReactMarkdown>
+                        </div>
+                      ) : (
+                        <pre className="overflow-x-auto rounded-lg bg-gray-50 p-3 text-xs">
+                          <code>{selectedFile.content}</code>
+                        </pre>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             </div>
           </>
