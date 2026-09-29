@@ -2,7 +2,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-from skill.discovery import discover_skills
+from skill.discovery import discover_skills, list_skill_files
 
 
 def test_discover_skills_finds_all_skill_directories_with_a_skill_md(tmp_path: Path) -> None:
@@ -72,3 +72,28 @@ def test_discover_skills_includes_updated_at_from_file_mtime(tmp_path: Path) -> 
 
     expected = datetime.fromtimestamp(fixed_timestamp).strftime("%Y-%m-%dT%H:%M:%S")
     assert skills[0].updated_at == expected
+
+
+def test_list_skill_files_returns_every_file_with_its_relative_path(tmp_path: Path) -> None:
+    skill_dir = tmp_path / "alpha"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text("# alpha\n", encoding="utf-8")
+    (skill_dir / "scripts").mkdir()
+    (skill_dir / "scripts" / "main.py").write_text("print('hi')\n", encoding="utf-8")
+
+    files = list_skill_files(skill_dir)
+
+    assert files == [
+        ("SKILL.md", "# alpha\n"),
+        ("scripts/main.py", "print('hi')\n"),
+    ]
+
+
+def test_list_skill_files_reports_none_content_for_undecodable_files(tmp_path: Path) -> None:
+    skill_dir = tmp_path / "alpha"
+    skill_dir.mkdir()
+    (skill_dir / "image.png").write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x00\x00\xff\xd9")
+
+    files = list_skill_files(skill_dir)
+
+    assert files == [("image.png", None)]

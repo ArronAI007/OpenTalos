@@ -32,6 +32,22 @@ def _extract_description(content: str) -> str:
     return ""
 
 
+def list_skill_files(skill_dir: Path) -> list[tuple[str, str | None]]:
+    """列出技能目录下所有文件的相对路径和内容——按 UTF-8 解码，解不出来（二进制文件）就给 None，
+    调用方决定怎么展示"无法预览"，不在这里替调用方下判断。"""
+    files = []
+    for path in sorted(skill_dir.rglob("*")):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(skill_dir).as_posix()
+        try:
+            content: str | None = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            content = None
+        files.append((relative, content))
+    return files
+
+
 def discover_skills(skills_root: Path) -> list[Skill]:
     if not skills_root.is_dir():
         return []
