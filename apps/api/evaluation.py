@@ -119,3 +119,36 @@ async def judge_reply(
         )
     except Exception:  # noqa: BLE001 - 裁判失败不影响其他用例，调用方看到 None 展示"评分失败"
         return None
+
+
+async def run_case(runtime: "ChatRuntime", agent_type: str, case: EvalCase) -> EvalResult:
+    """建一个立即归档的任务，复用 stream_reply 真实跑一轮对话，再让裁判打分。
+    单条失败（agent 报错/裁判解析失败/建任务时的意外异常）不影响其他组合——这个函数保证不
+    向外抛未捕获异常，外层可以放心用 asyncio.gather（不需要 return_exceptions=True）。"""
+    start = time.monotonic()
+    try:
+        task = runtime.store.create_task(agent_type)
+        runtime.store.update_task(task["id"], archived=1)
+        reply: str | None = None
+        error: str | None = None
+        async for event in runtime.stream_reply(task["id"], case.instruction, skip_suggestions=True):
+            if event["type"] == "done":
+                reply = event["reply"]
+            elif event["type"] == "error":
+                error = event["message"]
+        score = (
+            await judge_reply(runtime.model_client, case.instruction, case.expected_answer, reply)
+            if reply
+            else None
+        )
+    except Exception as exc:  # noqa: BLE001 - 这条组合失败不能连累其他组合
+        return EvalResult(
+            case_id=case.id, case_name=case.name, agent_type=agent_type,
+            reply=None, score=None, error=str(exc),
+            latency_ms=int((time.monotonic() - start) * 1000),
+        )
+    return EvalResult(
+        case_id=case.id, case_name=case.name, agent_type=agent_type,
+        reply=reply, score=score, error=error,
+        latency_ms=int((time.monotonic() - start) * 1000),
+    )

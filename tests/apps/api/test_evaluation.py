@@ -1,12 +1,25 @@
 """Agent 评估：测试用例 CRUD + LLM 裁判打分 + 单条评估执行，均遵循"失败不传染"的哲学。"""
-from pathlib import Path
-
 import asyncio
+from pathlib import Path
 from typing import Any
 
-from core.protocol import Completion
-from evaluation import add_eval_case, judge_reply, load_eval_cases, remove_eval_case, save_eval_cases
+import pytest
+from core.protocol import Completion, ToolCompletion
+from db import ChatStore
+from evaluation import add_eval_case, judge_reply, load_eval_cases, remove_eval_case, run_case, save_eval_cases
 from evaluation import EvalCase, EvalScore
+from runtime import ChatRuntime
+
+
+@pytest.fixture
+def store(tmp_path: Path) -> ChatStore:
+    return ChatStore(tmp_path / "chat.db")
+
+
+def _runtime(store: ChatStore, client, tmp_path: Path) -> ChatRuntime:
+    return ChatRuntime(
+        store, model_client=client, skill_service_url="http://127.0.0.1:1", trace_dir=tmp_path / "traces",
+    )
 
 
 def test_load_eval_cases_returns_empty_list_when_file_is_missing(tmp_path: Path) -> None:
@@ -85,3 +98,45 @@ class TestJudgeReply:
 
         client.acomplete = slow  # type: ignore[method-assign]
         assert asyncio.run(judge_reply(client, "instruction", None, "reply", timeout=0.05)) is None
+
+
+class TestRunCase:
+    def test_captures_a_reply_and_judge_score(self, store, scripted_client, tmp_path) -> None:
+        client = scripted_client(
+            tool_completions=[ToolCompletion(text="42", requested_tools=[], model_id="mock-model")],
+            completions=[Completion(text='{"correctness": 5, "completeness": 4, "clarity": 5, "comment": "good"}', model_id="mock-model")],
+        )
+        runtime = _runtime(store, client, tmp_path)
+        case = EvalCase(id="c1", name="加法", instruction="1+1等于几", expected_answer="2")
+
+        result = asyncio.run(run_case(runtime, "react", case))
+
+        assert result.reply == "42"
+        assert result.score == EvalScore(correctness=5, completeness=4, clarity=5, comment="good")
+        assert result.error is None
+        assert result.case_id == "c1"
+        assert result.case_name == "加法"
+        assert result.agent_type == "react"
+
+    def test_created_task_is_archived_and_hidden_from_the_task_list(self, store, scripted_client, tmp_path) -> None:
+        client = scripted_client(
+            tool_completions=[ToolCompletion(text="ok", requested_tools=[], model_id="mock-model")],
+            completions=[Completion(text='{"correctness": 3, "completeness": 3, "clarity": 3, "comment": "x"}', model_id="mock-model")],
+        )
+        runtime = _runtime(store, client, tmp_path)
+        case = EvalCase(id="c1", name="用例", instruction="hi", expected_answer=None)
+
+        asyncio.run(run_case(runtime, "react", case))
+
+        assert store.list_tasks() == []  # 评估任务立即标 archived，不出现在默认任务列表
+
+    def test_captures_an_error_without_raising(self, store, scripted_client, tmp_path) -> None:
+        client = scripted_client(tool_completions=[])
+        runtime = _runtime(store, client, tmp_path)
+        case = EvalCase(id="c1", name="坏用例", instruction="hi", expected_answer=None)
+
+        result = asyncio.run(run_case(runtime, "not-a-real-agent-type", case))
+
+        assert result.reply is None
+        assert result.score is None
+        assert result.error is not None
