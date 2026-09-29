@@ -274,3 +274,14 @@ export function FileTextIcon(props: IconProps) {
     </Icon>
   );
 }
+
+export function ChartBarIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M3 3v18h18" />
+      <rect x={7} y={13} width={3} height={5} />
+      <rect x={12} y={9} width={3} height={9} />
+      <rect x={17} y={5} width={3} height={13} />
+    </Icon>
+  );
+}
