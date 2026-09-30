@@ -55,6 +55,18 @@ def test_no_token_budget_means_unlimited_usage():
     assert token.is_cancelled is False
 
 
+def test_tokens_used_starts_at_zero():
+    token = CancellationToken()
+    assert token.tokens_used == 0
+
+
+def test_tokens_used_accumulates_across_calls():
+    token = CancellationToken()
+    token.record_tokens(60)
+    token.record_tokens(40)
+    assert token.tokens_used == 100
+
+
 async def test_timeout_seconds_is_not_exceeded_immediately():
     token = CancellationToken(timeout_seconds=10)
     assert token.is_cancelled is False

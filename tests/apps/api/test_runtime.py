@@ -726,6 +726,21 @@ def test_stream_reply_skips_suggestions_when_requested(store, scripted_client, t
     assert "suggestions" not in event_types
 
 
+def test_stream_reply_accumulates_tokens_onto_a_passed_in_cancellation_token(store, scripted_client, tmp_path) -> None:
+    from core.cancellation import CancellationToken
+
+    client = scripted_client(tool_completions=[
+        ToolCompletion(text="ok", requested_tools=[], model_id="mock-model", token_usage={"total_tokens": 42}),
+    ])
+    runtime = _runtime(store, client, tmp_path)
+    task = store.create_task("react")
+    cancellation = CancellationToken()
+
+    asyncio.run(_collect_kw(runtime, task["id"], "hi", cancellation=cancellation))
+
+    assert cancellation.tokens_used == 42
+
+
 def test_model_client_property_exposes_the_underlying_client(store, scripted_client, tmp_path) -> None:
     client = scripted_client(tool_completions=[])
     runtime = _runtime(store, client, tmp_path)

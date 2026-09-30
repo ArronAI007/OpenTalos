@@ -12,6 +12,7 @@ from typing import Any
 
 from agents.builder import build_agent
 from core.agent import Agent
+from core.cancellation import CancellationToken
 from core.model import ModelClient
 from core.protocol import ChatMessage
 from skill.client import SkillClient, SkillServiceError
@@ -238,7 +239,12 @@ class ChatRuntime:
         self._task_locks.pop(task_id, None)
 
     async def stream_reply(
-        self, task_id: str, content: str, *, skip_suggestions: bool = False
+        self,
+        task_id: str,
+        content: str,
+        *,
+        skip_suggestions: bool = False,
+        cancellation: CancellationToken | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         task = await asyncio.to_thread(self._store.get_task, task_id)
         if task is None:
@@ -278,6 +284,7 @@ class ChatRuntime:
                         content,
                         on_text_delta=lambda chunk: emit({"type": "delta", "text": chunk}),
                         on_reasoning_delta=lambda chunk: emit({"type": "reasoning", "text": chunk}),
+                        cancellation=cancellation,
                     )
                 except Exception as exc:  # noqa: BLE001 - 转成 error 事件交给前端
                     error = str(exc)

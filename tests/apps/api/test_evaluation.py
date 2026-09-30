@@ -103,7 +103,9 @@ class TestJudgeReply:
 class TestRunCase:
     def test_captures_a_reply_and_judge_score(self, store, scripted_client, tmp_path) -> None:
         client = scripted_client(
-            tool_completions=[ToolCompletion(text="42", requested_tools=[], model_id="mock-model")],
+            tool_completions=[
+                ToolCompletion(text="42", requested_tools=[], model_id="mock-model", token_usage={"total_tokens": 123}),
+            ],
             completions=[Completion(text='{"correctness": 5, "completeness": 4, "clarity": 5, "comment": "good"}', model_id="mock-model")],
         )
         runtime = _runtime(store, client, tmp_path)
@@ -117,6 +119,21 @@ class TestRunCase:
         assert result.case_id == "c1"
         assert result.case_name == "加法"
         assert result.agent_type == "react"
+        assert result.tokens_used == 123
+
+    def test_estimates_tokens_from_reply_length_when_real_usage_is_unavailable(self, store, scripted_client, tmp_path) -> None:
+        # 流式调用真机不报 usage（见 packages/core/model.py 的注释），token_usage 留空时
+        # 退化为按回复字符数 / 4 估算，而不是死板地显示 0。
+        client = scripted_client(
+            tool_completions=[ToolCompletion(text="12345678", requested_tools=[], model_id="mock-model")],
+            completions=[Completion(text='{"correctness": 3, "completeness": 3, "clarity": 3, "comment": "x"}', model_id="mock-model")],
+        )
+        runtime = _runtime(store, client, tmp_path)
+        case = EvalCase(id="c1", name="用例", instruction="hi", expected_answer=None)
+
+        result = asyncio.run(run_case(runtime, "react", case))
+
+        assert result.tokens_used == 2  # len("12345678") // 4
 
     def test_created_task_is_archived_and_hidden_from_the_task_list(self, store, scripted_client, tmp_path) -> None:
         client = scripted_client(

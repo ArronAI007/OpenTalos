@@ -190,6 +190,7 @@ export interface EvalResult {
   score: EvalScore | null;
   error: string | null;
   latency_ms: number;
+  tokens_used: number;
 }
 export interface EvalRun {
   id: string;

@@ -35,6 +35,10 @@ function formatTimestamp(createdAt: string): string {
   return createdAt.replace("T", " ").slice(0, 19);
 }
 
+function formatLatency(latencyMs: number): string {
+  return `${(latencyMs / 1000).toFixed(1)}s`;
+}
+
 // 删除确认弹窗，沿用 DeleteTurnDialog 的模态范式（fixed 遮罩点关 + Esc 带 IME guard，
 // 默认焦点落在「取消」）；这里单独写一份而不是复用 DeleteTurnDialog，因为文案是评估记录专属的。
 function ConfirmDeleteRunDialog({
@@ -125,6 +129,7 @@ function ReportView({ results, agentTypesOrder }: { results: EvalResult[]; agent
             <th className="py-1.5 pr-2">清晰度</th>
             <th className="py-1.5 pr-2">点评</th>
             <th className="py-1.5 pr-2">耗时</th>
+            <th className="py-1.5 pr-2">Token 数</th>
           </tr>
         </thead>
         <tbody>
@@ -148,7 +153,8 @@ function ReportView({ results, agentTypesOrder }: { results: EvalResult[]; agent
                   评分失败
                 </td>
               )}
-              <td className="py-1.5 pr-2">{r.latency_ms}ms</td>
+              <td className="py-1.5 pr-2">{formatLatency(r.latency_ms)}</td>
+              <td className="py-1.5 pr-2">{r.tokens_used}</td>
             </tr>
           ))}
         </tbody>

@@ -28,6 +28,10 @@ class CancellationToken:
         self._tokens_used += count
 
     @property
+    def tokens_used(self) -> int:
+        return self._tokens_used
+
+    @property
     def is_cancelled(self) -> bool:
         return (
             self._event.is_set()

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from core.cancellation import CancellationToken
 from core.model import ModelClient
 from pydantic import BaseModel
 
@@ -39,6 +40,7 @@ class EvalResult(BaseModel):
     score: EvalScore | None
     error: str | None
     latency_ms: int
+    tokens_used: int
 
 
 def load_eval_cases(store_path: Path) -> list[EvalCase]:
@@ -126,12 +128,15 @@ async def run_case(runtime: "ChatRuntime", agent_type: str, case: EvalCase) -> E
     单条失败（agent 报错/裁判解析失败/建任务时的意外异常）不影响其他组合——这个函数保证不
     向外抛未捕获异常，外层可以放心用 asyncio.gather（不需要 return_exceptions=True）。"""
     start = time.monotonic()
+    cancellation = CancellationToken()
     try:
         task = runtime.store.create_task(agent_type)
         runtime.store.update_task(task["id"], archived=1)
         reply: str | None = None
         error: str | None = None
-        async for event in runtime.stream_reply(task["id"], case.instruction, skip_suggestions=True):
+        async for event in runtime.stream_reply(
+            task["id"], case.instruction, skip_suggestions=True, cancellation=cancellation
+        ):
             if event["type"] == "done":
                 reply = event["reply"]
             elif event["type"] == "error":
@@ -146,9 +151,18 @@ async def run_case(runtime: "ChatRuntime", agent_type: str, case: EvalCase) -> E
             case_id=case.id, case_name=case.name, agent_type=agent_type,
             reply=None, score=None, error=str(exc),
             latency_ms=int((time.monotonic() - start) * 1000),
+            tokens_used=_estimate_tokens(None, cancellation.tokens_used),
         )
     return EvalResult(
         case_id=case.id, case_name=case.name, agent_type=agent_type,
         reply=reply, score=score, error=error,
         latency_ms=int((time.monotonic() - start) * 1000),
+        tokens_used=_estimate_tokens(reply, cancellation.tokens_used),
     )
+
+
+def _estimate_tokens(reply: str | None, recorded: int) -> int:
+    """真实用量优先；流式调用不报 usage（packages/core/model.py 的 astream_with_tools 对
+    openai-compatible 后端留空，避免依赖并非所有供应商都支持的 stream_options include_usage）
+    时，recorded 恒为 0——退化为按回复字符数 / 4 做粗略估计，聊胜于无地给出一个量级。"""
+    return recorded or (len(reply) // 4 if reply else 0)
