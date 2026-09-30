@@ -310,3 +310,37 @@ def test_legacy_db_without_flag_columns_migrates(tmp_path: Path) -> None:
     assert store.update_task("t1", pinned=1)["pinned"] == 1  # 迁移后可正常固定
     assert store.update_task("t1", starred=1)["starred"] == 1  # 迁移后可正常收藏
     assert store.update_task("t1", archived=1)["archived"] == 1  # 迁移后可正常归档
+
+
+def test_save_and_list_eval_runs(store: ChatStore) -> None:
+    results = [{"case_id": "c1", "agent_type": "react", "score": {"correctness": 5}}]
+    run = store.save_eval_run(results)
+    assert run["id"]
+    assert run["created_at"]
+    assert run["results"] == results
+    assert [r["id"] for r in store.list_eval_runs()] == [run["id"]]
+
+
+def test_list_eval_runs_orders_by_created_at_desc(store: ChatStore) -> None:
+    first = store.save_eval_run([{"case_id": "c1"}])
+    second = store.save_eval_run([{"case_id": "c2"}])
+    # 最新一次评估排最前
+    assert [r["id"] for r in store.list_eval_runs()] == [second["id"], first["id"]]
+
+
+def test_legacy_db_without_eval_runs_table_creates_it(tmp_path: Path) -> None:
+    db_path = tmp_path / "legacy.db"
+    # 构造旧库：仅 tasks 表，无 eval_runs 表。_SCHEMA 在每次构造时整段执行，
+    # CREATE TABLE IF NOT EXISTS 对既有库直接补建新表（与列级 _MIGRATIONS 不同）。
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "CREATE TABLE tasks (id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '',"
+        " agent_type TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"
+    )
+    conn.commit()
+    conn.close()
+
+    store = ChatStore(db_path)
+    assert store.list_eval_runs() == []
+    run = store.save_eval_run([{"case_id": "c1"}])
+    assert [r["id"] for r in store.list_eval_runs()] == [run["id"]]

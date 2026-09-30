@@ -6,11 +6,91 @@ import {
   createEvalCase,
   deleteEvalCase,
   runEval,
+  listEvalRuns,
   fetchConfig,
   type EvalCase,
   type EvalResult,
+  type EvalRun,
 } from "@/lib/api";
 import { TrashIcon } from "@/components/ui/icons";
+
+// 按 agent 类型汇总：均分取三维度总均值，通过率＝均分 >=3.5 的用例占比
+// （沿用参考资料里"数据生成质量评估"章节对 Pass Rate 阈值的约定）。
+function summarizeResults(results: EvalResult[], agentTypesOrder: string[]) {
+  const present = new Set(results.map((r) => r.agent_type));
+  return agentTypesOrder
+    .filter((t) => present.has(t))
+    .map((agentType) => {
+      const scored = results
+        .filter((r) => r.agent_type === agentType && r.score)
+        .map((r) => (r.score!.correctness + r.score!.completeness + r.score!.clarity) / 3);
+      const avg = scored.length ? scored.reduce((a, b) => a + b, 0) / scored.length : null;
+      const passRate = scored.length ? scored.filter((s) => s >= 3.5).length / scored.length : null;
+      return { agentType, avg, passRate };
+    });
+}
+
+function formatTimestamp(createdAt: string): string {
+  return createdAt.replace("T", " ").slice(0, 19);
+}
+
+function ReportView({ results, agentTypesOrder }: { results: EvalResult[]; agentTypesOrder: string[] }) {
+  const summaries = summarizeResults(results, agentTypesOrder);
+  return (
+    <div>
+      <ul className="mb-4 flex flex-wrap gap-4">
+        {summaries.map((s) => (
+          <li key={s.agentType} className="rounded-lg bg-gray-50 px-3 py-2 text-sm">
+            <p className="font-medium">{s.agentType}</p>
+            <p className="text-text-secondary">
+              {s.avg === null
+                ? "无有效评分"
+                : `均分 ${s.avg.toFixed(1)} · 通过率 ${Math.round((s.passRate ?? 0) * 100)}%`}
+            </p>
+          </li>
+        ))}
+      </ul>
+      <table className="w-full text-left text-sm">
+        <thead>
+          <tr className="border-b border-border text-text-secondary">
+            <th className="py-1.5 pr-2">用例</th>
+            <th className="py-1.5 pr-2">Agent</th>
+            <th className="py-1.5 pr-2">正确性</th>
+            <th className="py-1.5 pr-2">完整性</th>
+            <th className="py-1.5 pr-2">清晰度</th>
+            <th className="py-1.5 pr-2">点评</th>
+            <th className="py-1.5 pr-2">耗时</th>
+          </tr>
+        </thead>
+        <tbody>
+          {results.map((r) => (
+            <tr key={`${r.case_id}-${r.agent_type}`} className="border-b border-border align-top">
+              <td className="py-1.5 pr-2">{r.case_name}</td>
+              <td className="py-1.5 pr-2">{r.agent_type}</td>
+              {r.error ? (
+                <td colSpan={4} className="py-1.5 pr-2 text-red-500">
+                  {r.error}
+                </td>
+              ) : r.score ? (
+                <>
+                  <td className="py-1.5 pr-2">{r.score.correctness}</td>
+                  <td className="py-1.5 pr-2">{r.score.completeness}</td>
+                  <td className="py-1.5 pr-2">{r.score.clarity}</td>
+                  <td className="py-1.5 pr-2">{r.score.comment}</td>
+                </>
+              ) : (
+                <td colSpan={4} className="py-1.5 pr-2 text-text-secondary">
+                  评分失败
+                </td>
+              )}
+              <td className="py-1.5 pr-2">{r.latency_ms}ms</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 export default function EvalPage() {
   const [cases, setCases] = useState<EvalCase[] | null>(null);
@@ -21,7 +101,8 @@ export default function EvalPage() {
   const [instruction, setInstruction] = useState("");
   const [expectedAnswer, setExpectedAnswer] = useState("");
   const [running, setRunning] = useState(false);
-  const [results, setResults] = useState<EvalResult[] | null>(null);
+  const [runs, setRuns] = useState<EvalRun[] | null>(null);
+  const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -33,6 +114,7 @@ export default function EvalPage() {
       setAgentTypes(config.agent_types);
       setSelectedTypes(new Set(config.agent_types));
     });
+    listEvalRuns().then(setRuns);
   }, []);
 
   if (cases === null) return null;
@@ -84,31 +166,16 @@ export default function EvalPage() {
     if (selectedCaseIds.size === 0 || selectedTypes.size === 0) return;
     setRunning(true);
     setError(null);
-    setResults(null);
     try {
-      const data = await runEval([...selectedCaseIds], [...selectedTypes]);
-      setResults(data);
+      const run = await runEval([...selectedCaseIds], [...selectedTypes]);
+      setRuns((prev) => [run, ...(prev ?? [])]);
+      setExpandedRunId(run.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "评估失败");
     } finally {
       setRunning(false);
     }
   };
-
-  // 按 agent 类型汇总：均分取三维度总均值，通过率＝均分 >=3.5 的用例占比
-  // （沿用参考资料里"数据生成质量评估"章节对 Pass Rate 阈值的约定）。
-  const summaries = (results ?? []).length
-    ? agentTypes
-        .filter((t) => selectedTypes.has(t))
-        .map((agentType) => {
-          const scored = (results ?? [])
-            .filter((r) => r.agent_type === agentType && r.score)
-            .map((r) => (r.score!.correctness + r.score!.completeness + r.score!.clarity) / 3);
-          const avg = scored.length ? scored.reduce((a, b) => a + b, 0) / scored.length : null;
-          const passRate = scored.length ? scored.filter((s) => s >= 3.5).length / scored.length : null;
-          return { agentType, avg, passRate };
-        })
-    : [];
 
   return (
     <section className="p-6">
@@ -201,61 +268,41 @@ export default function EvalPage() {
         {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
       </div>
 
-      {results && (
-        <div className="rounded-xl border border-border bg-white p-4">
-          <h2 className="mb-3 text-sm font-medium">评估报告</h2>
-          <ul className="mb-4 flex flex-wrap gap-4">
-            {summaries.map((s) => (
-              <li key={s.agentType} className="rounded-lg bg-gray-50 px-3 py-2 text-sm">
-                <p className="font-medium">{s.agentType}</p>
-                <p className="text-text-secondary">
-                  {s.avg === null
-                    ? "无有效评分"
-                    : `均分 ${s.avg.toFixed(1)} · 通过率 ${Math.round((s.passRate ?? 0) * 100)}%`}
-                </p>
-              </li>
-            ))}
-          </ul>
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-border text-text-secondary">
-                <th className="py-1.5 pr-2">用例</th>
-                <th className="py-1.5 pr-2">Agent</th>
-                <th className="py-1.5 pr-2">正确性</th>
-                <th className="py-1.5 pr-2">完整性</th>
-                <th className="py-1.5 pr-2">清晰度</th>
-                <th className="py-1.5 pr-2">点评</th>
-                <th className="py-1.5 pr-2">耗时</th>
-              </tr>
-            </thead>
-            <tbody>
-              {results.map((r) => (
-                <tr key={`${r.case_id}-${r.agent_type}`} className="border-b border-border align-top">
-                  <td className="py-1.5 pr-2">{r.case_name}</td>
-                  <td className="py-1.5 pr-2">{r.agent_type}</td>
-                  {r.error ? (
-                    <td colSpan={4} className="py-1.5 pr-2 text-red-500">
-                      {r.error}
-                    </td>
-                  ) : r.score ? (
-                    <>
-                      <td className="py-1.5 pr-2">{r.score.correctness}</td>
-                      <td className="py-1.5 pr-2">{r.score.completeness}</td>
-                      <td className="py-1.5 pr-2">{r.score.clarity}</td>
-                      <td className="py-1.5 pr-2">{r.score.comment}</td>
-                    </>
-                  ) : (
-                    <td colSpan={4} className="py-1.5 pr-2 text-text-secondary">
-                      评分失败
-                    </td>
+      <div className="rounded-xl border border-border bg-white p-4">
+        <h2 className="mb-3 text-sm font-medium">历史评估记录</h2>
+        {!runs || runs.length === 0 ? (
+          <p className="text-sm text-text-secondary">还没有评估记录，运行一次评估后会显示在这里。</p>
+        ) : (
+          <ul className="space-y-2">
+            {runs.map((run) => {
+              const expanded = expandedRunId === run.id;
+              const presentTypes = [...new Set(run.results.map((r) => r.agent_type))];
+              return (
+                <li key={run.id} className="rounded-lg border border-border">
+                  <button
+                    type="button"
+                    onClick={() => setExpandedRunId(expanded ? null : run.id)}
+                    className="flex w-full items-center justify-between px-3 py-2 text-left text-sm"
+                  >
+                    <span>
+                      <span className="font-medium">{formatTimestamp(run.created_at)}</span>
+                      <span className="ml-2 text-text-secondary">
+                        {presentTypes.join("、")} · 共 {run.results.length} 条结果
+                      </span>
+                    </span>
+                    <span className="text-text-secondary">{expanded ? "收起" : "展开"}</span>
+                  </button>
+                  {expanded && (
+                    <div className="border-t border-border p-3">
+                      <ReportView results={run.results} agentTypesOrder={agentTypes} />
+                    </div>
                   )}
-                  <td className="py-1.5 pr-2">{r.latency_ms}ms</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
     </section>
   );
 }

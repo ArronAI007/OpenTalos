@@ -191,6 +191,11 @@ export interface EvalResult {
   error: string | null;
   latency_ms: number;
 }
+export interface EvalRun {
+  id: string;
+  created_at: string;
+  results: EvalResult[];
+}
 
 export async function listEvalCases(): Promise<EvalCase[]> {
   return fetchJson<{ cases: EvalCase[] }>(`${API_URL}/api/eval/cases`, { cache: "no-store" }).then((d) => d.cases);
@@ -213,10 +218,13 @@ export async function deleteEvalCase(id: string): Promise<void> {
   if (!res.ok) throw new Error(`API ${res.status} ${res.statusText}`);
 }
 
-export async function runEval(caseIds: string[], agentTypes: string[]): Promise<EvalResult[]> {
-  const data = await postJsonWithDetail<{ results: EvalResult[] }>(`${API_URL}/api/eval/run`, {
+export async function runEval(caseIds: string[], agentTypes: string[]): Promise<EvalRun> {
+  return postJsonWithDetail<EvalRun>(`${API_URL}/api/eval/run`, {
     case_ids: caseIds,
     agent_types: agentTypes,
   });
-  return data.results;
+}
+
+export async function listEvalRuns(): Promise<EvalRun[]> {
+  return fetchJson<{ runs: EvalRun[] }>(`${API_URL}/api/eval/runs`, { cache: "no-store" }).then((d) => d.runs);
 }

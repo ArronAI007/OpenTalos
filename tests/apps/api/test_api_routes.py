@@ -482,13 +482,26 @@ async def test_eval_run_route_returns_scored_results(tmp_path, scripted_client) 
     resp = await local_api.post("/api/eval/run", json={"case_ids": [case_id], "agent_types": ["react"]})
 
     assert resp.status_code == 200
-    results = resp.json()["results"]
+    run = resp.json()
+    assert run["id"]
+    assert run["created_at"]
+    results = run["results"]
     assert len(results) == 1
     assert results[0]["reply"] == "42"
     assert results[0]["score"]["correctness"] == 5
     assert runtime.store.list_tasks() == []  # 评估任务不进任务历史
 
+    listed = await local_api.get("/api/eval/runs")
+    assert listed.status_code == 200
+    assert [r["id"] for r in listed.json()["runs"]] == [run["id"]]  # 评估记录已持久化，可查询历史
+
 
 async def test_eval_run_route_rejects_an_unknown_agent_type(api) -> None:
     resp = await api.post("/api/eval/run", json={"case_ids": [], "agent_types": ["not-a-real-type"]})
     assert resp.status_code == 422
+
+
+async def test_eval_runs_route_lists_newest_first(api) -> None:
+    listed = await api.get("/api/eval/runs")
+    assert listed.status_code == 200
+    assert listed.json() == {"runs": []}

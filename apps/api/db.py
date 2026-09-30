@@ -1,6 +1,7 @@
 """SQLite 会话/消息仓储。同步实现——FastAPI 的 def/async 端点内用 asyncio.to_thread
 或直接调用（操作均为毫秒级）；不引第三方 ORM。"""
 import datetime
+import json
 import sqlite3
 import uuid
 from pathlib import Path
@@ -28,6 +29,11 @@ CREATE TABLE IF NOT EXISTS projects (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS eval_runs (
+  id TEXT PRIMARY KEY,
+  created_at TEXT NOT NULL,
+  results TEXT NOT NULL  -- JSON 序列化的 EvalResult 列表；整轮一起读写，不拆子表
 );
 """
 
@@ -192,3 +198,19 @@ class ChatStore:
         with self._connect() as conn:
             rows = conn.execute("SELECT * FROM projects ORDER BY created_at DESC, rowid DESC").fetchall()
         return [dict(row) for row in rows]
+
+    def save_eval_run(self, results: list[dict]) -> dict:
+        run_id = uuid.uuid4().hex
+        now = _now()
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO eval_runs (id, created_at, results) VALUES (?, ?, ?)",
+                (run_id, now, json.dumps(results)),
+            )
+        return {"id": run_id, "created_at": now, "results": results}
+
+    def list_eval_runs(self) -> list[dict]:
+        # 最新一次评估排最前；rowid 作同刻 tiebreak，与 list_projects 同款写法
+        with self._connect() as conn:
+            rows = conn.execute("SELECT * FROM eval_runs ORDER BY created_at DESC, rowid DESC").fetchall()
+        return [{"id": row["id"], "created_at": row["created_at"], "results": json.loads(row["results"])} for row in rows]

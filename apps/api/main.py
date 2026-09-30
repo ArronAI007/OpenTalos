@@ -321,7 +321,11 @@ def create_app(runtime: ChatRuntime | None = None, eval_cases_path: Path | None 
             for case in cases
             for agent_type in request.agent_types
         ])
-        return {"results": [r.model_dump() for r in results]}
+        return store.save_eval_run([r.model_dump() for r in results])
+
+    @app.get("/api/eval/runs")
+    async def list_eval_runs_route() -> dict:
+        return {"runs": store.list_eval_runs()}
 
     return app
 
