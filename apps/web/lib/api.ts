@@ -228,3 +228,8 @@ export async function runEval(caseIds: string[], agentTypes: string[]): Promise<
 export async function listEvalRuns(): Promise<EvalRun[]> {
   return fetchJson<{ runs: EvalRun[] }>(`${API_URL}/api/eval/runs`, { cache: "no-store" }).then((d) => d.runs);
 }
+
+export async function deleteEvalRun(id: string): Promise<void> {
+  const res = await fetch(`${API_URL}/api/eval/runs/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(`API ${res.status} ${res.statusText}`);
+}

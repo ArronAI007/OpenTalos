@@ -327,6 +327,11 @@ def create_app(runtime: ChatRuntime | None = None, eval_cases_path: Path | None 
     async def list_eval_runs_route() -> dict:
         return {"runs": store.list_eval_runs()}
 
+    @app.delete("/api/eval/runs/{run_id}", status_code=204)
+    async def delete_eval_run_route(run_id: str) -> None:
+        if not store.delete_eval_run(run_id):
+            raise HTTPException(404, "eval run not found")
+
     return app
 
 

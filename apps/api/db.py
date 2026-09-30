@@ -214,3 +214,8 @@ class ChatStore:
         with self._connect() as conn:
             rows = conn.execute("SELECT * FROM eval_runs ORDER BY created_at DESC, rowid DESC").fetchall()
         return [{"id": row["id"], "created_at": row["created_at"], "results": json.loads(row["results"])} for row in rows]
+
+    def delete_eval_run(self, run_id: str) -> bool:
+        with self._connect() as conn:
+            cursor = conn.execute("DELETE FROM eval_runs WHERE id = ?", (run_id,))
+            return cursor.rowcount > 0

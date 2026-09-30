@@ -505,3 +505,36 @@ async def test_eval_runs_route_lists_newest_first(api) -> None:
     listed = await api.get("/api/eval/runs")
     assert listed.status_code == 200
     assert listed.json() == {"runs": []}
+
+
+async def test_delete_eval_run_route(tmp_path, scripted_client) -> None:
+    from core.protocol import Completion
+
+    client = scripted_client(
+        tool_completions=[ToolCompletion(text="42", requested_tools=[], model_id="mock-model")],
+        completions=[Completion(text='{"correctness": 5, "completeness": 5, "clarity": 5, "comment": "好"}', model_id="mock-model")],
+    )
+    client.model_name = "mock-model"
+    runtime = ChatRuntime(
+        ChatStore(tmp_path / "chat.db"),
+        model_client=client,
+        skill_service_url="http://127.0.0.1:1",
+        trace_dir=tmp_path / "traces",
+    )
+    app = create_app(runtime, eval_cases_path=tmp_path / "eval_cases.json")
+    local_api = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+
+    created = await local_api.post("/api/eval/cases", json={"name": "加法", "instruction": "1+1等于几"})
+    case_id = created.json()["id"]
+    run = (await local_api.post("/api/eval/run", json={"case_ids": [case_id], "agent_types": ["react"]})).json()
+
+    deleted = await local_api.delete(f"/api/eval/runs/{run['id']}")
+    assert deleted.status_code == 204
+
+    listed = await local_api.get("/api/eval/runs")
+    assert listed.json() == {"runs": []}
+
+
+async def test_delete_missing_eval_run_returns_404(api) -> None:
+    resp = await api.delete("/api/eval/runs/no-such-id")
+    assert resp.status_code == 404

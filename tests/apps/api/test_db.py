@@ -344,3 +344,13 @@ def test_legacy_db_without_eval_runs_table_creates_it(tmp_path: Path) -> None:
     assert store.list_eval_runs() == []
     run = store.save_eval_run([{"case_id": "c1"}])
     assert [r["id"] for r in store.list_eval_runs()] == [run["id"]]
+
+
+def test_delete_eval_run_removes_it(store: ChatStore) -> None:
+    run = store.save_eval_run([{"case_id": "c1"}])
+    assert store.delete_eval_run(run["id"]) is True
+    assert store.list_eval_runs() == []
+
+
+def test_delete_missing_eval_run_returns_false(store: ChatStore) -> None:
+    assert store.delete_eval_run("no-such-id") is False

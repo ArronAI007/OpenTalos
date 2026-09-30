@@ -7,6 +7,7 @@ import {
   deleteEvalCase,
   runEval,
   listEvalRuns,
+  deleteEvalRun,
   fetchConfig,
   type EvalCase,
   type EvalResult,
@@ -162,6 +163,12 @@ export default function EvalPage() {
     });
   };
 
+  const handleDeleteRun = async (id: string) => {
+    await deleteEvalRun(id);
+    setRuns((prev) => prev?.filter((r) => r.id !== id) ?? null);
+    setExpandedRunId((prev) => (prev === id ? null : prev));
+  };
+
   const handleRun = async () => {
     if (selectedCaseIds.size === 0 || selectedTypes.size === 0) return;
     setRunning(true);
@@ -279,19 +286,29 @@ export default function EvalPage() {
               const presentTypes = [...new Set(run.results.map((r) => r.agent_type))];
               return (
                 <li key={run.id} className="rounded-lg border border-border">
-                  <button
-                    type="button"
-                    onClick={() => setExpandedRunId(expanded ? null : run.id)}
-                    className="flex w-full items-center justify-between px-3 py-2 text-left text-sm"
-                  >
-                    <span>
-                      <span className="font-medium">{formatTimestamp(run.created_at)}</span>
-                      <span className="ml-2 text-text-secondary">
-                        {presentTypes.join("、")} · 共 {run.results.length} 条结果
+                  <div className="flex items-center gap-2 px-3 py-2 text-sm">
+                    <button
+                      type="button"
+                      onClick={() => setExpandedRunId(expanded ? null : run.id)}
+                      className="flex flex-1 items-center justify-between text-left"
+                    >
+                      <span>
+                        <span className="font-medium">{formatTimestamp(run.created_at)}</span>
+                        <span className="ml-2 text-text-secondary">
+                          {presentTypes.join("、")} · 共 {run.results.length} 条结果
+                        </span>
                       </span>
-                    </span>
-                    <span className="text-text-secondary">{expanded ? "收起" : "展开"}</span>
-                  </button>
+                      <span className="text-text-secondary">{expanded ? "收起" : "展开"}</span>
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`删除 ${formatTimestamp(run.created_at)} 的评估记录`}
+                      onClick={() => void handleDeleteRun(run.id)}
+                      className="text-text-secondary hover:text-red-500"
+                    >
+                      <TrashIcon width={14} height={14} />
+                    </button>
+                  </div>
                   {expanded && (
                     <div className="border-t border-border p-3">
                       <ReportView results={run.results} agentTypesOrder={agentTypes} />
