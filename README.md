@@ -31,6 +31,11 @@ from the full marketplace.
 
 ![Added skills](assets/screenshots/my-skills.png)
 
+**Agent evaluation** — LLM-as-judge scoring of self-authored test cases across the four
+reasoning patterns side by side, with per-type averages/pass rates and a per-run detail table.
+
+![Agent evaluation](assets/screenshots/eval.png)
+
 <details>
 <summary>Home page</summary>
 
@@ -52,6 +57,12 @@ from the full marketplace.
   mid-conversation, with per-source failure reporting instead of silent gaps.
 - **Streaming chat** — SSE-driven replies with live tool-call bubbles, a reasoning trace,
   stop/resume, and model-generated follow-up question suggestions.
+- **Agent evaluation** (`/eval`) — author test cases (a task instruction plus an optional
+  reference answer), pick which of the four agent types to compare, and run them side by side.
+  Each reply is scored by an LLM judge (correctness/completeness/clarity, 1-5) with a written
+  comment; the report shows per-type averages and pass rates plus a full per-case breakdown.
+  Evaluation runs execute real conversations under the hood but are archived immediately, so
+  they never clutter your task history.
 
 ## Architecture
 
