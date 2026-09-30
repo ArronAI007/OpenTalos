@@ -104,6 +104,8 @@ export default function EvalPage() {
   const [running, setRunning] = useState(false);
   const [runs, setRuns] = useState<EvalRun[] | null>(null);
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
+  const [deletingRunId, setDeletingRunId] = useState<string | null>(null);
+  const [historyError, setHistoryError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -164,9 +166,20 @@ export default function EvalPage() {
   };
 
   const handleDeleteRun = async (id: string) => {
-    await deleteEvalRun(id);
-    setRuns((prev) => prev?.filter((r) => r.id !== id) ?? null);
-    setExpandedRunId((prev) => (prev === id ? null : prev));
+    // deletingRunId 卡住按钮防止双击重复发请求：第二次点击此时已被 disabled 拦下，
+    // 不会对同一条已删记录再发一次 DELETE 而 404。
+    if (deletingRunId) return;
+    setDeletingRunId(id);
+    setHistoryError(null);
+    try {
+      await deleteEvalRun(id);
+      setRuns((prev) => prev?.filter((r) => r.id !== id) ?? null);
+      setExpandedRunId((prev) => (prev === id ? null : prev));
+    } catch (err) {
+      setHistoryError(err instanceof Error ? err.message : "删除失败");
+    } finally {
+      setDeletingRunId(null);
+    }
   };
 
   const handleRun = async () => {
@@ -277,6 +290,7 @@ export default function EvalPage() {
 
       <div className="rounded-xl border border-border bg-white p-4">
         <h2 className="mb-3 text-sm font-medium">历史评估记录</h2>
+        {historyError && <p className="mb-3 text-xs text-red-500">{historyError}</p>}
         {!runs || runs.length === 0 ? (
           <p className="text-sm text-text-secondary">还没有评估记录，运行一次评估后会显示在这里。</p>
         ) : (
@@ -304,7 +318,8 @@ export default function EvalPage() {
                       type="button"
                       aria-label={`删除 ${formatTimestamp(run.created_at)} 的评估记录`}
                       onClick={() => void handleDeleteRun(run.id)}
-                      className="text-text-secondary hover:text-red-500"
+                      disabled={deletingRunId === run.id}
+                      className="text-text-secondary hover:text-red-500 disabled:opacity-50"
                     >
                       <TrashIcon width={14} height={14} />
                     </button>
