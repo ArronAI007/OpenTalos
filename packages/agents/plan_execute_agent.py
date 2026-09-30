@@ -84,10 +84,13 @@ class PlanExecuteAgent(Agent):
             {"role": "system", "content": self.system_prompt},
             {"role": "user", "content": f"Produce a step-by-step plan for:\n\n{question}"},
         ]
+        # tool_choice 用 "required"（必须调用某个工具，不点名）而不是指定具体函数名——
+        # 后者在某些"常驻思维链"模型（如 kimi-k3）上会被 API 拒绝："tool_choice 'specified' is
+        # incompatible with thinking enabled"。这里工具列表本来就只有一个，"required" 效果等价。
         completion = await self.model_client.acomplete_with_tools(
             messages,
             [PROPOSE_STEPS_TOOL],
-            tool_choice={"type": "function", "function": {"name": "propose_steps"}},
+            tool_choice="required",
             **backend_kwargs,
         )
         if cancellation is not None:
