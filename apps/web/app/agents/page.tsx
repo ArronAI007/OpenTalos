@@ -9,7 +9,7 @@ export default function AgentsPage() {
   return (
     <section className="p-6">
       <h1 className="mb-4 text-xl font-semibold">Agent 类型</h1>
-      <p className="mb-4 text-sm text-text-secondary">在顶栏下拉中切换当前类型，新建任务将使用该类型。</p>
+      <p className="mb-4 text-sm text-text-secondary">在首页或任务页顶部的下拉中选择类型，新建任务将使用该类型。</p>
       <ul className="grid gap-3">
         {TYPES.map((t) => (
           <li key={t.key} className="rounded-lg border border-border bg-white p-4">
