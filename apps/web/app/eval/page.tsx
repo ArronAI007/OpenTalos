@@ -35,6 +35,70 @@ function formatTimestamp(createdAt: string): string {
   return createdAt.replace("T", " ").slice(0, 19);
 }
 
+// 删除确认弹窗，沿用 DeleteTurnDialog 的模态范式（fixed 遮罩点关 + Esc 带 IME guard，
+// 默认焦点落在「取消」）；这里单独写一份而不是复用 DeleteTurnDialog，因为文案是评估记录专属的。
+function ConfirmDeleteRunDialog({
+  open,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  open: boolean;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.isComposing) return;
+      if (e.key === "Escape") onCancel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onCancel]);
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+      <div className="absolute inset-0 bg-black/50" onClick={onCancel} aria-hidden="true" />
+      <div
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="delete-eval-run-dialog-title"
+        aria-describedby="delete-eval-run-dialog-desc"
+        className="relative z-10 w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl"
+      >
+        <h2 id="delete-eval-run-dialog-title" className="text-sm font-semibold">
+          删除这条评估记录？
+        </h2>
+        <p id="delete-eval-run-dialog-desc" className="mt-1.5 text-sm text-text-secondary">
+          将删除这次评估的全部结果，此操作不可撤销。
+        </p>
+        <div className="mt-4 flex justify-end gap-2">
+          <button
+            type="button"
+            autoFocus
+            onClick={onCancel}
+            className="rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-sidebar"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={busy}
+            className="rounded-lg bg-red-500 px-3 py-1.5 text-sm text-white hover:bg-red-600 disabled:opacity-40"
+          >
+            删除
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ReportView({ results, agentTypesOrder }: { results: EvalResult[]; agentTypesOrder: string[] }) {
   const summaries = summarizeResults(results, agentTypesOrder);
   return (
@@ -105,6 +169,7 @@ export default function EvalPage() {
   const [runs, setRuns] = useState<EvalRun[] | null>(null);
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
   const [deletingRunId, setDeletingRunId] = useState<string | null>(null);
+  const [pendingDeleteRunId, setPendingDeleteRunId] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -317,7 +382,7 @@ export default function EvalPage() {
                     <button
                       type="button"
                       aria-label={`删除 ${formatTimestamp(run.created_at)} 的评估记录`}
-                      onClick={() => void handleDeleteRun(run.id)}
+                      onClick={() => setPendingDeleteRunId(run.id)}
                       disabled={deletingRunId === run.id}
                       className="text-text-secondary hover:text-red-500 disabled:opacity-50"
                     >
@@ -335,6 +400,17 @@ export default function EvalPage() {
           </ul>
         )}
       </div>
+
+      <ConfirmDeleteRunDialog
+        open={pendingDeleteRunId !== null}
+        busy={deletingRunId !== null}
+        onCancel={() => setPendingDeleteRunId(null)}
+        onConfirm={() => {
+          const id = pendingDeleteRunId;
+          setPendingDeleteRunId(null);
+          if (id) void handleDeleteRun(id);
+        }}
+      />
     </section>
   );
 }
