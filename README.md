@@ -14,27 +14,27 @@ rather than installed, and imported as top-level modules (`from core.agent impor
 **Streaming chat** — a ReAct agent calling skill and web-search tools mid-reply, with live
 tool-call bubbles and a rendered Markdown response.
 
-![Chat conversation](.github/assets/screenshots/chat.png)
+![Chat conversation](assets/screenshots/chat.png)
 
 **Skills marketplace** — a searchable, categorized card grid of built-in, GitHub-imported, and
 uploaded skills.
 
-![Skills marketplace](.github/assets/screenshots/skills.png)
+![Skills marketplace](assets/screenshots/skills.png)
 
 **Skill detail** — a file-explorer-style view of a skill's `SKILL.md`: the raw YAML frontmatter
 in a copyable block, plus the rendered Markdown body.
 
-![Skill detail view](.github/assets/screenshots/skill-detail.png)
+![Skill detail view](assets/screenshots/skill-detail.png)
 
 **Your skills** — the subset of skills actually available to the agent, managed independently
 from the full marketplace.
 
-![Added skills](.github/assets/screenshots/my-skills.png)
+![Added skills](assets/screenshots/my-skills.png)
 
 <details>
 <summary>Home page</summary>
 
-![Home page](.github/assets/screenshots/home.png)
+![Home page](assets/screenshots/home.png)
 
 </details>
 
