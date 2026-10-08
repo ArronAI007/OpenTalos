@@ -4,6 +4,7 @@ load_base_model_and_tokenizer() 加载真实 Qwen3-0.6B，测试路径用 tests/
 import copy
 from collections.abc import Callable
 
+import torch
 from datasets import Dataset
 from peft import LoraConfig, PeftModel, TaskType, get_peft_model
 from transformers import (
@@ -138,9 +139,13 @@ _NUM_COMPARISON_SAMPLES = 3
 
 
 def _generate(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, question: str) -> str:
+    # trainer.train() 结束后模型还留在 train 模式（dropout 仍激活）——不切回 eval 模式会让
+    # 哪怕是贪心解码（do_sample=False）也因为每次前向的 dropout 噪声而生成退化的重复文本。
+    model.eval()
     prompt = f"问题：{question}\n解答："
     inputs = tokenizer(prompt, return_tensors="pt")
-    output_ids = model.generate(**inputs, max_new_tokens=64, do_sample=False)
+    with torch.no_grad():
+        output_ids = model.generate(**inputs, max_new_tokens=64, do_sample=False)
     return tokenizer.decode(output_ids[0][inputs["input_ids"].shape[1] :], skip_special_tokens=True)
 
 
