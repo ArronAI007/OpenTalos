@@ -1,6 +1,7 @@
 """SFT + GRPO 训练核心逻辑。model/tokenizer 由调用方传入（依赖注入）——生产代码路径用
 load_base_model_and_tokenizer() 加载真实 Qwen3-0.6B，测试路径用 tests/helpers.py 的极小模型，
 两边共用同一套训练函数，不是两套代码。"""
+import copy
 from collections.abc import Callable
 
 from datasets import Dataset
@@ -16,6 +17,7 @@ from transformers import (
 )
 from trl import GRPOConfig, GRPOTrainer
 
+from dataset import load_problems
 from rewards import accuracy_reward, length_penalty_reward
 
 _BASE_MODEL_NAME = "Qwen/Qwen3-0.6B"
@@ -130,3 +132,48 @@ def run_grpo(
     trainer.add_callback(_RewardReporter())
     trainer.train()
     return model
+
+
+_NUM_COMPARISON_SAMPLES = 3
+
+
+def _generate(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, question: str) -> str:
+    prompt = f"问题：{question}\n解答："
+    inputs = tokenizer(prompt, return_tensors="pt")
+    output_ids = model.generate(**inputs, max_new_tokens=64, do_sample=False)
+    return tokenizer.decode(output_ids[0][inputs["input_ids"].shape[1] :], skip_special_tokens=True)
+
+
+def run_training_job(
+    config: dict[str, int],
+    *,
+    on_metric: Callable[[str, int, float], None],
+    model_loader: Callable[[], tuple[PreTrainedModel, PreTrainedTokenizerBase]] = load_base_model_and_tokenizer,
+) -> dict:
+    """SFT -> GRPO -> 训练前后样例对比，整个过程是阻塞的同步调用（调用方负责丢进后台线程）。"""
+    model, tokenizer = model_loader()
+    base_model_for_comparison = copy.deepcopy(model)
+
+    sft_examples = load_problems(config["sft_samples"])
+    sft_model = run_sft(
+        model, tokenizer, sft_examples, steps=config["sft_steps"],
+        on_step=lambda step, loss: on_metric("sft_loss", step, loss),
+    )
+
+    grpo_examples = load_problems(config["grpo_samples"])
+    trained_model = run_grpo(
+        sft_model, tokenizer, grpo_examples, steps=config["grpo_steps"],
+        on_step=lambda step, reward: on_metric("grpo_reward", step, reward),
+    )
+
+    comparison_pool = load_problems(min(_NUM_COMPARISON_SAMPLES, len(sft_examples) + len(grpo_examples)))
+    comparisons = [
+        {
+            "question": item["question"],
+            "before": _generate(base_model_for_comparison, tokenizer, item["question"]),
+            "after": _generate(trained_model, tokenizer, item["question"]),
+            "expected": item["answer"],
+        }
+        for item in comparison_pool
+    ]
+    return {"comparisons": comparisons}
