@@ -1,8 +1,10 @@
 """AgentRL：独立的 SFT→GRPO 训练演示服务，不依赖本仓库其他任何包。"""
 import asyncio
+import os
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from store import RunStore
@@ -15,6 +17,18 @@ _MAX_STEPS = 50
 store = RunStore(_REPO_ROOT / ".data" / "agentrl.db")
 
 app = FastAPI()
+# 与 apps/api/main.py 同款约定：CORS_ORIGINS 由 scripts/start.sh 按 web 端口导出，
+# 独立跑（不经 start.sh）时默认放行 :3000。
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        origin.strip()
+        for origin in os.environ.get("CORS_ORIGINS", "http://localhost:3000").split(",")
+        if origin.strip()
+    ],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 class CreateRunRequest(BaseModel):
