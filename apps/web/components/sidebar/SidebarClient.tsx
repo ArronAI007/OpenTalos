@@ -291,7 +291,10 @@ export function TaskList() {
           <>
             <a
               href={`/t/${task.id}`}
-              className={`block rounded-lg px-3 py-2 text-sm hover:bg-white ${active ? "bg-white font-medium" : ""}`}
+              // pr-8（而非 px-3 两侧统一）：右侧要给悬浮出现的 ⋯ 按钮（absolute right-2，约
+              // 28px 宽）留出净空，否则标题的 truncate 省略号会截到按钮的位置，悬浮时两处
+              // 的"点点"重叠在一起，视觉上看起来像三个点在随鼠标移动时跳动/漂移。
+              className={`block rounded-lg py-2 pl-3 pr-8 text-sm hover:bg-white ${active ? "bg-white font-medium" : ""}`}
             >
               <span className="flex items-center gap-1.5">
                 {task.pinned && (
