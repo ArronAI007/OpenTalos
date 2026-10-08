@@ -3,7 +3,9 @@
 An experimental agent framework in Python: a small, dependency-clean core runtime plus
 building blocks for tool calling, context engineering, script-execution skills, four
 reusable agent reasoning patterns, and execution tracing — with a Manus-style web chat on top
-to actually use it.
+to actually use it. "Dependency-clean" describes `packages/*` specifically — `agentrl/` is the
+one deliberate exception, a fully independent service with its own heavy ML dependencies (see
+below).
 
 Managed as a single `uv` project (not a workspace); `packages/*` are added to `sys.path`
 rather than installed, and imported as top-level modules (`from core.agent import Agent`,
@@ -63,6 +65,10 @@ reasoning patterns side by side, with per-type averages/pass rates and a per-run
   comment; the report shows per-type averages and pass rates plus a full per-case breakdown.
   Evaluation runs execute real conversations under the hood but are archived immediately, so
   they never clutter your task history.
+- **AgentRL** (`/agentrl`) — a real (not simulated), small-scale SFT→GRPO training demo on
+  `Qwen/Qwen3-0.6B`, configurable sample/step counts, live loss/reward curves, a before/after
+  reply comparison on held-out questions, and run history. Runs as a fully independent service
+  (`agentrl/`, its own `pyproject.toml`/port/SQLite store) with no coupling to the chat app.
 
 ## Architecture
 
@@ -97,14 +103,20 @@ And `apps/` is what you actually run:
 | `apps/api` | FastAPI chat API: `config`/`tasks`/`messages` REST endpoints plus SSE streaming replies, with SQLite persistence (`.data/chat.db`) for tasks and messages. This is the sole backend for the web frontend `apps/web`. |
 | `apps/web` | Next.js frontend: two-pane shell with a sidebar (new task / Agent / skills / task history), a top bar with an agent-type dropdown and the model name, and a streaming chat view driven by the API's SSE replies. |
 
+`agentrl/` is a separate top-level project, not part of `apps/`: its own `pyproject.toml`
+(torch/transformers/peft/trl/accelerate/datasets), its own FastAPI service (`:8420`), its own
+SQLite store. No import relationship with `packages/*` or `apps/api` — the web frontend talks
+to it directly.
+
 ## Repository Layout
 
 ```
 opentalos/
 ├── packages/         # core, tool, context, observability, skill, agents
 ├── apps/             # api (FastAPI), web (Next.js)
+├── agentrl/          # independent SFT→GRPO training service, own pyproject.toml/venv
 ├── skills/           # skill content served by packages/skill (SKILL.md + scripts)
-├── tests/            # pytest, mirrors packages/ and apps/
+├── tests/            # pytest, mirrors packages/ and apps/ (agentrl has its own tests/)
 └── scripts/          # start.sh
 ```
 
@@ -123,6 +135,13 @@ uv run pytest tests/
 ./scripts/start.sh   # skill service (:8321) + chat API (:8400) + web frontend (:3010)
                      # all three spawn in the background, logs go to .data/logs/,
                      # and the terminal is handed back once everything is healthy
+```
+
+AgentRL needs its own one-time setup first (separate project, heavy ML dependencies not
+installed by the root `uv sync` above):
+
+```bash
+cd agentrl && uv sync && cd ..
 ```
 
 Then open http://localhost:3010. A service already answering `{"status":"ok"}` on its port
