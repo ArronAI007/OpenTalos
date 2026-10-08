@@ -2,6 +2,7 @@
 load_base_model_and_tokenizer() 加载真实 Qwen3-0.6B，测试路径用 tests/helpers.py 的极小模型，
 两边共用同一套训练函数，不是两套代码。"""
 import copy
+import re
 from collections.abc import Callable
 
 import torch
@@ -136,6 +137,22 @@ def run_grpo(
 
 
 _NUM_COMPARISON_SAMPLES = 3
+_SENTENCE_END_RE = re.compile(r"[。！？]")
+
+
+def _trim_to_first_answer(text: str) -> str:
+    """基座模型（非指令微调）不知道何时停下——续写到 max_new_tokens 上限就被硬切，常把
+    回答切在句子中间，或者续写出下一道新题。两种截断策略二选一，不叠加：模型开始复述
+    "问题："说明已经答完当前题、开始续写新题了，此时截断点之前的内容本身就是完整回答
+    （哪怕结尾没有句末标点，比如"答案：8"）；没有这个标记时才说明是被硬切在句子中间，
+    这时才需要回退到最后一个句末标点处，避免展示半句话。"""
+    marker = text.find("问题：")
+    if marker != -1:
+        return text[:marker].strip()
+    matches = list(_SENTENCE_END_RE.finditer(text))
+    if matches:
+        return text[: matches[-1].end()].strip()
+    return text.strip()
 
 
 def _generate(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, question: str) -> str:
@@ -145,8 +162,9 @@ def _generate(model: PreTrainedModel, tokenizer: PreTrainedTokenizerBase, questi
     prompt = f"问题：{question}\n解答："
     inputs = tokenizer(prompt, return_tensors="pt")
     with torch.no_grad():
-        output_ids = model.generate(**inputs, max_new_tokens=64, do_sample=False)
-    return tokenizer.decode(output_ids[0][inputs["input_ids"].shape[1] :], skip_special_tokens=True)
+        output_ids = model.generate(**inputs, max_new_tokens=96, do_sample=False)
+    text = tokenizer.decode(output_ids[0][inputs["input_ids"].shape[1] :], skip_special_tokens=True)
+    return _trim_to_first_answer(text)
 
 
 def run_training_job(
