@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 #
-# OpenTalos 一键管理（后台模式）：skill 服务 + 聊天 API + Web 前端。
-#   ./scripts/start.sh          拉起三个进程到后台（日志 .data/logs/，pid 记录 .data/pids/），
+# OpenTalos 一键管理（后台模式）：skill 服务 + 聊天 API + AgentRL 服务 + Web 前端。
+#   ./scripts/start.sh          拉起四个进程到后台（日志 .data/logs/，pid 记录 .data/pids/），
 #                               全部健康后打印地址并退出，终端立即归还
 #   ./scripts/start.sh stop     停止本脚本拉起的进程（复用的外部进程不动）
 #   ./scripts/start.sh restart  先停后起，等价于 stop + start
 #   tail -f .data/logs/web.log  查看某一路日志
-# 已有健康（返回 {"status":"ok"}）的 skill/api（或首页可访问的 web）会被复用，不重复拉起，
-# 也不归本脚本的 stop 管理。
+# 已有健康（返回 {"status":"ok"}）的 skill/api/agentrl（或首页可访问的 web）会被复用，不重复拉起，
+# 也不归本脚本的 stop 管理。agentrl 是独立的 uv 项目（agentrl/pyproject.toml），首次使用前需要
+# 自己先 `cd agentrl && uv sync` 一次（重型 ML 依赖，不在根项目的 uv sync 范围内）。
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
@@ -100,6 +101,11 @@ ensure_service "skill" 8321 "$LOG_DIR/skill.log" "$SKILL_URL/health" \
 ensure_service "api" 8400 "$LOG_DIR/api.log" "$API_URL/health" \
   env PYTHONPATH=packages uv run uvicorn main:app --app-dir apps/api --host 0.0.0.0 --port 8400
 
+AGENTRL_URL="http://localhost:8420"
+
+ensure_service "agentrl" 8420 "$LOG_DIR/agentrl.log" "$AGENTRL_URL/health" \
+  uv run --directory agentrl uvicorn main:app --host 0.0.0.0 --port 8420
+
 # web：next dev 无 /health，首页 200 即视为就绪；首次编译可能几十秒。
 if curl -sf "http://localhost:${WEB_PORT}" >/dev/null 2>&1; then
   echo "web already running on :$WEB_PORT — reusing it (not managed by start.sh stop)"
@@ -107,7 +113,7 @@ else
   [ -d apps/web/node_modules ] || (cd apps/web && pnpm install)
   echo "starting web frontend on :$WEB_PORT ... (log: $LOG_DIR/web.log)"
   # -p 固定端口，被占即 fail-fast；子 shell 整体后台，日志入文件
-  (cd apps/web && NEXT_PUBLIC_API_URL="$API_URL" pnpm dev -p "$WEB_PORT") >>"$LOG_DIR/web.log" 2>&1 &
+  (cd apps/web && NEXT_PUBLIC_API_URL="$API_URL" NEXT_PUBLIC_AGENTRL_URL="$AGENTRL_URL" pnpm dev -p "$WEB_PORT") >>"$LOG_DIR/web.log" 2>&1 &
   echo $! > "$PID_DIR/web.pid"
   echo "$WEB_PORT" > "$PID_DIR/web.port"
   for attempt in $(seq 1 120); do
@@ -122,7 +128,8 @@ fi
 
 echo
 echo "OpenTalos is up:"
-echo "  web    http://localhost:$WEB_PORT"
-echo "  api    $API_URL"
-echo "  skill  $SKILL_URL"
-echo "logs: tail -f $LOG_DIR/{skill,api,web}.log    stop: ./scripts/start.sh stop"
+echo "  web      http://localhost:$WEB_PORT"
+echo "  api      $API_URL"
+echo "  skill    $SKILL_URL"
+echo "  agentrl  $AGENTRL_URL"
+echo "logs: tail -f $LOG_DIR/{skill,api,agentrl,web}.log    stop: ./scripts/start.sh stop"
