@@ -285,3 +285,13 @@ export function ChartBarIcon(props: IconProps) {
     </Icon>
   );
 }
+
+export function BeakerIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M9 3h6" />
+      <path d="M10 3v6.5L4.5 19a1 1 0 0 0 .9 1.5h13.2a1 1 0 0 0 .9-1.5L14 9.5V3" />
+      <path d="M7 15h10" />
+    </Icon>
+  );
+}

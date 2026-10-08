@@ -8,7 +8,7 @@ import { readAgentType } from "@/lib/agent-type";
 import { copyText } from "@/lib/clipboard";
 import { sortTasks } from "@/lib/task-sort";
 import { partitionTasks, visibleUngrouped } from "@/lib/task-projects";
-import { ChartBarIcon, ClockIcon, PencilSquareIcon, PinIcon, PuzzleIcon, SearchIcon, SparklesIcon, StarIcon } from "@/components/ui/icons";
+import { BeakerIcon, ChartBarIcon, ClockIcon, PencilSquareIcon, PinIcon, PuzzleIcon, SearchIcon, SparklesIcon, StarIcon } from "@/components/ui/icons";
 import { LogoMark } from "./Logo";
 import { TaskListMenu } from "./TaskListMenu";
 import { ArchivedSection } from "./ArchivedSection";
@@ -96,6 +96,9 @@ export function SidebarRail({ busy, onCreate, onExpand, onOpenSearch }: SidebarR
       </Link>
       <Link href="/eval" aria-label="Agent 评估" title="Agent 评估" className={iconBtn}>
         <ChartBarIcon />
+      </Link>
+      <Link href="/agentrl" aria-label="AgentRL" title="AgentRL" className={iconBtn}>
+        <BeakerIcon />
       </Link>
       <button type="button" aria-label="任务历史" title="任务历史" onClick={onExpand} className={iconBtn}>
         <ClockIcon />
