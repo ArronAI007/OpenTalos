@@ -3,6 +3,7 @@ load_base_model_and_tokenizer() 加载真实 Qwen3-0.6B，测试路径用 tests/
 两边共用同一套训练函数，不是两套代码。"""
 from collections.abc import Callable
 
+from datasets import Dataset
 from peft import LoraConfig, PeftModel, TaskType, get_peft_model
 from transformers import (
     AutoModelForCausalLM,
@@ -13,6 +14,9 @@ from transformers import (
     TrainerCallback,
     TrainingArguments,
 )
+from trl import GRPOConfig, GRPOTrainer
+
+from rewards import accuracy_reward, length_penalty_reward
 
 _BASE_MODEL_NAME = "Qwen/Qwen3-0.6B"
 _LORA_TARGET_MODULES = ["q_proj", "v_proj"]
@@ -78,3 +82,51 @@ def run_sft(
     )
     trainer.train()
     return peft_model
+
+
+def run_grpo(
+    model: PreTrainedModel,
+    tokenizer: PreTrainedTokenizerBase,
+    examples: list[dict[str, str]],
+    *,
+    steps: int,
+    on_step: Callable[[int, float], None],
+) -> PreTrainedModel:
+    dataset = Dataset.from_list(
+        [{"prompt": f"问题：{ex['question']}\n解答：", "ground_truth": ex["answer"]} for ex in examples]
+    )
+
+    config = GRPOConfig(
+        output_dir="/tmp/agentrl-grpo",
+        max_steps=steps,
+        num_generations=2,
+        max_completion_length=32,
+        per_device_train_batch_size=2,
+        learning_rate=1e-5,
+        logging_steps=1,
+        report_to=[],
+        save_strategy="no",
+    )
+
+    def _accuracy(completions, ground_truth, **kwargs):  # noqa: ANN001 - trl 回调签名
+        return accuracy_reward(completions=completions, ground_truth=ground_truth)
+
+    def _length(completions, **kwargs):  # noqa: ANN001
+        return length_penalty_reward(completions=completions)
+
+    trainer = GRPOTrainer(
+        model=model,
+        reward_funcs=[_accuracy, _length],
+        args=config,
+        train_dataset=dataset,
+        processing_class=tokenizer,
+    )
+
+    class _RewardReporter(TrainerCallback):
+        def on_log(self, args, state, control, logs=None, **kwargs):  # noqa: ANN001
+            if logs and "reward" in logs:
+                on_step(state.global_step, float(logs["reward"]))
+
+    trainer.add_callback(_RewardReporter())
+    trainer.train()
+    return model
