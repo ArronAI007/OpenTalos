@@ -18,6 +18,7 @@ if str(_PACKAGES_DIR) not in sys.path:
 from agents.builder import AGENT_TYPES  # noqa: E402
 from db import ChatStore  # noqa: E402
 from deepresearch import run_research, start_live_run, stream_run_events  # noqa: E402
+from mcpclient.client import MCPConnectionError, MCPServerConfig, connect_and_list_tools  # noqa: E402
 from evaluation import (  # noqa: E402
     add_eval_case,
     load_eval_cases,
@@ -76,6 +77,18 @@ class EvalRunBody(BaseModel):
 
 class CreateDeepResearchRunBody(BaseModel):
     topic: str
+
+
+class CreateMCPServerBody(BaseModel):
+    name: str
+    transport: str  # 'stdio' | 'http'
+    command: str | None = None
+    args: list[str] = []
+    url: str | None = None
+
+
+class UpdateMCPServerBody(BaseModel):
+    enabled: bool
 
 
 # 任务的布尔 flag 字段：PATCH 端点按下表统一装配，新增 flag 只需在此处与模型各加一行。
@@ -376,6 +389,61 @@ def create_app(runtime: ChatRuntime | None = None, eval_cases_path: Path | None 
         if run["status"] == "running":
             raise HTTPException(409, "run is still in progress")
         store.delete_deepresearch_run(run_id)
+
+    @app.post("/api/mcp/servers")
+    async def create_mcp_server_route(request: CreateMCPServerBody) -> dict:
+        name = request.name.strip()
+        if not name:
+            raise HTTPException(400, "name must not be blank")
+        server_config = MCPServerConfig(
+            transport=request.transport, command=request.command, args=request.args, url=request.url
+        )
+        try:
+            tools = await connect_and_list_tools(server_config)
+        except MCPConnectionError as error:
+            raise HTTPException(502, str(error)) from error
+        config = (
+            {"command": request.command, "args": request.args}
+            if request.transport == "stdio"
+            else {"url": request.url}
+        )
+        cached_tools = [
+            {"name": t.name, "description": t.description, "input_schema": t.input_schema} for t in tools
+        ]
+        return store.create_mcp_server(
+            name=name, transport=request.transport, config=config, cached_tools=cached_tools
+        )
+
+    @app.get("/api/mcp/servers")
+    async def list_mcp_servers_route() -> dict:
+        return {"servers": store.list_mcp_servers()}
+
+    @app.patch("/api/mcp/servers/{server_id}")
+    async def update_mcp_server_route(server_id: str, request: UpdateMCPServerBody) -> dict:
+        updated = store.set_mcp_server_enabled(server_id, request.enabled)
+        if updated is None:
+            raise HTTPException(404, "server not found")
+        return updated
+
+    @app.post("/api/mcp/servers/{server_id}/refresh")
+    async def refresh_mcp_server_route(server_id: str) -> dict:
+        existing = store.get_mcp_server(server_id)
+        if existing is None:
+            raise HTTPException(404, "server not found")
+        server_config = MCPServerConfig(transport=existing["transport"], **existing["config"])
+        try:
+            tools = await connect_and_list_tools(server_config)
+        except MCPConnectionError as error:
+            return store.update_mcp_server_probe_result(server_id, last_error=str(error))
+        cached_tools = [
+            {"name": t.name, "description": t.description, "input_schema": t.input_schema} for t in tools
+        ]
+        return store.update_mcp_server_probe_result(server_id, last_error=None, cached_tools=cached_tools)
+
+    @app.delete("/api/mcp/servers/{server_id}", status_code=204)
+    async def delete_mcp_server_route(server_id: str) -> None:
+        if not store.delete_mcp_server(server_id):
+            raise HTTPException(404, "server not found")
 
     return app
 

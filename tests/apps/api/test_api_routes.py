@@ -1,5 +1,7 @@
 import asyncio
 import json
+import sys
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -665,3 +667,61 @@ async def test_delete_running_deepresearch_run_returns_409(tmp_path, scripted_cl
     # 调度才真正开始跑规划调用——紧跟着删，不需要额外手段就能稳定撞见 running 状态。
     resp = await local_api.delete(f"/api/deepresearch/runs/{run_id}")
     assert resp.status_code == 409
+
+
+def _mcp_demo_server_config() -> dict:
+    demo_server = str(
+        Path(__file__).resolve().parent.parent.parent.parent / "packages" / "mcpclient" / "demo_server.py"
+    )
+    return {"name": "weather", "transport": "stdio", "command": sys.executable, "args": [demo_server]}
+
+
+async def test_create_mcp_server_probes_and_persists_tools(api) -> None:
+    resp = await api.post("/api/mcp/servers", json=_mcp_demo_server_config())
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["name"] == "weather"
+    assert body["enabled"] is True
+    assert body["cached_tools"][0]["name"] == "get_weather"
+
+    listed = await api.get("/api/mcp/servers")
+    assert [s["id"] for s in listed.json()["servers"]] == [body["id"]]
+
+
+async def test_create_mcp_server_rejects_unreachable_config(api) -> None:
+    resp = await api.post(
+        "/api/mcp/servers",
+        json={"name": "bad", "transport": "stdio", "command": "no-such-executable-xyz", "args": []},
+    )
+    assert resp.status_code == 502
+
+
+async def test_patch_mcp_server_toggles_enabled(api) -> None:
+    created = (await api.post("/api/mcp/servers", json=_mcp_demo_server_config())).json()
+    resp = await api.patch(f"/api/mcp/servers/{created['id']}", json={"enabled": False})
+    assert resp.status_code == 200
+    assert resp.json()["enabled"] is False
+
+
+async def test_patch_missing_mcp_server_returns_404(api) -> None:
+    resp = await api.patch("/api/mcp/servers/no-such-id", json={"enabled": False})
+    assert resp.status_code == 404
+
+
+async def test_refresh_mcp_server_updates_cached_tools(api) -> None:
+    created = (await api.post("/api/mcp/servers", json=_mcp_demo_server_config())).json()
+    resp = await api.post(f"/api/mcp/servers/{created['id']}/refresh")
+    assert resp.status_code == 200
+    assert resp.json()["cached_tools"][0]["name"] == "get_weather"
+
+
+async def test_delete_mcp_server(api) -> None:
+    created = (await api.post("/api/mcp/servers", json=_mcp_demo_server_config())).json()
+    resp = await api.delete(f"/api/mcp/servers/{created['id']}")
+    assert resp.status_code == 204
+    assert (await api.get("/api/mcp/servers")).json()["servers"] == []
+
+
+async def test_delete_missing_mcp_server_returns_404(api) -> None:
+    resp = await api.delete("/api/mcp/servers/no-such-id")
+    assert resp.status_code == 404
