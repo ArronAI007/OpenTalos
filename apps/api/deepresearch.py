@@ -4,7 +4,7 @@ import asyncio
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, AsyncIterator
 
 from core.model import ModelClient
 from websearch.client import TavilyClient
@@ -65,6 +65,49 @@ def _publish(run_id: str, event: dict) -> None:
         return
     for queue in live.subscribers:
         queue.put_nowait(event)
+
+
+def _snapshot_with_partial_report(run: dict, live: _LiveRun) -> dict:
+    if not live.partial_report:
+        return run
+    return {**run, "report": live.partial_report}
+
+
+async def stream_run_events(store: ChatStore, run_id: str) -> AsyncIterator[dict]:
+    """SSE 端点背后的事件生成器——main.py 只负责把每个 yield 出来的 dict 套上 `_sse()` 格式。
+
+    是否要挂起等待实时事件，只认这里刚读到的 DB status，不依赖 _live_runs 是否还有这个
+    key：run_research 收尾顺序是「写 DB 终态 → 广播 run_done → 删除 _live_runs 条目」，如果
+    改成认 _live_runs 存在与否，会有个真实竞态——某个新连接恰好在"终态已写入 DB、run_done
+    已经广播给当时在场的订阅者、_live_runs 条目还没删掉"这个缝隙里订阅进来，会订阅到一个
+    再也不会收到任何事件的队列，永远挂起。status 字段是唯一不会有这种中间态的信号。
+    """
+    run = await asyncio.to_thread(store.get_deepresearch_run, run_id)
+    if run is None:
+        yield {"type": "error", "message": "run not found"}
+        return
+
+    if run["status"] != "running":
+        yield {"type": "snapshot", "run": run}
+        return
+
+    # status=="running" 时 _live_runs[run_id] 保证已存在：main.py 的 POST 路由在
+    # asyncio.create_task(run_research(...)) 调度之前就同步调用了 start_live_run。
+    live = _live_runs[run_id]
+    queue: asyncio.Queue = asyncio.Queue()
+    live.subscribers.append(queue)
+    try:
+        # 先订阅、后拼 snapshot：防止注册前瞬间错过事件（容忍极小概率的重复推送，前端按
+        # todo id 做整体替换/插入，收到两次同样内容无害）。
+        yield {"type": "snapshot", "run": _snapshot_with_partial_report(run, live)}
+
+        while True:
+            event = await queue.get()
+            yield event
+            if event["type"] == "run_done":
+                break
+    finally:
+        live.subscribers.remove(queue)
 
 
 def _parse_queries(text: str) -> list[str]:

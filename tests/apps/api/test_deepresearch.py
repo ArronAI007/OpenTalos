@@ -12,14 +12,17 @@ from websearch.models import SearchResult
 
 from deepresearch import (
     PlanningError,
+    _LiveRun,
     _live_runs,
     _parse_queries,
     _plan,
     _publish,
     _run_todo,
+    _snapshot_with_partial_report,
     _synthesize_report,
     run_research,
     start_live_run,
+    stream_run_events,
 )
 
 
@@ -302,3 +305,59 @@ class TestLiveRunBroadcaster:
             assert q2.get_nowait() == {"type": "todo_update", "id": 0}
         finally:
             _live_runs.pop("run-1", None)
+
+
+class TestSnapshotWithPartialReport:
+    def test_returns_run_unchanged_when_no_partial_text(self) -> None:
+        run = {"id": "r1", "status": "running", "report": None}
+        live = _LiveRun()
+        assert _snapshot_with_partial_report(run, live) == run
+
+    def test_overlays_partial_report_text(self) -> None:
+        run = {"id": "r1", "status": "running", "report": None}
+        live = _LiveRun(partial_report="已经流出来的一半")
+        result = _snapshot_with_partial_report(run, live)
+        assert result == {"id": "r1", "status": "running", "report": "已经流出来的一半"}
+        assert run["report"] is None  # 原 dict 不被就地修改
+
+
+class TestStreamRunEvents:
+    async def test_missing_run_yields_error_event(self, store) -> None:
+        events = [e async for e in stream_run_events(store, "no-such-run")]
+        assert events == [{"type": "error", "message": "run not found"}]
+
+    async def test_terminal_run_yields_single_snapshot(self, store) -> None:
+        run = store.create_deepresearch_run("topic")
+        store.update_deepresearch_run(run["id"], status="completed", report="# 报告")
+
+        events = [e async for e in stream_run_events(store, run["id"])]
+
+        assert len(events) == 1
+        assert events[0]["type"] == "snapshot"
+        assert events[0]["run"]["status"] == "completed"
+        assert events[0]["run"]["report"] == "# 报告"
+
+    async def test_running_run_yields_snapshot_then_live_events_until_done(self, store) -> None:
+        run = store.create_deepresearch_run("topic")
+        start_live_run(run["id"])
+        live = _live_runs[run["id"]]
+        live.partial_report = "部分"
+
+        async def _drive() -> list[dict]:
+            collected = []
+            async for event in stream_run_events(store, run["id"]):
+                collected.append(event)
+                if event["type"] == "snapshot":
+                    # 订阅已经建立（stream_run_events 先订阅后 yield snapshot），现在才发
+                    # 一条实时事件，验证订阅的时机足够早，不会错过
+                    _publish(run["id"], {"type": "todo_update", "id": 0, "status": "completed"})
+                    _publish(run["id"], {"type": "run_done", "status": "completed", "report": "完整报告", "error": None})
+            return collected
+
+        events = await _drive()
+
+        assert events[0]["type"] == "snapshot"
+        assert events[0]["run"]["report"] == "部分"  # 覆盖了内存里的部分报告文本
+        assert events[1] == {"type": "todo_update", "id": 0, "status": "completed"}
+        assert events[2]["type"] == "run_done"
+        assert live.subscribers == []  # finally 块清理了自己的订阅队列
