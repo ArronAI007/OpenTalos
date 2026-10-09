@@ -159,15 +159,27 @@ async def _synthesize_report(
     return report.strip()
 
 
+async def _finish(store: ChatStore, run_id: str, **fields: object) -> None:
+    """统一收尾：落库终态 → 广播 run_done → 清理广播器条目。三条退出路径（规划失败/全部
+    TODO 失败/报告合成失败/完整成功）都走这一个函数，避免某条路径漏清理 _live_runs 造成
+    进程生命周期内的内存泄漏（不影响正确性——新连接判断"是否还在跑"只看 DB 的 status 字段，
+    不依赖 _live_runs 是否还有这个 key——但长期运行会不断攒下已完成 run 的空壳条目）。"""
+    run = await asyncio.to_thread(store.update_deepresearch_run, run_id, **fields)
+    _publish(run_id, {"type": "run_done", "status": run["status"], "report": run["report"], "error": run["error"]})
+    _live_runs.pop(run_id, None)
+
+
 async def run_research(
     store: ChatStore, run_id: str, client: ModelClient, search_client: TavilyClient, topic: str
 ) -> None:
     """后台任务主体：规划 → 并行执行 → 合成报告 → 落库。main.py 的调用方是 fire-and-forget 的
-    asyncio.create_task——这里必须吞掉所有异常并落成 status='failed'，否则调用方永远看不到。"""
+    asyncio.create_task——这里必须吞掉所有异常并落成 status='failed'，否则调用方永远看不到。
+    每次写 DB 之后额外广播一条事件给 _live_runs 里挂着的 SSE 订阅者（没有订阅者时 _publish
+    是个空操作，不影响这条主线逻辑）。"""
     try:
         queries = await _plan(client, topic)
     except PlanningError as exc:
-        await asyncio.to_thread(store.update_deepresearch_run, run_id, status="failed", error=str(exc))
+        await _finish(store, run_id, status="failed", error=str(exc))
         return
 
     todos = [
@@ -175,26 +187,41 @@ async def run_research(
         for i, q in enumerate(queries)
     ]
     await asyncio.to_thread(store.update_deepresearch_run_todos, run_id, todos)
+    for todo in todos:
+        _publish(run_id, {"type": "todo_update", **todo})
 
     # update_deepresearch_todo 是"整列读出来、改一条、整列写回去"——并发跑多条 TODO 时，
     # 两个协程交错的读-改-写会互相覆盖对方的更新（丢更新）。用一把锁只序列化这几次快速的
-    # 数据库读写，真正慢的搜索+总结调用（_run_todo）仍然完全并发，不受影响。
+    # 数据库读写，真正慢的搜索+总结调用（_run_todo）仍然完全并发，不受影响。广播调用放在
+    # 同一把锁里、紧跟对应的 DB 写入之后，保证广播顺序和落库顺序完全一致。
     todo_lock = asyncio.Lock()
 
     async def _execute(todo: dict) -> None:
         async with todo_lock:
             await asyncio.to_thread(store.update_deepresearch_todo, run_id, todo["id"], status="running")
+            _publish(run_id, {
+                "type": "todo_update", "id": todo["id"], "query": todo["query"],
+                "status": "running", "summary": None, "sources": [],
+            })
         result = await _run_todo(client, search_client, todo["query"])
         async with todo_lock:
             await asyncio.to_thread(store.update_deepresearch_todo, run_id, todo["id"], **result)
+            _publish(run_id, {"type": "todo_update", "id": todo["id"], "query": todo["query"], **result})
 
     await asyncio.gather(*(_execute(todo) for todo in todos))
 
     final_run = await asyncio.to_thread(store.get_deepresearch_run, run_id)
+
+    async def _on_chunk(delta: str) -> None:
+        live = _live_runs.get(run_id)
+        if live is not None:
+            live.partial_report += delta
+        _publish(run_id, {"type": "report_chunk", "delta": delta})
+
     try:
-        report = await _synthesize_report(client, topic, final_run["todos"])
+        report = await _synthesize_report(client, topic, final_run["todos"], on_chunk=_on_chunk)
     except PlanningError as exc:
-        await asyncio.to_thread(store.update_deepresearch_run, run_id, status="failed", error=str(exc))
+        await _finish(store, run_id, status="failed", error=str(exc))
         return
 
-    await asyncio.to_thread(store.update_deepresearch_run, run_id, status="completed", report=report)
+    await _finish(store, run_id, status="completed", report=report)

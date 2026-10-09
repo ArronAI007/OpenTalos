@@ -185,6 +185,105 @@ class TestRunResearch:
         assert final["status"] == "failed"
         assert all(t["status"] == "failed" for t in final["todos"])
 
+    async def test_broadcasts_full_event_sequence_on_success(self, store, scripted_client) -> None:
+        client = scripted_client(completions=[
+            Completion(text='["q1","q2","q3"]', model_id="mock-model"),
+            Completion(text="总结1", model_id="mock-model"),
+            Completion(text="总结2", model_id="mock-model"),
+            Completion(text="总结3", model_id="mock-model"),
+            Completion(text="报告", model_id="mock-model"),
+        ])
+        search_client = _tavily_with_results([
+            SearchResult(title="标题", url="https://a.example", content="内容", score=0.9),
+        ])
+        run = store.create_deepresearch_run("研究主题")
+        start_live_run(run["id"])
+        queue: asyncio.Queue = asyncio.Queue()
+        _live_runs[run["id"]].subscribers.append(queue)
+
+        await run_research(store, run["id"], client, search_client, "研究主题")
+
+        events = []
+        while not queue.empty():
+            events.append(queue.get_nowait())
+
+        # 前 3 条：规划完成后逐条初始化为 pending，严格按 id 顺序（这段是顺序执行，不是并发）
+        pending_events = events[:3]
+        assert [(e["type"], e["id"], e["status"]) for e in pending_events] == [
+            ("todo_update", 0, "pending"), ("todo_update", 1, "pending"), ("todo_update", 2, "pending"),
+        ]
+
+        # 中间 6 条：3 条 TODO 各自的 running→completed，并发执行，顺序不保证，只断言集合
+        concurrent_events = events[3:9]
+        seen = {(e["id"], e["status"]) for e in concurrent_events}
+        assert seen == {
+            (0, "running"), (0, "completed"),
+            (1, "running"), (1, "completed"),
+            (2, "running"), (2, "completed"),
+        }
+        assert all(e["type"] == "todo_update" and "query" in e and "sources" in e for e in concurrent_events)
+
+        # 之后：report_chunk×N，拼起来等于完整报告
+        report_events = events[9:-1]
+        assert all(e["type"] == "report_chunk" for e in report_events)
+        assert "".join(e["delta"] for e in report_events) == "报告"
+
+        # 最后一条：run_done
+        assert events[-1] == {"type": "run_done", "status": "completed", "report": "报告", "error": None}
+
+        # 收尾：_live_runs 条目已清理，不会内存泄漏
+        assert run["id"] not in _live_runs
+
+    async def test_broadcasts_run_done_failed_on_planning_failure(self, store, scripted_client) -> None:
+        client = scripted_client(completions=[Completion(text="不是数组", model_id="mock-model")])
+        run = store.create_deepresearch_run("研究主题")
+        start_live_run(run["id"])
+        queue: asyncio.Queue = asyncio.Queue()
+        _live_runs[run["id"]].subscribers.append(queue)
+
+        await run_research(store, run["id"], client, _tavily_erroring(), "研究主题")
+
+        events = []
+        while not queue.empty():
+            events.append(queue.get_nowait())
+        assert len(events) == 1
+        assert events[0]["type"] == "run_done"
+        assert events[0]["status"] == "failed"
+        assert run["id"] not in _live_runs
+
+    async def test_mid_stream_report_failure_discards_partial_text(self, store, scripted_client) -> None:
+        client = scripted_client(completions=[
+            Completion(text='["q1","q2","q3"]', model_id="mock-model"),
+            Completion(text="总结1", model_id="mock-model"),
+            Completion(text="总结2", model_id="mock-model"),
+            Completion(text="总结3", model_id="mock-model"),
+        ])
+
+        async def raising_astream(_messages: list[dict[str, Any]], **_kwargs: Any):
+            yield "部分报告"
+            raise RuntimeError("stream broke")
+
+        client.astream = raising_astream  # type: ignore[method-assign]
+        search_client = _tavily_with_results([
+            SearchResult(title="标题", url="https://a.example", content="内容", score=0.9),
+        ])
+        run = store.create_deepresearch_run("研究主题")
+        start_live_run(run["id"])
+        queue: asyncio.Queue = asyncio.Queue()
+        _live_runs[run["id"]].subscribers.append(queue)
+
+        await run_research(store, run["id"], client, search_client, "研究主题")
+
+        events = []
+        while not queue.empty():
+            events.append(queue.get_nowait())
+        assert events[-2] == {"type": "report_chunk", "delta": "部分报告"}
+        assert events[-1]["type"] == "run_done"
+        assert events[-1]["status"] == "failed"
+
+        final = store.get_deepresearch_run(run["id"])
+        assert final["report"] is None  # 半截文本不落库
+
 
 class TestLiveRunBroadcaster:
     def test_publish_without_live_entry_is_noop(self) -> None:
