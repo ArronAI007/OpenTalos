@@ -17,7 +17,7 @@ if str(_PACKAGES_DIR) not in sys.path:
 
 from agents.builder import AGENT_TYPES  # noqa: E402
 from db import ChatStore  # noqa: E402
-from deepresearch import run_research  # noqa: E402
+from deepresearch import run_research, start_live_run, stream_run_events  # noqa: E402
 from evaluation import (  # noqa: E402
     add_eval_case,
     load_eval_cases,
@@ -345,6 +345,7 @@ def create_app(runtime: ChatRuntime | None = None, eval_cases_path: Path | None 
         if not topic:
             raise HTTPException(400, "topic must not be blank")
         run = store.create_deepresearch_run(topic)
+        start_live_run(run["id"])
         asyncio.create_task(run_research(store, run["id"], runtime.model_client, runtime.search_client, topic))
         return run
 
@@ -358,6 +359,14 @@ def create_app(runtime: ChatRuntime | None = None, eval_cases_path: Path | None 
         if run is None:
             raise HTTPException(404, "run not found")
         return run
+
+    @app.get("/api/deepresearch/runs/{run_id}/stream")
+    async def stream_deepresearch_run_route(run_id: str) -> StreamingResponse:
+        async def event_stream():
+            async for event in stream_run_events(store, run_id):
+                yield _sse(event)
+
+        return StreamingResponse(event_stream(), media_type="text/event-stream")
 
     @app.delete("/api/deepresearch/runs/{run_id}", status_code=204)
     async def delete_deepresearch_run_route(run_id: str) -> None:

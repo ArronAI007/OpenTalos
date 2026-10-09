@@ -607,6 +607,50 @@ async def test_deepresearch_run_completes_and_is_listed(tmp_path, scripted_clien
     assert [r["id"] for r in listed.json()["runs"]] == [run_id]
 
 
+async def test_deepresearch_stream_full_event_sequence(tmp_path, scripted_client) -> None:
+    local_api = _deepresearch_app(tmp_path, scripted_client)
+    created = await local_api.post("/api/deepresearch/runs", json={"topic": "研究主题"})
+    run_id = created.json()["id"]
+
+    async with local_api.stream("GET", f"/api/deepresearch/runs/{run_id}/stream") as resp:
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("text/event-stream")
+        body = (await resp.aread()).decode()
+
+    frames = [block for block in body.split("\n\n") if block.strip()]
+    events = [json.loads(frame.strip().removeprefix("data: ")) for frame in frames]
+
+    assert events[0]["type"] == "snapshot"
+    assert events[-1]["type"] == "run_done"
+    assert events[-1]["status"] == "completed"
+    assert events[-1]["report"] == "# 报告"
+    report_chunks = [e for e in events if e["type"] == "report_chunk"]
+    assert "".join(e["delta"] for e in report_chunks) == "# 报告"
+
+
+async def test_deepresearch_stream_on_terminal_run_closes_immediately(tmp_path, scripted_client) -> None:
+    local_api = _deepresearch_app(tmp_path, scripted_client)
+    created = await local_api.post("/api/deepresearch/runs", json={"topic": "研究主题"})
+    run_id = created.json()["id"]
+
+    fetched = created
+    for _ in range(50):
+        fetched = await local_api.get(f"/api/deepresearch/runs/{run_id}")
+        if fetched.json()["status"] != "running":
+            break
+        await asyncio.sleep(0.05)
+    assert fetched.json()["status"] == "completed"
+
+    async with local_api.stream("GET", f"/api/deepresearch/runs/{run_id}/stream") as resp:
+        body = (await resp.aread()).decode()
+
+    frames = [block for block in body.split("\n\n") if block.strip()]
+    events = [json.loads(frame.strip().removeprefix("data: ")) for frame in frames]
+    assert len(events) == 1
+    assert events[0]["type"] == "snapshot"
+    assert events[0]["run"]["status"] == "completed"
+
+
 async def test_delete_missing_deepresearch_run_returns_404(tmp_path, scripted_client) -> None:
     local_api = _deepresearch_app(tmp_path, scripted_client)
     resp = await local_api.delete("/api/deepresearch/runs/no-such-id")
