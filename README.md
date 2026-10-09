@@ -76,6 +76,10 @@ reasoning patterns side by side, with per-type averages/pass rates and a per-run
   live TODO status and the report's text as it's generated; reconnecting mid-run resumes with
   a snapshot of current progress instead of starting over. Keeps a history of past research
   runs; requires `TAVILY_API_KEY` to be configured.
+- **MCP** (`/mcp`) — connect external MCP (Model Context Protocol) servers (stdio subprocess
+  or HTTP) and expose their tools to agents like any other tool. Connections are probed for
+  real on add/refresh (tool list is cached for display) and opened fresh per call rather than
+  held open, so a crashed or restarted server never leaves a stale connection behind.
 
 ## Architecture
 
