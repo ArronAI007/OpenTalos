@@ -1,14 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   createDeepResearchRun,
   listDeepResearchRuns,
-  getDeepResearchRun,
   deleteDeepResearchRun,
+  deepResearchStreamUrl,
   type DeepResearchRun,
+  type DeepResearchTodo,
 } from "@/lib/deepresearch-api";
 import { TrashIcon } from "@/components/ui/icons";
 
@@ -70,29 +71,78 @@ export default function DeepResearchPage() {
   const [expandedTodoId, setExpandedTodoId] = useState<number | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const streamsRef = useRef<Map<string, EventSource>>(new Map());
 
   useEffect(() => {
     listDeepResearchRuns().then(setRuns);
   }, []);
 
-  useEffect(() => {
-    const hasRunning = runs?.some((r) => r.status === "running") ?? false;
-    if (!hasRunning) {
-      if (pollRef.current) clearInterval(pollRef.current);
-      return;
-    }
-    pollRef.current = setInterval(async () => {
-      const current = runs ?? [];
-      const updated = await Promise.all(
-        current.map((r) => (r.status === "running" ? getDeepResearchRun(r.id) : Promise.resolve(r)))
-      );
-      setRuns(updated);
-    }, 2500);
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
+  // 四个 helper 都只闭包 setRuns（React 保证跨渲染稳定），用 useCallback 固定引用——这样
+  // openStream 本身也能用 useCallback 固定引用，依赖它的 useEffect 才能把它安全地放进依赖
+  // 数组，不会每次渲染都触发多余的重新执行。
+  const applyRunPatch = useCallback((id: string, patch: Partial<DeepResearchRun>) => {
+    setRuns((prev) => prev?.map((r) => (r.id === id ? { ...r, ...patch } : r)) ?? null);
+  }, []);
+
+  const applyTodoUpdate = useCallback((id: string, todo: DeepResearchTodo) => {
+    setRuns((prev) =>
+      prev?.map((r) => {
+        if (r.id !== id) return r;
+        const exists = r.todos.some((t) => t.id === todo.id);
+        const todos = exists ? r.todos.map((t) => (t.id === todo.id ? todo : t)) : [...r.todos, todo];
+        return { ...r, todos };
+      }) ?? null
+    );
+  }, []);
+
+  const appendReportChunk = useCallback((id: string, delta: string) => {
+    setRuns((prev) =>
+      prev?.map((r) => (r.id === id ? { ...r, report: (r.report ?? "") + delta } : r)) ?? null
+    );
+  }, []);
+
+  const openStream = useCallback((id: string) => {
+    if (streamsRef.current.has(id)) return;
+    const es = new EventSource(deepResearchStreamUrl(id));
+    streamsRef.current.set(id, es);
+    es.onmessage = (ev) => {
+      const event = JSON.parse(ev.data);
+      if (event.type === "snapshot") {
+        setRuns((prev) => prev?.map((r) => (r.id === id ? event.run : r)) ?? null);
+      } else if (event.type === "todo_update") {
+        applyTodoUpdate(id, {
+          id: event.id, query: event.query, status: event.status,
+          summary: event.summary, sources: event.sources,
+        });
+      } else if (event.type === "report_chunk") {
+        appendReportChunk(id, event.delta);
+      } else if (event.type === "run_done") {
+        applyRunPatch(id, { status: event.status, report: event.report, error: event.error });
+        es.close();
+        streamsRef.current.delete(id);
+      }
     };
-  }, [runs]);
+  }, [applyTodoUpdate, appendReportChunk, applyRunPatch]);
+
+  // 只依赖"当前正在跑的 run id 集合"这个派生字符串，不直接依赖 runs 本身——runs 每来一条
+  // SSE 事件（尤其 report_chunk，频率很高）就会变成新数组引用，如果直接把 runs 放进依赖数组，
+  // 这个 effect 会在每次增量更新后重新执行，cleanup 把所有流关掉、再立刻重新打开，导致流式
+  // 连接不断重连，等于白做。runningIds 只在"有 run 开始跑/跑完"这种真正的集合变化时才变。
+  const runningIds = (runs ?? []).filter((r) => r.status === "running").map((r) => r.id).join(",");
+
+  useEffect(() => {
+    for (const id of runningIds ? runningIds.split(",") : []) openStream(id);
+  }, [runningIds, openStream]);
+
+  // 组件卸载时关闭所有还开着的连接（和 runningIds 变化无关，只在页面离开时跑一次）；正常的
+  // "跑完关闭"由 openStream 里收到 run_done 时主动 es.close() 处理，不依赖这个卸载清理。
+  useEffect(() => {
+    const streams = streamsRef.current;
+    return () => {
+      for (const es of streams.values()) es.close();
+      streams.clear();
+    };
+  }, []);
 
   const handleStart = async () => {
     const trimmed = topic.trim();
