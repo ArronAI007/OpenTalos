@@ -71,9 +71,11 @@ reasoning patterns side by side, with per-type averages/pass rates and a per-run
   (`agentrl/`, its own `pyproject.toml`/port/SQLite store) with no coupling to the chat app.
 - **DeepResearch** (`/deepresearch`) — give it a topic, it plans 3-5 sub-tasks, researches each
   one concurrently (reusing the same Tavily search integration as the chat agents), and
-  synthesizes a cited markdown report. Runs in the background with a polling-based job model
-  (same pattern as AgentRL) and keeps a history of past research runs; requires
-  `TAVILY_API_KEY` to be configured.
+  synthesizes a cited markdown report. The research itself runs as a background task
+  independent of any connection (closing the tab doesn't stop it), while an SSE stream pushes
+  live TODO status and the report's text as it's generated; reconnecting mid-run resumes with
+  a snapshot of current progress instead of starting over. Keeps a history of past research
+  runs; requires `TAVILY_API_KEY` to be configured.
 
 ## Architecture
 
