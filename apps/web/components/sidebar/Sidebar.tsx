@@ -43,6 +43,7 @@ export function Sidebar({ collapsed, onToggleCollapse }: SidebarProps) {
           <Link href="/eval" className="rounded-lg px-3 py-2 text-sm hover:bg-white">📊 Agent 评估</Link>
           <Link href="/agentrl" className="rounded-lg px-3 py-2 text-sm hover:bg-white">🧪 AgentRL</Link>
           <Link href="/deepresearch" className="rounded-lg px-3 py-2 text-sm hover:bg-white">🔭 DeepResearch</Link>
+          <Link href="/mcp" className="rounded-lg px-3 py-2 text-sm hover:bg-white">🔌 MCP</Link>
           <hr className="my-3 border-border" />
           <TaskList />
         </nav>

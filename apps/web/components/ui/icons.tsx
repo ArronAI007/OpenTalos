@@ -306,3 +306,14 @@ export function TelescopeIcon(props: IconProps) {
     </Icon>
   );
 }
+
+export function PlugIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M12 22v-5" />
+      <path d="M9 8V2" />
+      <path d="M15 8V2" />
+      <path d="M18 8v3a6 6 0 0 1-6 6v0a6 6 0 0 1-6-6V8Z" />
+    </Icon>
+  );
+}
