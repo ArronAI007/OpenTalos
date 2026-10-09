@@ -109,6 +109,7 @@ def create_app(runtime: ChatRuntime | None = None, eval_cases_path: Path | None 
             ChatStore(_REPO_ROOT / ".data" / "chat.db"),
             skill_service_url=os.environ.get("SKILL_SERVICE_URL", "http://localhost:8321"),
             tavily_api_key=os.environ.get("TAVILY_API_KEY"),
+            a2a_peer_url=os.environ.get("A2A_PEER_URL"),
             trace_dir=_REPO_ROOT / ".data" / "traces",
             compaction_token_limit=int(os.environ.get("COMPACTION_TOKEN_LIMIT", "16000")),
         )
