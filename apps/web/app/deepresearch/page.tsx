@@ -179,6 +179,13 @@ export default function DeepResearchPage() {
           <input
             value={topic}
             onChange={(e) => setTopic(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.nativeEvent.isComposing) return; // IME 候选窗激活时 Enter 仅选词，不提交
+              if (e.key === "Enter") {
+                e.preventDefault();
+                void handleStart();
+              }
+            }}
             placeholder="例如：量子计算的基本原理和应用场景"
             className="flex-1 rounded-lg border border-border px-3 py-1.5 text-sm"
           />
