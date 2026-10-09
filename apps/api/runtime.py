@@ -112,13 +112,18 @@ class ChatRuntime:
         self._skills_suffix: str | None = None
         self._skills_reachable: bool | None = None
         self._websearch_tools: list[Any] = []
+        self._search_client: TavilyClient | None = None
         if tavily_api_key:
-            _tavily_client = TavilyClient(tavily_api_key)
-            self._websearch_tools = [WebSearchTool(_tavily_client), WebExtractorTool(_tavily_client)]
+            self._search_client = TavilyClient(tavily_api_key)
+            self._websearch_tools = [WebSearchTool(self._search_client), WebExtractorTool(self._search_client)]
 
     @property
     def store(self) -> ChatStore:
         return self._store
+
+    @property
+    def search_client(self) -> TavilyClient | None:
+        return self._search_client
 
     @property
     def skill_service_url(self) -> str:

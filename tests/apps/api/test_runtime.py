@@ -842,3 +842,18 @@ def test_model_client_property_exposes_the_underlying_client(store, scripted_cli
     runtime = _runtime(store, client, tmp_path)
 
     assert runtime.model_client is client
+
+
+def test_search_client_is_none_without_a_tavily_api_key(store, scripted_client, tmp_path) -> None:
+    client = scripted_client(tool_completions=[])
+    runtime = _runtime(store, client, tmp_path)
+    assert runtime.search_client is None
+
+
+def test_search_client_exposes_the_configured_tavily_client(store, scripted_client, tmp_path) -> None:
+    client = scripted_client(tool_completions=[])
+    runtime = ChatRuntime(
+        store, model_client=client, skill_service_url="http://127.0.0.1:1",
+        trace_dir=tmp_path / "traces", tavily_api_key="tvly-test",
+    )
+    assert runtime.search_client is not None
