@@ -115,6 +115,33 @@ class TestSynthesizeReport:
         with pytest.raises(PlanningError):
             await _synthesize_report(client, "topic", todos)
 
+    async def test_invokes_on_chunk_for_each_delta_and_reconstructs_full_text(self, scripted_client) -> None:
+        client = scripted_client(completions=[Completion(text="abc", model_id="mock-model")])
+        todos = [{"id": 0, "query": "q1", "status": "completed", "summary": "s1", "sources": []}]
+        chunks: list[str] = []
+
+        async def on_chunk(delta: str) -> None:
+            chunks.append(delta)
+
+        report = await _synthesize_report(client, "topic", todos, on_chunk=on_chunk)
+
+        assert report == "abc"
+        assert "".join(chunks) == "abc"
+        assert len(chunks) == 3  # scripted_client 的 fake_astream 逐字符 yield
+
+    async def test_mid_stream_failure_raises_planning_error_with_exception_type(self, scripted_client) -> None:
+        client = scripted_client()
+
+        async def raising_astream(_messages: list[dict[str, Any]], **_kwargs: Any):
+            yield "部分"
+            raise RuntimeError("stream broke")
+
+        client.astream = raising_astream  # type: ignore[method-assign]
+        todos = [{"id": 0, "query": "q1", "status": "completed", "summary": "s1", "sources": []}]
+
+        with pytest.raises(PlanningError, match="RuntimeError"):
+            await _synthesize_report(client, "topic", todos)
+
 
 class TestRunResearch:
     async def test_full_flow_persists_completed_run_with_report(self, store, scripted_client) -> None:

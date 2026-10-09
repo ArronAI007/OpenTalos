@@ -57,6 +57,10 @@ def scripted_client():
         client = ModelClient(provider="mock")
 
         if completions:
+            # acomplete/astream 共用同一个队列、同一个游标——调用方可能在一次流程里交替用两种
+            # 调用方式（比如先 acomplete 规划再 astream 合成），脚本化的响应顺序要按「实际调用
+            # 顺序」消费，不能按「调用方式」分别维护两条独立游标，否则两种调用方式一混用，
+            # 消费到的响应就会和调用顺序错位。
             queue = list(completions)
 
             async def fake_acomplete(messages: list[dict[str, Any]], **kwargs: Any) -> Completion:
@@ -64,10 +68,8 @@ def scripted_client():
 
             client.acomplete = fake_acomplete  # type: ignore[method-assign]
 
-            text_queue = list(completions)
-
             async def fake_astream(messages: list[dict[str, Any]], **kwargs: Any):
-                for char in text_queue.pop(0).text:
+                for char in queue.pop(0).text:
                     yield char
 
             client.astream = fake_astream  # type: ignore[method-assign]

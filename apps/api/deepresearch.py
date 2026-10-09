@@ -129,22 +129,34 @@ async def _run_todo(client: ModelClient, search_client: TavilyClient, query: str
         return {"status": "failed", "summary": str(exc), "sources": []}
 
 
-async def _synthesize_report(client: ModelClient, topic: str, todos: list[dict]) -> str:
+async def _synthesize_report(
+    client: ModelClient,
+    topic: str,
+    todos: list[dict],
+    *,
+    on_chunk: Callable[[str], Awaitable[None]] | None = None,
+) -> str:
     completed = [t for t in todos if t["status"] == "completed"]
     if not completed:
         raise PlanningError("no completed todos to synthesize a report from")
     sections = "\n\n".join(f"## {t['query']}\n{t['summary']}" for t in completed)
+
+    async def _consume() -> str:
+        chunks: list[str] = []
+        async for delta in client.astream([
+            {"role": "system", "content": _REPORT_SYSTEM},
+            {"role": "user", "content": f"研究主题：{topic}\n\n{sections}"},
+        ]):
+            chunks.append(delta)
+            if on_chunk is not None:
+                await on_chunk(delta)
+        return "".join(chunks)
+
     try:
-        completion = await asyncio.wait_for(
-            client.acomplete([
-                {"role": "system", "content": _REPORT_SYSTEM},
-                {"role": "user", "content": f"研究主题：{topic}\n\n{sections}"},
-            ]),
-            timeout=_REPORT_TIMEOUT_S,
-        )
+        report = await asyncio.wait_for(_consume(), timeout=_REPORT_TIMEOUT_S)
     except Exception as exc:  # noqa: BLE001
         raise PlanningError(f"report synthesis failed: {type(exc).__name__}: {exc}") from exc
-    return completion.text.strip()
+    return report.strip()
 
 
 async def run_research(
