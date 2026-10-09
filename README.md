@@ -80,6 +80,11 @@ reasoning patterns side by side, with per-type averages/pass rates and a per-run
   or HTTP) and expose their tools to agents like any other tool. Connections are probed for
   real on add/refresh (tool list is cached for display) and opened fresh per call rather than
   held open, so a crashed or restarted server never leaves a stale connection behind.
+- **A2A Peer** (`:8430`) — an independent, always-on service wrapping a real OpenTalos agent as
+  a genuine A2A (Agent2Agent Protocol) peer, reachable at its `/.well-known/agent-card.json`
+  discovery endpoint. Any chat agent gets an `ask_peer_agent` tool once `A2A_PEER_URL` is
+  configured, letting it delegate a question to this separate agent instance over the real
+  protocol — not a simulation.
 
 ## Architecture
 
@@ -118,6 +123,11 @@ And `apps/` is what you actually run:
 (torch/transformers/peft/trl/accelerate/datasets), its own FastAPI service (`:8420`), its own
 SQLite store. No import relationship with `packages/*` or `apps/api` — the web frontend talks
 to it directly.
+
+`packages/a2apeer` is a different kind of exception from `agentrl/`: it's a genuinely
+independent always-on service (own port, managed by `scripts/start.sh`) but — unlike
+`agentrl/` — it shares the root `pyproject.toml`/dependencies rather than needing its own,
+since its dependencies (`a2a-sdk` and friends) don't conflict with anything already here.
 
 ## Repository Layout
 
@@ -188,6 +198,7 @@ Read by the chat API (`apps/api/main.py`) and the web frontend (`apps/web`) dire
 |---|---|---|
 | `SKILL_SERVICE_URL` | `http://localhost:8321` | Where the chat API reaches the skill service. |
 | `TAVILY_API_KEY` | *(none)* | Powers the chat agents' `web_search`/`web_extractor` tools and is a hard requirement for DeepResearch — without it, `/api/deepresearch/runs` returns 503. |
+| `A2A_PEER_URL` | *(none)* | Points chat agents at the `a2apeer` service's A2A endpoint (e.g. `http://localhost:8430/`) so they get an `ask_peer_agent` tool. Leave empty to disable. |
 | `NEXT_PUBLIC_API_URL` | `http://localhost:8400` | Chat API address the web frontend calls; `start.sh` injects it automatically, set it yourself only when running web standalone. |
 
 By default the API only allows CORS from `http://localhost:3000`. If the web frontend runs on a
