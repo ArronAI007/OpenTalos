@@ -354,3 +354,71 @@ def test_delete_eval_run_removes_it(store: ChatStore) -> None:
 
 def test_delete_missing_eval_run_returns_false(store: ChatStore) -> None:
     assert store.delete_eval_run("no-such-id") is False
+
+
+def test_create_and_get_deepresearch_run(store: ChatStore) -> None:
+    run = store.create_deepresearch_run("量子计算的应用")
+    assert run["id"]
+    assert run["status"] == "running"
+    assert run["topic"] == "量子计算的应用"
+    assert run["todos"] == []
+    assert run["report"] is None
+    assert run["error"] is None
+    assert store.get_deepresearch_run(run["id"]) == run
+
+
+def test_get_missing_deepresearch_run_returns_none(store: ChatStore) -> None:
+    assert store.get_deepresearch_run("no-such-id") is None
+
+
+def test_list_deepresearch_runs_orders_newest_first(store: ChatStore) -> None:
+    first = store.create_deepresearch_run("topic A")
+    second = store.create_deepresearch_run("topic B")
+    assert [r["id"] for r in store.list_deepresearch_runs()] == [second["id"], first["id"]]
+
+
+def test_update_deepresearch_run_todos_replaces_the_list(store: ChatStore) -> None:
+    run = store.create_deepresearch_run("topic")
+    todos = [{"id": 0, "query": "q1", "status": "pending", "summary": None, "sources": []}]
+    store.update_deepresearch_run_todos(run["id"], todos)
+    assert store.get_deepresearch_run(run["id"])["todos"] == todos
+
+
+def test_update_deepresearch_todo_patches_one_entry_by_id(store: ChatStore) -> None:
+    run = store.create_deepresearch_run("topic")
+    todos = [
+        {"id": 0, "query": "q1", "status": "pending", "summary": None, "sources": []},
+        {"id": 1, "query": "q2", "status": "pending", "summary": None, "sources": []},
+    ]
+    store.update_deepresearch_run_todos(run["id"], todos)
+    store.update_deepresearch_todo(run["id"], 1, status="completed", summary="s2", sources=[{"title": "t", "url": "u"}])
+    updated = store.get_deepresearch_run(run["id"])["todos"]
+    assert updated[0] == todos[0]  # 没动的那条原样保留
+    assert updated[1] == {"id": 1, "query": "q2", "status": "completed", "summary": "s2", "sources": [{"title": "t", "url": "u"}]}
+
+
+def test_update_deepresearch_todo_missing_run_is_a_noop(store: ChatStore) -> None:
+    store.update_deepresearch_todo("no-such-id", 0, status="completed")  # 不应抛异常
+
+
+def test_update_deepresearch_run_sets_status_report_and_error(store: ChatStore) -> None:
+    run = store.create_deepresearch_run("topic")
+    updated = store.update_deepresearch_run(run["id"], status="completed", report="# 报告")
+    assert updated["status"] == "completed"
+    assert updated["report"] == "# 报告"
+    assert updated["error"] is None
+
+    failed = store.create_deepresearch_run("topic2")
+    updated_failed = store.update_deepresearch_run(failed["id"], status="failed", error="boom")
+    assert updated_failed["status"] == "failed"
+    assert updated_failed["error"] == "boom"
+
+
+def test_delete_deepresearch_run_removes_it(store: ChatStore) -> None:
+    run = store.create_deepresearch_run("topic")
+    assert store.delete_deepresearch_run(run["id"]) is True
+    assert store.get_deepresearch_run(run["id"]) is None
+
+
+def test_delete_missing_deepresearch_run_returns_false(store: ChatStore) -> None:
+    assert store.delete_deepresearch_run("no-such-id") is False
