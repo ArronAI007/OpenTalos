@@ -223,7 +223,10 @@ async def test_message_sse_flow_and_persistence(api) -> None:
     frames = [block for block in body.split("\n\n") if block.strip()]
     events = [json.loads(frame.strip().removeprefix("data: ")) for frame in frames]
     assert events[0]["type"] == "user_stored"  # 落库回执是流内首事件
-    assert events[1]["type"] == "delta"
+    # 首条消息紧跟一个 title 事件（截断兜底版）；这个 fixture 没配 completions，模型概括版
+    # 调用返回空文本会静默降级为 None，不会有第二次 title 事件覆盖它。
+    assert events[1] == {"type": "title", "title": "ping"}
+    assert events[2]["type"] == "delta"
     assert events[-1] == {"type": "done", "reply": "pong"}
     rows = (await api.get(f"/api/tasks/{task['id']}/messages")).json()["messages"]
     assert [r["kind"] for r in rows] == ["user", "assistant"]

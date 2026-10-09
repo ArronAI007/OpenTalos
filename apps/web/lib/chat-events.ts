@@ -8,7 +8,10 @@ export type ChatEvent =
   // user 行落库后服务端回送：把 live-N user 泡换成 row-N 身份（删除轮次需要服务端 id）。
   | { type: "user_stored"; id: number; created_at: string }
   // 回复完成后服务端追加的跟进问题推荐（done 之后、流尾；仅出现在本会话，不落库）。
-  | { type: "suggestions"; items: string[] };
+  | { type: "suggestions"; items: string[] }
+  // 首条消息时并行生成的概括性标题（成功才发，失败/超时不发——保留已落库的截断版兜底）。
+  // 不对应任何聊天气泡，use-chat 里单独转发给侧栏任务列表，这里只负责"原样放行"。
+  | { type: "title"; title: string };
 
 export type UiMessage =
   // completedAt（epoch ms）：assistant 回复定稿时刻（done/停止/error 定稿）或历史行 created_at；
@@ -190,5 +193,8 @@ export function reduceChatEvent(prev: UiMessage[], event: ChatEvent, now = Date.
       const rest = prev.filter((m) => m.kind !== "suggestions");
       return [...rest, { id: nextUiId(rest), kind: "suggestions", items: event.items }];
     }
+    case "title":
+      // 不改变本页消息列表——侧栏任务列表的更新由 use-chat 的事件回调单独转发。
+      return prev;
   }
 }

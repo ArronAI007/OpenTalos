@@ -13,6 +13,7 @@ import {
   type UiMessage,
 } from "./chat-events";
 import { postSse } from "./sse";
+import { emitTaskTitleUpdated } from "./task-events";
 
 function fromStored(row: StoredMessage): UiMessage {
   // 服务端断连兜底落的 stopped 标记行 → 渲染为"已停止 — 发送消息以继续"提示
@@ -82,6 +83,8 @@ export function useChat(taskId: string) {
           { content },
           (event) => {
             if (event.type === "done") doneRef.current = true;
+            // 标题事件不进本页消息列表，单独转发给侧栏（两者是独立组件/独立 state）。
+            if (event.type === "title") emitTaskTitleUpdated(taskId, event.title);
             setMessages((prev) => reduceChatEvent(prev, event));
           },
           ctrl.signal,

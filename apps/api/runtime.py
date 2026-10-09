@@ -25,7 +25,7 @@ from websearch.client import TavilyClient
 from websearch.tools import WebExtractorTool, WebSearchTool
 
 from db import ChatStore
-from suggest import suggest_followups, suggest_skill_usage_examples
+from suggest import suggest_followups, suggest_skill_usage_examples, suggest_title
 
 EventSink = Callable[[dict[str, Any]], Awaitable[None]]
 
@@ -263,11 +263,18 @@ class ChatRuntime:
             # 取舍：user 消息先落库，agent transcript 要到 arespond 末尾才补录。若流在这两步
             # 之间被取消，DB 会多出这条 user 行而缓存 agent 的 transcript 缺失；下一轮缓存命中
             # 不重放，上下文会短暂缺这一句，直到 evict/重启后从 DB 重放恢复。接受此取舍。
+            # 只在任务当前还没有标题时才需要生成一个新的——标题只在第一条消息时确定一次。
+            is_first_message = task["title"] == ""
             user_row = await asyncio.to_thread(self._store.append_message, task_id, "user", content)
-            await asyncio.to_thread(self._store.set_title_if_empty, task_id, _truncate_title(content))
+            truncated_title = _truncate_title(content)
+            await asyncio.to_thread(self._store.set_title_if_empty, task_id, truncated_title)
             # 回送落库行的身份：前端据此把 live-N user 泡换成 row-N（删除轮次需要服务端 id），
             # completedAt 也校准为服务端写入时间。事件发生在 producer 启动前，必为流内首事件。
             yield {"type": "user_stored", "id": user_row["id"], "created_at": user_row["created_at"]}
+            if is_first_message:
+                # 截断版兜底标题立即推给侧栏——不等模型生成的概括版，避免侧栏在那之前（或
+                # 模型调用失败/超时时）一直显示"（未命名任务）"。概括版生成成功后会覆盖发第二次。
+                yield {"type": "title", "title": truncated_title}
             pending_calls: list[dict[str, Any]] = []
             parts: list[str] = []
             error: str | None = None
@@ -308,6 +315,15 @@ class ChatRuntime:
                     )
                 )
                 if not skip_suggestions
+                else None
+            )
+            # 标题同理并行预发：截断版兜底标题已经同步落库过了（上面那行），这里只是
+            # 用一次模型调用去"升级"成概括性标题，失败/超时就保留兜底版，不覆盖。
+            # 复用 skip_suggestions：评估场景的任务立即归档、标题从不展示给用户，不值得
+            # 多打一次模型调用。
+            title_task = (
+                asyncio.create_task(suggest_title(self._client(), content))
+                if is_first_message and not skip_suggestions
                 else None
             )
             persisted = False
@@ -365,6 +381,13 @@ class ChatRuntime:
                         suggestions = await suggest_task
                         if suggestions:
                             yield {"type": "suggestions", "items": suggestions}
+                    # 标题同理：通常已经跑完，拿到就覆盖落库的兜底标题；None（失败/超时）
+                    # 就保留已经同步写过的截断版，不发事件（前端侧栏标题不变）。
+                    if title_task is not None:
+                        new_title = await title_task
+                        if new_title:
+                            await asyncio.to_thread(self._store.update_task, task_id, title=new_title)
+                            yield {"type": "title", "title": new_title}
                     # 压缩是优化、失败不影响对话：assistant 已落库，此处触发折叠+快照落库，
                     # DB 顺序 user → tool → assistant → summary，重放时 summary 之后无重复行。
                     try:
@@ -381,6 +404,8 @@ class ChatRuntime:
                     producer.cancel()
                 if suggest_task is not None and not suggest_task.done():
                     suggest_task.cancel()
+                if title_task is not None and not title_task.done():
+                    title_task.cancel()
                 # 客户端中途断开 / 用户停止（消费循环被 GeneratorExit/CancelledError 打断、
                 # 或 stopped_by_user 提前 return）：正常完成路径的 assistant 落库不可达。
                 # 这里兜底：①有已流出内容则落 assistant partial；②无条件落一行

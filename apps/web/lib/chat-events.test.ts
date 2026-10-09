@@ -337,3 +337,11 @@ describe("suggestions", () => {
     expect(dropSuggestions(prev)).toBe(prev);
   });
 });
+
+describe("title", () => {
+  it("does not change the message list — only use-chat forwards it to the sidebar", () => {
+    const prev: UiMessage[] = [{ id: "row-1", kind: "user", content: "问" }];
+    const next = reduceChatEvent(prev, { type: "title", title: "新标题" });
+    expect(next).toBe(prev); // 同引用：no-op，不触发多余渲染
+  });
+});

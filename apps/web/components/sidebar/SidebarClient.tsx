@@ -8,6 +8,7 @@ import { readAgentType } from "@/lib/agent-type";
 import { copyText } from "@/lib/clipboard";
 import { sortTasks } from "@/lib/task-sort";
 import { partitionTasks, visibleUngrouped } from "@/lib/task-projects";
+import { TASK_TITLE_UPDATED_EVENT, type TaskTitleUpdatedDetail } from "@/lib/task-events";
 import { BeakerIcon, ChartBarIcon, ClockIcon, PencilSquareIcon, PinIcon, PuzzleIcon, SearchIcon, SparklesIcon, StarIcon } from "@/components/ui/icons";
 import { LogoMark } from "./Logo";
 import { TaskListMenu } from "./TaskListMenu";
@@ -124,6 +125,17 @@ export function TaskList() {
     void listTasks().then(setTasks).catch(() => undefined);
     void listProjects().then(setProjects).catch(() => undefined);
   }, [pathname]); // 路由变化（新建/删除导航）触发刷新
+
+  // 标题生成是异步的、在当前任务页停留期间才会到达——不会触发上面那个 pathname 刷新，
+  // 用跨组件事件直接更新本地状态，不用整份重新拉取。
+  useEffect(() => {
+    const onTitleUpdated = (e: Event) => {
+      const { taskId, title } = (e as CustomEvent<TaskTitleUpdatedDetail>).detail;
+      setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, title } : t)));
+    };
+    window.addEventListener(TASK_TITLE_UPDATED_EVENT, onTitleUpdated);
+    return () => window.removeEventListener(TASK_TITLE_UPDATED_EVENT, onTitleUpdated);
+  }, []);
 
   // 点击菜单外或 Esc 关闭当前唯一打开的菜单。
   useEffect(() => {

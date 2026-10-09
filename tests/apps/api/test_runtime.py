@@ -73,6 +73,7 @@ def test_disconnect_mid_stream_persists_partial(store, scripted_client, tmp_path
     ])
     runtime = _runtime(store, client, tmp_path)
     task = store.create_task("react")
+    store.update_task(task["id"], title="已有标题")  # 跳过首条消息才有的标题事件，不干扰事件序列断言
 
     async def consume_one_delta_then_close() -> str:
         gen = runtime.stream_reply(task["id"], "hi")
@@ -105,6 +106,7 @@ def test_disconnect_before_any_delta_persists_stopped_marker(store, scripted_cli
     client.astream_with_tools = slow_silent_astream  # type: ignore[method-assign]
     runtime = _runtime(store, client, tmp_path)
     task = store.create_task("react")
+    store.update_task(task["id"], title="已有标题")  # 跳过首条消息才有的标题事件，不干扰事件序列断言
 
     async def close_before_first_delta() -> None:
         gen = runtime.stream_reply(task["id"], "hi")
@@ -164,6 +166,7 @@ def test_idle_stream_emits_keepalive_ping(store, scripted_client, tmp_path) -> N
     client.astream_with_tools = slow_silent_astream  # type: ignore[method-assign]
     runtime = _runtime(store, client, tmp_path)
     task = store.create_task("react")
+    store.update_task(task["id"], title="已有标题")  # 跳过首条消息才有的标题事件，不干扰事件序列断言
 
     async def first_two_events() -> list[dict[str, Any]]:
         gen = runtime.stream_reply(task["id"], "hi")
@@ -467,6 +470,7 @@ def test_followup_suggestions_absent_on_stop(store, scripted_client, tmp_path) -
     )
     runtime = _runtime(store, client, tmp_path)
     task = store.create_task("react")
+    store.update_task(task["id"], title="已有标题")  # 跳过首条消息才有的标题事件，不干扰事件序列断言
 
     async def consume_then_stop() -> list[dict[str, Any]]:
         gen = runtime.stream_reply(task["id"], "hi")
@@ -503,6 +507,10 @@ def test_followup_suggestions_prefetch_starts_with_reply(store, scripted_client,
     client.acomplete = gated_acomplete  # type: ignore[method-assign]
     runtime = _runtime(store, client, tmp_path)
     task = store.create_task("react")
+    # 标题生成只在任务还没标题（首条消息）时才会并行发起、同样调用 acomplete——这个测试
+    # 专门断言"推荐调用先于 done 发起"，给任务先设好标题以跳过标题生成，避免两路并行调用
+    # 互相抢占同一个 gated_acomplete/completions 队列。
+    store.update_task(task["id"], title="已有标题")
 
     async def consume() -> list[dict[str, Any]]:
         events: list[dict[str, Any]] = []
@@ -535,6 +543,8 @@ def test_compression_persists_summary_checkpoint(store, scripted_client, tmp_pat
         tool_completions=[ToolCompletion(text="答复", requested_tools=[], model_id="mock-model")],
     )
     task = store.create_task("react")
+    # 同上：先设标题跳过标题生成，避免它抢占这里专门留给 suggest/summarize 的两格 completions 队列。
+    store.update_task(task["id"], title="已有标题")
     for i in range(11):  # 种入 11 回合，第 12 轮触发压缩（min_retain_turns=10）
         store.append_message(task["id"], "user", f"问题 {i}")
         store.append_message(task["id"], "assistant", f"回答 {i}")
@@ -724,6 +734,92 @@ def test_stream_reply_skips_suggestions_when_requested(store, scripted_client, t
     event_types = [e["type"] for e in events]
     assert event_types[-1] == "done"
     assert "suggestions" not in event_types
+
+
+def test_stream_reply_generates_a_title_on_first_message(store, scripted_client, tmp_path) -> None:
+    # 标题生成和跟进问题推荐并行发起、共用同一个 client.acomplete，asyncio 调度顺序不保证
+    # 谁先到——按 system prompt 内容路由而不是按队列顺序，两边谁先谁后结果都确定。
+    client = scripted_client(tool_completions=[
+        ToolCompletion(text="你好", requested_tools=[], model_id="mock-model"),
+    ])
+
+    async def routed_acomplete(messages: list[dict[str, Any]], **_kwargs: Any) -> Completion:
+        system = messages[0]["content"]
+        if "标题生成器" in system:
+            return Completion(text="查询今天日期", model_id="mock-model")
+        return Completion(text="[]", model_id="mock-model")
+
+    client.acomplete = routed_acomplete  # type: ignore[method-assign]
+    runtime = _runtime(store, client, tmp_path)
+    task = store.create_task("react")
+
+    events = asyncio.run(_collect(runtime, task["id"], "今天是几号？"))
+
+    # 两次 title 事件：user_stored 后立即发的截断兜底版，done 后再发一次模型概括版覆盖它。
+    title_events = [e for e in events if e["type"] == "title"]
+    assert title_events == [
+        {"type": "title", "title": "今天是几号？"},
+        {"type": "title", "title": "查询今天日期"},
+    ]
+    assert store.get_task(task["id"])["title"] == "查询今天日期"
+
+
+def test_stream_reply_does_not_regenerate_title_on_later_messages(store, scripted_client, tmp_path) -> None:
+    client = scripted_client(tool_completions=[
+        ToolCompletion(text="好的", requested_tools=[], model_id="mock-model"),
+    ])
+    runtime = _runtime(store, client, tmp_path)
+    task = store.create_task("react")
+    store.update_task(task["id"], title="已有标题")
+
+    events = asyncio.run(_collect(runtime, task["id"], "第二条消息"))
+
+    assert "title" not in [e["type"] for e in events]
+    assert store.get_task(task["id"])["title"] == "已有标题"
+
+
+def test_stream_reply_title_generation_failure_keeps_truncated_fallback(store, scripted_client, tmp_path) -> None:
+    client = scripted_client(tool_completions=[
+        ToolCompletion(text="你好", requested_tools=[], model_id="mock-model"),
+    ])
+
+    async def raising(_messages: list[dict[str, Any]], **_kwargs: Any) -> Completion:
+        raise RuntimeError("model down")
+
+    client.acomplete = raising  # type: ignore[method-assign]
+    runtime = _runtime(store, client, tmp_path)
+    task = store.create_task("react")
+
+    events = asyncio.run(_collect(runtime, task["id"], "一条很长很长的第一条消息"))
+
+    # 只有 user_stored 后立即发的截断兜底版那一次 title 事件；模型调用失败，没有第二次覆盖。
+    title_events = [e for e in events if e["type"] == "title"]
+    assert title_events == [{"type": "title", "title": "一条很长很长的第一条消息"}]
+    assert store.get_task(task["id"])["title"] == "一条很长很长的第一条消息"  # 截断兜底未被覆盖
+
+
+def test_stream_reply_skips_title_generation_when_skip_suggestions_is_true(store, scripted_client, tmp_path) -> None:
+    client = scripted_client(tool_completions=[
+        ToolCompletion(text="你好", requested_tools=[], model_id="mock-model"),
+    ])
+    # 不提供 completions：一旦标题生成真的发起了模型调用，fake_acomplete 未被覆盖时
+    # 会落到 FakeModelBackend 默认实现（返回空文本）而不是报错——所以改用显式断言调用次数。
+    call_count = 0
+    original_acomplete = client.acomplete
+
+    async def counting_acomplete(*args: Any, **kwargs: Any) -> Completion:
+        nonlocal call_count
+        call_count += 1
+        return await original_acomplete(*args, **kwargs)
+
+    client.acomplete = counting_acomplete  # type: ignore[method-assign]
+    runtime = _runtime(store, client, tmp_path)
+    task = store.create_task("react")
+
+    asyncio.run(_collect_kw(runtime, task["id"], "hi", skip_suggestions=True))
+
+    assert call_count == 0
+    assert store.get_task(task["id"])["title"] == "hi"
 
 
 def test_stream_reply_accumulates_tokens_onto_a_passed_in_cancellation_token(store, scripted_client, tmp_path) -> None:

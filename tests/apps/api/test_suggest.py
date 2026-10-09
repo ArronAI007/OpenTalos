@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 from core.protocol import Completion
-from suggest import _parse_items, suggest_followups, suggest_skill_usage_examples
+from suggest import _parse_items, suggest_followups, suggest_skill_usage_examples, suggest_title
 
 
 def _history(*contents: str) -> list[dict[str, Any]]:
@@ -124,3 +124,40 @@ class TestSuggestSkillUsageExamples:
 
         client.acomplete = slow  # type: ignore[method-assign]
         assert asyncio.run(suggest_skill_usage_examples(client, "date", "desc", timeout=0.05)) == []
+
+
+class TestSuggestTitle:
+    def test_returns_title_on_success(self, scripted_client) -> None:
+        client = scripted_client(completions=[Completion(text="查询今天日期", model_id="mock-model")])
+        assert asyncio.run(suggest_title(client, "今天是几号？")) == "查询今天日期"
+
+    def test_strips_surrounding_quotes_and_whitespace(self, scripted_client) -> None:
+        client = scripted_client(completions=[Completion(text='  "查询今天日期"  ', model_id="mock-model")])
+        assert asyncio.run(suggest_title(client, "今天是几号？")) == "查询今天日期"
+
+    def test_truncates_to_max_chars(self, scripted_client) -> None:
+        client = scripted_client(completions=[Completion(text="一" * 30, model_id="mock-model")])
+        assert asyncio.run(suggest_title(client, "随便问点什么")) == "一" * 20
+
+    def test_empty_output_returns_none(self, scripted_client) -> None:
+        client = scripted_client(completions=[Completion(text="   ", model_id="mock-model")])
+        assert asyncio.run(suggest_title(client, "hi")) is None
+
+    def test_model_error_degrades_to_none(self, scripted_client) -> None:
+        client = scripted_client()
+
+        async def raising(_messages: list[dict[str, Any]], **_kwargs: Any) -> Completion:
+            raise RuntimeError("model down")
+
+        client.acomplete = raising  # type: ignore[method-assign]
+        assert asyncio.run(suggest_title(client, "hi")) is None
+
+    def test_timeout_degrades_to_none(self, scripted_client) -> None:
+        client = scripted_client()
+
+        async def slow(_messages: list[dict[str, Any]], **_kwargs: Any) -> Completion:
+            await asyncio.sleep(0.3)
+            return Completion(text="标题", model_id="mock-model")
+
+        client.acomplete = slow  # type: ignore[method-assign]
+        assert asyncio.run(suggest_title(client, "hi", timeout=0.05)) is None

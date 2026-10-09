@@ -96,3 +96,33 @@ async def suggest_skill_usage_examples(
     except Exception:  # noqa: BLE001 - 和 suggest_followups 同样的静默降级哲学
         return []
     return _parse_items(completion.text)
+
+
+_TITLE_TIMEOUT_S = 15.0
+_TITLE_MAX_CHARS = 20
+_TITLE_SYSTEM = (
+    "你是对话标题生成器。根据用户的第一条消息，生成一个简短的标题，概括这条任务/对话的主题。"
+    f"要求：不超过 {_TITLE_MAX_CHARS} 个字，不要标点符号或引号，不要解释，只输出标题本身。"
+)
+
+
+async def suggest_title(
+    client: ModelClient,
+    user_message: str,
+    *,
+    timeout: float = _TITLE_TIMEOUT_S,
+) -> str | None:
+    """根据用户第一条消息生成简短标题——和 suggest_followups 同样的"失败不传染"哲学：
+    调用失败/超时/空输出都返回 None，调用方保留已有的兜底标题（截断版），不覆盖成 None。"""
+    try:
+        completion = await asyncio.wait_for(
+            client.acomplete([
+                {"role": "system", "content": _TITLE_SYSTEM},
+                {"role": "user", "content": user_message},
+            ]),
+            timeout=timeout,
+        )
+    except Exception:  # noqa: BLE001 - 标题生成失败静默降级，保留已有的兜底标题
+        return None
+    title = completion.text.strip().strip("\"'“”‘’").strip()
+    return title[:_TITLE_MAX_CHARS] if title else None
