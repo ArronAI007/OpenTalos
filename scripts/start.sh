@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# OpenTalos 一键管理（后台模式）：skill 服务 + 聊天 API + AgentRL 服务 + Web 前端。
+# OpenTalos 一键管理（后台模式）：skill 服务 + 聊天 API + AgentRL 服务 + A2A peer 服务 + Web 前端。
 #   ./scripts/start.sh          拉起四个进程到后台（日志 .data/logs/，pid 记录 .data/pids/），
 #                               全部健康后打印地址并退出，终端立即归还
 #   ./scripts/start.sh stop     停止本脚本拉起的进程（复用的外部进程不动）
@@ -106,6 +106,11 @@ AGENTRL_URL="http://localhost:8420"
 ensure_service "agentrl" 8420 "$LOG_DIR/agentrl.log" "$AGENTRL_URL/health" \
   uv run --directory agentrl uvicorn main:app --host 0.0.0.0 --port 8420
 
+A2APEER_URL="http://localhost:8430"
+
+ensure_service "a2apeer" 8430 "$LOG_DIR/a2apeer.log" "$A2APEER_URL/health" \
+  env PYTHONPATH=packages uv run uvicorn a2apeer.main:app --host 0.0.0.0 --port 8430
+
 # web：next dev 无 /health，首页 200 即视为就绪；首次编译可能几十秒。
 if curl -sf "http://localhost:${WEB_PORT}" >/dev/null 2>&1; then
   echo "web already running on :$WEB_PORT — reusing it (not managed by start.sh stop)"
@@ -132,4 +137,5 @@ echo "  web      http://localhost:$WEB_PORT"
 echo "  api      $API_URL"
 echo "  skill    $SKILL_URL"
 echo "  agentrl  $AGENTRL_URL"
-echo "logs: tail -f $LOG_DIR/{skill,api,agentrl,web}.log    stop: ./scripts/start.sh stop"
+echo "  a2apeer  $A2APEER_URL"
+echo "logs: tail -f $LOG_DIR/{skill,api,agentrl,a2apeer,web}.log    stop: ./scripts/start.sh stop"
