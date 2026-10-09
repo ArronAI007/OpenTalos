@@ -25,6 +25,7 @@ from websearch.client import TavilyClient
 from websearch.tools import WebExtractorTool, WebSearchTool
 from mcpclient.client import MCPServerConfig, MCPToolInfo
 from mcpclient.tools import MCPTool
+from a2apeer.tools import A2ATool
 
 from db import ChatStore
 from suggest import suggest_followups, suggest_skill_usage_examples, suggest_title
@@ -99,6 +100,7 @@ class ChatRuntime:
         model_client: ModelClient | None = None,
         skill_service_url: str = "http://localhost:8321",
         tavily_api_key: str | None = None,
+        a2a_peer_url: str | None = None,
         trace_dir: Path | None = None,
         tool_registry_factory: Callable[[], ToolRegistry] | None = None,
         compaction_token_limit: int | None = None,
@@ -119,6 +121,7 @@ class ChatRuntime:
         self._skills_reachable: bool | None = None
         self._websearch_tools: list[Any] = []
         self._mcp_tools: list[Any] = []
+        self._a2a_tools: list[Any] = [A2ATool(a2a_peer_url)] if a2a_peer_url else []
         self._search_client: TavilyClient | None = None
         if tavily_api_key:
             self._search_client = TavilyClient(tavily_api_key)
@@ -195,6 +198,8 @@ class ChatRuntime:
         for tool in self._websearch_tools:
             inner.register(tool)
         for tool in self._mcp_tools:
+            inner.register(tool)
+        for tool in self._a2a_tools:
             inner.register(tool)
         if not inner.function_schemas():
             return None

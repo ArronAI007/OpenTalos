@@ -890,3 +890,26 @@ async def test_disabled_mcp_server_tool_absent_from_registry(store, scripted_cli
     await runtime._get_agent(task)
     registry = runtime._registries.get(task["id"])
     assert registry is None or registry.get("get_weather") is None
+
+
+async def test_a2a_peer_tool_absent_without_url(store, scripted_client, tmp_path) -> None:
+    client = scripted_client(tool_completions=[])
+    runtime = ChatRuntime(
+        store, model_client=client, skill_service_url="http://127.0.0.1:1", trace_dir=tmp_path / "traces",
+    )
+    task = store.create_task("react")
+    await runtime._get_agent(task)
+    registry = runtime._registries.get(task["id"])
+    assert registry is None or registry.get("ask_peer_agent") is None
+
+
+async def test_a2a_peer_tool_present_with_url(store, scripted_client, tmp_path) -> None:
+    client = scripted_client(tool_completions=[])
+    runtime = ChatRuntime(
+        store, model_client=client, skill_service_url="http://127.0.0.1:1",
+        trace_dir=tmp_path / "traces", a2a_peer_url="http://127.0.0.1:8430/",
+    )
+    task = store.create_task("react")
+    await runtime._get_agent(task)
+    registry = runtime._registries[task["id"]]
+    assert registry.get("ask_peer_agent") is not None
