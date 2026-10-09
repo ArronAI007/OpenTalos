@@ -295,3 +295,14 @@ export function BeakerIcon(props: IconProps) {
     </Icon>
   );
 }
+
+export function TelescopeIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M3 10l14-5 2 5.5-14 5z" />
+      <path d="M8.5 11.5l2 5.5" />
+      <path d="M6 21l3-6" />
+      <circle cx={19} cy={7} r={1.5} />
+    </Icon>
+  );
+}

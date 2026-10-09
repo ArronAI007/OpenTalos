@@ -9,7 +9,7 @@ import { copyText } from "@/lib/clipboard";
 import { sortTasks } from "@/lib/task-sort";
 import { partitionTasks, visibleUngrouped } from "@/lib/task-projects";
 import { TASK_TITLE_UPDATED_EVENT, type TaskTitleUpdatedDetail } from "@/lib/task-events";
-import { BeakerIcon, ChartBarIcon, ClockIcon, PencilSquareIcon, PinIcon, PuzzleIcon, SearchIcon, SparklesIcon, StarIcon } from "@/components/ui/icons";
+import { BeakerIcon, ChartBarIcon, ClockIcon, PencilSquareIcon, PinIcon, PuzzleIcon, SearchIcon, SparklesIcon, StarIcon, TelescopeIcon } from "@/components/ui/icons";
 import { LogoMark } from "./Logo";
 import { TaskListMenu } from "./TaskListMenu";
 import { ArchivedSection } from "./ArchivedSection";
@@ -100,6 +100,9 @@ export function SidebarRail({ busy, onCreate, onExpand, onOpenSearch }: SidebarR
       </Link>
       <Link href="/agentrl" aria-label="AgentRL" title="AgentRL" className={iconBtn}>
         <BeakerIcon />
+      </Link>
+      <Link href="/deepresearch" aria-label="DeepResearch" title="DeepResearch" className={iconBtn}>
+        <TelescopeIcon />
       </Link>
       <button type="button" aria-label="任务历史" title="任务历史" onClick={onExpand} className={iconBtn}>
         <ClockIcon />
