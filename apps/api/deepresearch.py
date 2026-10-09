@@ -2,6 +2,8 @@
 evaluation.py/suggest.py——不进 packages/*。"""
 import asyncio
 import json
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 from typing import Any
 
 from core.model import ModelClient
@@ -33,6 +35,36 @@ _REPORT_SYSTEM = (
 
 class PlanningError(Exception):
     """规划/报告合成阶段失败——没有可用内容，整个研究任务直接判失败。"""
+
+
+@dataclass
+class _LiveRun:
+    """一次 research run 的进程内实时状态——只在内存里，不落库。
+
+    subscribers：当前挂着的 SSE 连接各自的收件队列。partial_report：报告合成阶段已经流出来
+    但还没整体落库的文本，供断线重连时拼 snapshot 用；报告失败时直接丢弃，不持久化这部分。
+    """
+
+    subscribers: list[asyncio.Queue] = field(default_factory=list)
+    partial_report: str = ""
+
+
+_live_runs: dict[str, _LiveRun] = {}
+
+
+def start_live_run(run_id: str) -> None:
+    """main.py 的 POST 路由在 asyncio.create_task(run_research(...)) 调度之前同步调用——
+    保证从 POST 响应返回的那一刻起，这个 run 的广播器条目已经存在，不会有"DB 里已经是
+    running 但广播器还没来得及建"的缝隙。"""
+    _live_runs[run_id] = _LiveRun()
+
+
+def _publish(run_id: str, event: dict) -> None:
+    live = _live_runs.get(run_id)
+    if live is None:
+        return
+    for queue in live.subscribers:
+        queue.put_nowait(event)
 
 
 def _parse_queries(text: str) -> list[str]:

@@ -1,4 +1,5 @@
 """DeepResearch 核心逻辑：解析弹性 + 单条 TODO 失败不传染 + 整体编排的测试。"""
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -9,7 +10,17 @@ from db import ChatStore
 from websearch.client import TavilyClient
 from websearch.models import SearchResult
 
-from deepresearch import PlanningError, _parse_queries, _plan, _run_todo, _synthesize_report, run_research
+from deepresearch import (
+    PlanningError,
+    _live_runs,
+    _parse_queries,
+    _plan,
+    _publish,
+    _run_todo,
+    _synthesize_report,
+    run_research,
+    start_live_run,
+)
 
 
 @pytest.fixture
@@ -146,3 +157,22 @@ class TestRunResearch:
         final = store.get_deepresearch_run(run["id"])
         assert final["status"] == "failed"
         assert all(t["status"] == "failed" for t in final["todos"])
+
+
+class TestLiveRunBroadcaster:
+    def test_publish_without_live_entry_is_noop(self) -> None:
+        _publish("no-such-run", {"type": "todo_update"})  # 不应该抛异常
+
+    async def test_publish_fans_out_to_all_subscribers(self) -> None:
+        start_live_run("run-1")
+        try:
+            q1: asyncio.Queue = asyncio.Queue()
+            q2: asyncio.Queue = asyncio.Queue()
+            _live_runs["run-1"].subscribers.extend([q1, q2])
+
+            _publish("run-1", {"type": "todo_update", "id": 0})
+
+            assert q1.get_nowait() == {"type": "todo_update", "id": 0}
+            assert q2.get_nowait() == {"type": "todo_update", "id": 0}
+        finally:
+            _live_runs.pop("run-1", None)
