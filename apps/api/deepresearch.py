@@ -13,7 +13,7 @@ _MIN_TODOS = 3
 _MAX_TODOS = 5
 _PLAN_TIMEOUT_S = 30.0
 _SUMMARY_TIMEOUT_S = 30.0
-_REPORT_TIMEOUT_S = 60.0
+_REPORT_TIMEOUT_S = 200.0  # 留出余量：底层 HTTP 客户端自己的超时（MODEL_TIMEOUT，见 .env）更短会先触发
 _SEARCH_MAX_RESULTS = 5
 
 _PLAN_SYSTEM = (
@@ -65,7 +65,7 @@ async def _plan(client: ModelClient, topic: str) -> list[str]:
             timeout=_PLAN_TIMEOUT_S,
         )
     except Exception as exc:  # noqa: BLE001
-        raise PlanningError(f"planning call failed: {exc}") from exc
+        raise PlanningError(f"planning call failed: {type(exc).__name__}: {exc}") from exc
     queries = _parse_queries(completion.text)
     if len(queries) < _MIN_TODOS:
         raise PlanningError(f"planner returned only {len(queries)} usable queries")
@@ -111,7 +111,7 @@ async def _synthesize_report(client: ModelClient, topic: str, todos: list[dict])
             timeout=_REPORT_TIMEOUT_S,
         )
     except Exception as exc:  # noqa: BLE001
-        raise PlanningError(f"report synthesis failed: {exc}") from exc
+        raise PlanningError(f"report synthesis failed: {type(exc).__name__}: {exc}") from exc
     return completion.text.strip()
 
 

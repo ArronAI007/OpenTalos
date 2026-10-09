@@ -173,7 +173,7 @@ precedence over it.
 | `MODEL_API_KEY` | *(required except `mock`)* | |
 | `MODEL_NAME` | *(required except `mock`)* | |
 | `MODEL_BASE_URL` | provider default | Required for `openai-compatible` against a non-OpenAI endpoint (DeepSeek, Kimi/Moonshot, etc.). |
-| `MODEL_TIMEOUT` | `60` | Request timeout, seconds. |
+| `MODEL_TIMEOUT` | `60` | Request timeout, seconds. Always-on-thinking models (kimi-k3, etc.) can need well over 60s for long calls like DeepResearch's report synthesis — raise this if you see those fail with a timeout. |
 | `MODEL_TEMPERATURE` | *(not sent)* | Left unset, the request carries no `temperature` and the provider's own default applies — required for models that only accept a fixed value (o-series, kimi-k3). Set a number to pin it. |
 
 Read by the chat API (`apps/api/main.py`) and the web frontend (`apps/web`) directly:
