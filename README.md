@@ -69,6 +69,11 @@ reasoning patterns side by side, with per-type averages/pass rates and a per-run
   `Qwen/Qwen3-0.6B`, configurable sample/step counts, live loss/reward curves, a before/after
   reply comparison on held-out questions, and run history. Runs as a fully independent service
   (`agentrl/`, its own `pyproject.toml`/port/SQLite store) with no coupling to the chat app.
+- **DeepResearch** (`/deepresearch`) — give it a topic, it plans 3-5 sub-tasks, researches each
+  one concurrently (reusing the same Tavily search integration as the chat agents), and
+  synthesizes a cited markdown report. Runs in the background with a polling-based job model
+  (same pattern as AgentRL) and keeps a history of past research runs; requires
+  `TAVILY_API_KEY` to be configured.
 
 ## Architecture
 
@@ -176,6 +181,7 @@ Read by the chat API (`apps/api/main.py`) and the web frontend (`apps/web`) dire
 | Variable | Default | Notes |
 |---|---|---|
 | `SKILL_SERVICE_URL` | `http://localhost:8321` | Where the chat API reaches the skill service. |
+| `TAVILY_API_KEY` | *(none)* | Powers the chat agents' `web_search`/`web_extractor` tools and is a hard requirement for DeepResearch — without it, `/api/deepresearch/runs` returns 503. |
 | `NEXT_PUBLIC_API_URL` | `http://localhost:8400` | Chat API address the web frontend calls; `start.sh` injects it automatically, set it yourself only when running web standalone. |
 
 By default the API only allows CORS from `http://localhost:3000`. If the web frontend runs on a
