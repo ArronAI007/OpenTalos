@@ -23,6 +23,8 @@ from tool.registry import ToolRegistry
 from tool.tool import Tool
 from websearch.client import TavilyClient
 from websearch.tools import WebExtractorTool, WebSearchTool
+from mcpclient.client import MCPServerConfig, MCPToolInfo
+from mcpclient.tools import MCPTool
 
 from db import ChatStore
 from suggest import suggest_followups, suggest_skill_usage_examples, suggest_title
@@ -85,6 +87,10 @@ def _truncate_title(text: str, limit: int = 40) -> str:
     return text if len(text) <= limit else text[:limit] + "…"
 
 
+def _mcp_tool_info_from_dict(data: dict) -> MCPToolInfo:
+    return MCPToolInfo(name=data["name"], description=data["description"], input_schema=data["input_schema"])
+
+
 class ChatRuntime:
     def __init__(
         self,
@@ -112,6 +118,7 @@ class ChatRuntime:
         self._skills_suffix: str | None = None
         self._skills_reachable: bool | None = None
         self._websearch_tools: list[Any] = []
+        self._mcp_tools: list[Any] = []
         self._search_client: TavilyClient | None = None
         if tavily_api_key:
             self._search_client = TavilyClient(tavily_api_key)
@@ -166,11 +173,28 @@ class ChatRuntime:
             self._skills_suffix = None
             self._skills_reachable = False
 
+    async def _ensure_mcp_tools(self) -> None:
+        # 和 _ensure_skills 同样的取舍：不做"只算一次"的永久缓存，每次新建 agent 时都重新
+        # 查一遍库——这样 /mcp 页面上启用/禁用某个 server 才能在下一个新建的 task 里立刻
+        # 生效，不用重启进程。
+        servers = await asyncio.to_thread(self._store.list_mcp_servers)
+        self._mcp_tools = [
+            MCPTool(
+                MCPServerConfig(transport=server["transport"], **server["config"]),
+                _mcp_tool_info_from_dict(tool),
+            )
+            for server in servers
+            if server["enabled"]
+            for tool in server["cached_tools"]
+        ]
+
     def _build_registry(self, task_id: str) -> ToolRegistry | None:
         inner = self._tool_registry_factory() if self._tool_registry_factory else ToolRegistry()
         for tool in self._skill_tools:
             inner.register(tool)
         for tool in self._websearch_tools:
+            inner.register(tool)
+        for tool in self._mcp_tools:
             inner.register(tool)
         if not inner.function_schemas():
             return None
@@ -183,6 +207,7 @@ class ChatRuntime:
         if agent is not None:
             return agent
         await self._ensure_skills()
+        await self._ensure_mcp_tools()
         agent = build_agent(
             task["agent_type"], f"task-{task['id'][:8]}", self._client(),
             tool_registry=self._build_registry(task["id"]),

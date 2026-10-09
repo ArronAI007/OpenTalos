@@ -1,5 +1,6 @@
 import asyncio
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -857,3 +858,35 @@ def test_search_client_exposes_the_configured_tavily_client(store, scripted_clie
         trace_dir=tmp_path / "traces", tavily_api_key="tvly-test",
     )
     assert runtime.search_client is not None
+
+
+def _mcp_demo_server_config() -> dict:
+    demo_server = str(
+        Path(__file__).resolve().parent.parent.parent.parent / "packages" / "mcpclient" / "demo_server.py"
+    )
+    return {"command": sys.executable, "args": [demo_server]}
+
+
+async def test_enabled_mcp_server_tool_reaches_registry(store, scripted_client, tmp_path) -> None:
+    store.create_mcp_server(
+        name="weather", transport="stdio", config=_mcp_demo_server_config(),
+        cached_tools=[{"name": "get_weather", "description": "d", "input_schema": {"type": "object", "properties": {}}}],
+    )
+    runtime = _runtime(store, scripted_client(tool_completions=[]), tmp_path)
+    task = store.create_task("react")
+    await runtime._get_agent(task)
+    registry = runtime._registries[task["id"]]
+    assert registry.get("get_weather") is not None
+
+
+async def test_disabled_mcp_server_tool_absent_from_registry(store, scripted_client, tmp_path) -> None:
+    created = store.create_mcp_server(
+        name="weather", transport="stdio", config=_mcp_demo_server_config(),
+        cached_tools=[{"name": "get_weather", "description": "d", "input_schema": {"type": "object", "properties": {}}}],
+    )
+    store.set_mcp_server_enabled(created["id"], False)
+    runtime = _runtime(store, scripted_client(tool_completions=[]), tmp_path)
+    task = store.create_task("react")
+    await runtime._get_agent(task)
+    registry = runtime._registries.get(task["id"])
+    assert registry is None or registry.get("get_weather") is None
