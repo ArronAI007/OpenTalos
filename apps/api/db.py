@@ -44,6 +44,16 @@ CREATE TABLE IF NOT EXISTS deepresearch_runs (
   report TEXT,                 -- 最终 markdown 报告；未完成/失败为 NULL
   error TEXT                   -- 失败信息；成功/进行中为 NULL
 );
+CREATE TABLE IF NOT EXISTS mcp_servers (
+  id TEXT PRIMARY KEY,
+  created_at TEXT NOT NULL,
+  name TEXT NOT NULL,
+  transport TEXT NOT NULL,       -- 'stdio' | 'http'
+  config TEXT NOT NULL,          -- JSON：{command, args} 或 {url}
+  enabled INTEGER NOT NULL DEFAULT 1,
+  cached_tools TEXT NOT NULL,    -- JSON 数组：[{name, description, input_schema}]
+  last_error TEXT                -- 最近一次探测/刷新失败的错误信息；成功为 NULL
+);
 """
 
 
@@ -306,4 +316,74 @@ class ChatStore:
     def delete_deepresearch_run(self, run_id: str) -> bool:
         with self._connect() as conn:
             cursor = conn.execute("DELETE FROM deepresearch_runs WHERE id = ?", (run_id,))
+            return cursor.rowcount > 0
+
+    def create_mcp_server(
+        self, *, name: str, transport: str, config: dict, cached_tools: list[dict]
+    ) -> dict:
+        server_id = uuid.uuid4().hex
+        now = _now()
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO mcp_servers (id, created_at, name, transport, config, enabled, cached_tools, last_error)"
+                " VALUES (?, ?, ?, ?, ?, 1, ?, NULL)",
+                (server_id, now, name, transport, json.dumps(config), json.dumps(cached_tools)),
+            )
+        return self.get_mcp_server(server_id)
+
+    @staticmethod
+    def _mcp_server_row_to_dict(row: sqlite3.Row) -> dict:
+        return {
+            "id": row["id"],
+            "created_at": row["created_at"],
+            "name": row["name"],
+            "transport": row["transport"],
+            "config": json.loads(row["config"]),
+            "enabled": bool(row["enabled"]),
+            "cached_tools": json.loads(row["cached_tools"]),
+            "last_error": row["last_error"],
+        }
+
+    def get_mcp_server(self, server_id: str) -> dict | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM mcp_servers WHERE id = ?", (server_id,)).fetchone()
+        return self._mcp_server_row_to_dict(row) if row else None
+
+    def list_mcp_servers(self) -> list[dict]:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT * FROM mcp_servers ORDER BY created_at DESC, rowid DESC").fetchall()
+        return [self._mcp_server_row_to_dict(row) for row in rows]
+
+    def set_mcp_server_enabled(self, server_id: str, enabled: bool) -> dict | None:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "UPDATE mcp_servers SET enabled = ? WHERE id = ?", (1 if enabled else 0, server_id)
+            )
+            if cursor.rowcount == 0:
+                return None
+        return self.get_mcp_server(server_id)
+
+    def update_mcp_server_probe_result(
+        self, server_id: str, *, last_error: str | None, cached_tools: list[dict] | None = None
+    ) -> dict | None:
+        """刷新探测结果：成功时传 cached_tools（整体替换）+ last_error=None（清空旧错误）；
+        失败时只传 last_error，cached_tools 保持不变（不能用"非 None 才更新"的通用模式——
+        成功时必须能把 last_error 显式写回 NULL，那种模式做不到"清空"这个操作）。"""
+        with self._connect() as conn:
+            if cached_tools is not None:
+                cursor = conn.execute(
+                    "UPDATE mcp_servers SET cached_tools = ?, last_error = ? WHERE id = ?",
+                    (json.dumps(cached_tools), last_error, server_id),
+                )
+            else:
+                cursor = conn.execute(
+                    "UPDATE mcp_servers SET last_error = ? WHERE id = ?", (last_error, server_id)
+                )
+            if cursor.rowcount == 0:
+                return None
+        return self.get_mcp_server(server_id)
+
+    def delete_mcp_server(self, server_id: str) -> bool:
+        with self._connect() as conn:
+            cursor = conn.execute("DELETE FROM mcp_servers WHERE id = ?", (server_id,))
             return cursor.rowcount > 0

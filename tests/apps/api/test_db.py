@@ -422,3 +422,64 @@ def test_delete_deepresearch_run_removes_it(store: ChatStore) -> None:
 
 def test_delete_missing_deepresearch_run_returns_false(store: ChatStore) -> None:
     assert store.delete_deepresearch_run("no-such-id") is False
+
+
+class TestMCPServers:
+    def test_create_and_get_round_trip(self, store: ChatStore) -> None:
+        cached_tools = [{"name": "get_weather", "description": "desc", "input_schema": {"type": "object"}}]
+        created = store.create_mcp_server(
+            name="weather", transport="stdio",
+            config={"command": "python", "args": ["demo_server.py"]}, cached_tools=cached_tools,
+        )
+        assert created["name"] == "weather"
+        assert created["transport"] == "stdio"
+        assert created["config"] == {"command": "python", "args": ["demo_server.py"]}
+        assert created["enabled"] is True
+        assert created["cached_tools"] == cached_tools
+        assert created["last_error"] is None
+
+        fetched = store.get_mcp_server(created["id"])
+        assert fetched == created
+
+    def test_get_missing_returns_none(self, store: ChatStore) -> None:
+        assert store.get_mcp_server("no-such-id") is None
+
+    def test_list_orders_newest_first(self, store: ChatStore) -> None:
+        first = store.create_mcp_server(name="a", transport="http", config={"url": "http://x"}, cached_tools=[])
+        second = store.create_mcp_server(name="b", transport="http", config={"url": "http://y"}, cached_tools=[])
+        listed = store.list_mcp_servers()
+        assert [s["id"] for s in listed] == [second["id"], first["id"]]
+
+    def test_set_enabled_toggles_flag(self, store: ChatStore) -> None:
+        created = store.create_mcp_server(name="a", transport="http", config={"url": "http://x"}, cached_tools=[])
+        updated = store.set_mcp_server_enabled(created["id"], False)
+        assert updated["enabled"] is False
+        assert store.get_mcp_server(created["id"])["enabled"] is False
+
+    def test_set_enabled_missing_returns_none(self, store: ChatStore) -> None:
+        assert store.set_mcp_server_enabled("no-such-id", True) is None
+
+    def test_update_probe_result_success_clears_error_and_replaces_tools(self, store: ChatStore) -> None:
+        created = store.create_mcp_server(name="a", transport="http", config={"url": "http://x"}, cached_tools=[])
+        store.update_mcp_server_probe_result(created["id"], last_error="old error", cached_tools=[])
+        new_tools = [{"name": "t", "description": "d", "input_schema": {}}]
+        updated = store.update_mcp_server_probe_result(created["id"], last_error=None, cached_tools=new_tools)
+        assert updated["last_error"] is None
+        assert updated["cached_tools"] == new_tools
+
+    def test_update_probe_result_failure_keeps_old_tools(self, store: ChatStore) -> None:
+        old_tools = [{"name": "t", "description": "d", "input_schema": {}}]
+        created = store.create_mcp_server(
+            name="a", transport="http", config={"url": "http://x"}, cached_tools=old_tools
+        )
+        updated = store.update_mcp_server_probe_result(created["id"], last_error="boom")
+        assert updated["last_error"] == "boom"
+        assert updated["cached_tools"] == old_tools
+
+    def test_delete_removes_row(self, store: ChatStore) -> None:
+        created = store.create_mcp_server(name="a", transport="http", config={"url": "http://x"}, cached_tools=[])
+        assert store.delete_mcp_server(created["id"]) is True
+        assert store.get_mcp_server(created["id"]) is None
+
+    def test_delete_missing_returns_false(self, store: ChatStore) -> None:
+        assert store.delete_mcp_server("no-such-id") is False
