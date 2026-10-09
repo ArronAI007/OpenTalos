@@ -17,6 +17,7 @@ if str(_PACKAGES_DIR) not in sys.path:
 
 from agents.builder import AGENT_TYPES  # noqa: E402
 from db import ChatStore  # noqa: E402
+from deepresearch import run_research  # noqa: E402
 from evaluation import (  # noqa: E402
     add_eval_case,
     load_eval_cases,
@@ -71,6 +72,10 @@ class EvalCaseBody(BaseModel):
 class EvalRunBody(BaseModel):
     case_ids: list[str]
     agent_types: list[str]
+
+
+class CreateDeepResearchRunBody(BaseModel):
+    topic: str
 
 
 # 任务的布尔 flag 字段：PATCH 端点按下表统一装配，新增 flag 只需在此处与模型各加一行。
@@ -331,6 +336,37 @@ def create_app(runtime: ChatRuntime | None = None, eval_cases_path: Path | None 
     async def delete_eval_run_route(run_id: str) -> None:
         if not store.delete_eval_run(run_id):
             raise HTTPException(404, "eval run not found")
+
+    @app.post("/api/deepresearch/runs")
+    async def create_deepresearch_run_route(request: CreateDeepResearchRunBody) -> dict:
+        if runtime.search_client is None:
+            raise HTTPException(503, "web search is not configured (TAVILY_API_KEY missing)")
+        topic = request.topic.strip()
+        if not topic:
+            raise HTTPException(400, "topic must not be blank")
+        run = store.create_deepresearch_run(topic)
+        asyncio.create_task(run_research(store, run["id"], runtime.model_client, runtime.search_client, topic))
+        return run
+
+    @app.get("/api/deepresearch/runs")
+    async def list_deepresearch_runs_route() -> dict:
+        return {"runs": store.list_deepresearch_runs()}
+
+    @app.get("/api/deepresearch/runs/{run_id}")
+    async def get_deepresearch_run_route(run_id: str) -> dict:
+        run = store.get_deepresearch_run(run_id)
+        if run is None:
+            raise HTTPException(404, "run not found")
+        return run
+
+    @app.delete("/api/deepresearch/runs/{run_id}", status_code=204)
+    async def delete_deepresearch_run_route(run_id: str) -> None:
+        run = store.get_deepresearch_run(run_id)
+        if run is None:
+            raise HTTPException(404, "run not found")
+        if run["status"] == "running":
+            raise HTTPException(409, "run is still in progress")
+        store.delete_deepresearch_run(run_id)
 
     return app
 

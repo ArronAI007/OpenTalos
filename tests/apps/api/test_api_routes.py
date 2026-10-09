@@ -1,8 +1,10 @@
+import asyncio
 import json
+from typing import Any
 
 import httpx
 import pytest
-from core.protocol import ToolCompletion
+from core.protocol import Completion, ToolCompletion
 from db import ChatStore
 from main import _sse, create_app
 from runtime import ChatRuntime
@@ -541,3 +543,81 @@ async def test_delete_eval_run_route(tmp_path, scripted_client) -> None:
 async def test_delete_missing_eval_run_returns_404(api) -> None:
     resp = await api.delete("/api/eval/runs/no-such-id")
     assert resp.status_code == 404
+
+
+def _deepresearch_app(tmp_path, scripted_client, *, with_tavily: bool = True):
+    client = scripted_client(completions=[
+        Completion(text='["q1","q2","q3"]', model_id="mock-model"),
+        Completion(text="总结1", model_id="mock-model"),
+        Completion(text="总结2", model_id="mock-model"),
+        Completion(text="总结3", model_id="mock-model"),
+        Completion(text="# 报告", model_id="mock-model"),
+    ])
+    runtime = ChatRuntime(
+        ChatStore(tmp_path / "chat.db"),
+        model_client=client,
+        skill_service_url="http://127.0.0.1:1",
+        trace_dir=tmp_path / "traces",
+        tavily_api_key="tvly-test" if with_tavily else None,
+    )
+    if with_tavily:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={"query": "q", "results": [{"title": "t", "url": "https://a.example", "content": "c", "score": 0.9}]},
+            )
+        from websearch.client import TavilyClient
+        runtime._search_client = TavilyClient(
+            "tvly-test", client=httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        )
+    app = create_app(runtime, eval_cases_path=tmp_path / "eval_cases.json")
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+
+
+async def test_create_deepresearch_run_without_tavily_key_returns_503(tmp_path, scripted_client) -> None:
+    local_api = _deepresearch_app(tmp_path, scripted_client, with_tavily=False)
+    resp = await local_api.post("/api/deepresearch/runs", json={"topic": "topic"})
+    assert resp.status_code == 503
+
+
+async def test_create_deepresearch_run_rejects_blank_topic(tmp_path, scripted_client) -> None:
+    local_api = _deepresearch_app(tmp_path, scripted_client)
+    resp = await local_api.post("/api/deepresearch/runs", json={"topic": "   "})
+    assert resp.status_code == 400
+
+
+async def test_deepresearch_run_completes_and_is_listed(tmp_path, scripted_client) -> None:
+    local_api = _deepresearch_app(tmp_path, scripted_client)
+    created = await local_api.post("/api/deepresearch/runs", json={"topic": "研究主题"})
+    assert created.status_code == 200
+    run_id = created.json()["id"]
+    assert created.json()["status"] == "running"
+
+    fetched = created
+    for _ in range(50):
+        fetched = await local_api.get(f"/api/deepresearch/runs/{run_id}")
+        if fetched.json()["status"] != "running":
+            break
+        await asyncio.sleep(0.05)
+
+    assert fetched.json()["status"] == "completed"
+    assert fetched.json()["report"] == "# 报告"
+
+    listed = await local_api.get("/api/deepresearch/runs")
+    assert [r["id"] for r in listed.json()["runs"]] == [run_id]
+
+
+async def test_delete_missing_deepresearch_run_returns_404(tmp_path, scripted_client) -> None:
+    local_api = _deepresearch_app(tmp_path, scripted_client)
+    resp = await local_api.delete("/api/deepresearch/runs/no-such-id")
+    assert resp.status_code == 404
+
+
+async def test_delete_running_deepresearch_run_returns_409(tmp_path, scripted_client) -> None:
+    local_api = _deepresearch_app(tmp_path, scripted_client)
+    created = await local_api.post("/api/deepresearch/runs", json={"topic": "topic"})
+    run_id = created.json()["id"]
+    # 立即删除：create_deepresearch_run 同步把 status 设成 running，后台任务要到下一次事件循环
+    # 调度才真正开始跑规划调用——紧跟着删，不需要额外手段就能稳定撞见 running 状态。
+    resp = await local_api.delete(f"/api/deepresearch/runs/{run_id}")
+    assert resp.status_code == 409
