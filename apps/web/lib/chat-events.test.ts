@@ -4,6 +4,7 @@ import {
   denyPendingApprovals,
   dropStoppedNotice,
   dropSuggestions,
+  dropTrailingTurn,
   dropTurn,
   finalizeStreaming,
   parseSseBlock,
@@ -388,6 +389,24 @@ describe("title", () => {
     const prev: UiMessage[] = [{ id: "row-1", kind: "user", content: "问" }];
     const next = reduceChatEvent(prev, { type: "title", title: "新标题" });
     expect(next).toBe(prev); // 同引用：no-op，不触发多余渲染
+  });
+});
+
+describe("dropTrailingTurn（刷新附着）", () => {
+  it("keeps rows up to and including the last user message", () => {
+    const msgs: UiMessage[] = [
+      { id: "row-1", kind: "user", content: "一" },
+      { id: "row-2", kind: "assistant", content: "答一" },
+      { id: "row-3", kind: "user", content: "二" },
+      { id: "live-1", kind: "tool", name: "echo", arguments: {} },
+      { id: "live-2", kind: "assistant", content: "半截", streaming: true },
+    ];
+    expect(dropTrailingTurn(msgs).map((m) => m.id)).toEqual(["row-1", "row-2", "row-3"]);
+  });
+
+  it("returns the same reference when there is no user row", () => {
+    const msgs: UiMessage[] = [{ id: "row-1", kind: "assistant", content: "答" }];
+    expect(dropTrailingTurn(msgs)).toBe(msgs);
   });
 });
 

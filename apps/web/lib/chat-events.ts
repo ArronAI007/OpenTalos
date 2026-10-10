@@ -164,6 +164,16 @@ export function dropTurn(prev: UiMessage[], messageId: string): UiMessage[] {
   return [...prev.slice(0, start), ...prev.slice(end)];
 }
 
+// 附着运行中的流时用：只保留到最近一条 user 为止，丢弃其后由历史派生的行
+// （assistant/tool/reasoning/stopped）——本轮内容改由 SSE 事件重建，避免与历史重复。
+// 无 user 行时返回原引用。
+export function dropTrailingTurn(prev: UiMessage[]): UiMessage[] {
+  for (let i = prev.length - 1; i >= 0; i--) {
+    if (prev[i].kind === "user") return prev.slice(0, i + 1);
+  }
+  return prev;
+}
+
 // 定位"目标消息所属那一轮"的起始 user 消息（从目标向前数到最近的 user）——重新生成据此找到
 // 要重放的提问。目标不存在、或其前没有任何 user 时返回 null。
 export function turnUserMessage(
