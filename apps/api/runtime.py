@@ -20,7 +20,7 @@ from skill.client import SkillClient, SkillServiceError
 from skill.prompt import format_skills_for_system_prompt
 from skill.tools import ReadSkillTool, RunSkillScriptTool
 from tool.outcome import ToolOutcome
-from tool.registry import ToolRegistry
+from tool.registry import CircuitBreaker, ToolRegistry
 from tool.tool import Tool
 from websearch.client import TavilyClient
 from websearch.tools import WebExtractorTool, WebSearchTool
@@ -105,6 +105,9 @@ class ChatRuntime:
         trace_dir: Path | None = None,
         tool_registry_factory: Callable[[], ToolRegistry] | None = None,
         compaction_token_limit: int | None = None,
+        tool_timeout_seconds: float | None = 120.0,
+        circuit_failure_threshold: int = 3,
+        circuit_recovery_seconds: float = 300.0,
     ) -> None:
         self._store = store
         self._model_client = model_client  # None → 首次需要时按 env 构造
@@ -112,6 +115,14 @@ class ChatRuntime:
         self._trace_dir = trace_dir
         self._tool_registry_factory = tool_registry_factory
         self._compaction_token_limit = compaction_token_limit
+        # 工具可靠性的安全网：单个工具 120s 上限（各工具自身超时更短，这是兵底），
+        # 连续失败到阈值就对该工具开路。熔断器进程级共享——跨 task 不再反复重试同一坏工具。
+        self._tool_timeout_seconds = tool_timeout_seconds
+        self._circuit_breaker = (
+            CircuitBreaker(failure_threshold=circuit_failure_threshold, recovery_seconds=circuit_recovery_seconds)
+            if circuit_failure_threshold > 0
+            else None
+        )
         self._agents: dict[str, Agent] = {}
         self._registries: dict[str, EventToolRegistry] = {}
         self._task_locks: dict[str, asyncio.Lock] = {}
@@ -213,16 +224,22 @@ class ChatRuntime:
     def _build_registry(self, task_id: str) -> ToolRegistry:
         # subagent_tools 必须是和 main_tools 物理上不同的 ToolRegistry 实例——dispatch_subagent
         # 只注册进 main_tools，否则子 agent 会连带看到它自己，能够递归再分派。
-        subagent_tools = self._tool_registry_factory() if self._tool_registry_factory else ToolRegistry()
+        subagent_tools = self._new_registry()
         self._collect_base_tools(subagent_tools)
 
-        main_tools = self._tool_registry_factory() if self._tool_registry_factory else ToolRegistry()
+        main_tools = self._new_registry()
         self._collect_base_tools(main_tools)
         main_tools.register(DispatchSubagentTool(self._client(), subagent_tools))
 
         wrapper = EventToolRegistry(main_tools)
         self._registries[task_id] = wrapper
         return wrapper
+
+    def _new_registry(self) -> ToolRegistry:
+        # 注入的 factory（测试）自行决定配置；默认路径挂上超时安全网与共享熔断器。
+        if self._tool_registry_factory is not None:
+            return self._tool_registry_factory()
+        return ToolRegistry(circuit_breaker=self._circuit_breaker, timeout_seconds=self._tool_timeout_seconds)
 
     async def _get_agent(self, task: dict[str, Any]) -> Agent:
         agent = self._agents.get(task["id"])

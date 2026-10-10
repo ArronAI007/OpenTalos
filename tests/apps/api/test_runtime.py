@@ -10,6 +10,8 @@ from core.protocol import Completion, ToolCompletion, ToolInvocation
 from core.model import ModelClient
 from db import ChatStore
 from runtime import ChatRuntime
+from tool.outcome import FailureCode, ToolOutcome
+from tool.tool import Tool, ToolParameter
 
 
 @pytest.fixture
@@ -961,6 +963,64 @@ def test_aclose_is_a_noop_when_no_model_client_was_constructed(store) -> None:
     runtime = ChatRuntime(store, model_client=None, skill_service_url="http://127.0.0.1:1")
 
     asyncio.run(runtime.aclose())  # 懒构造从未发生，不应抛异常
+
+
+class _HangingTool(Tool):
+    def __init__(self) -> None:
+        super().__init__(name="hang", description="Never returns before the timeout.")
+
+    def parameters(self) -> list[ToolParameter]:
+        return []
+
+    async def acall(self, arguments):
+        await asyncio.sleep(10)
+        return ToolOutcome.ok("too late")
+
+
+class _ExplodingTool(Tool):
+    def __init__(self) -> None:
+        super().__init__(name="boom", description="Always raises.")
+
+    def parameters(self) -> list[ToolParameter]:
+        return []
+
+    async def acall(self, arguments):
+        raise RuntimeError("kaboom")
+
+
+def test_registry_enforces_a_tool_timeout(store) -> None:
+    runtime = ChatRuntime(
+        store,
+        model_client=ModelClient(provider="mock"),
+        skill_service_url="http://127.0.0.1:1",
+        tool_timeout_seconds=0.01,
+    )
+    registry = runtime._build_registry("t1")
+    registry.register(_HangingTool())
+
+    outcome = asyncio.run(registry.acall("hang", {}))
+
+    assert outcome.failure_code == FailureCode.TIMEOUT
+
+
+def test_registry_trips_the_shared_circuit_breaker_across_tasks(store) -> None:
+    runtime = ChatRuntime(
+        store,
+        model_client=ModelClient(provider="mock"),
+        skill_service_url="http://127.0.0.1:1",
+        circuit_failure_threshold=2,
+    )
+    registry = runtime._build_registry("t1")
+    registry.register(_ExplodingTool())
+    asyncio.run(registry.acall("boom", {}))  # 失败 1
+    asyncio.run(registry.acall("boom", {}))  # 失败 2 → 开路
+
+    # 换一个 task 的注册表，共享同一个熔断器：仍是开路状态
+    other = runtime._build_registry("t2")
+    other.register(_ExplodingTool())
+    outcome = asyncio.run(other.acall("boom", {}))
+
+    assert outcome.failure_code == FailureCode.CIRCUIT_OPEN
 
 
 def test_stream_reply_writes_a_complete_trace_with_task_id(store, scripted_client, tmp_path) -> None:

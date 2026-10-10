@@ -113,6 +113,10 @@ def create_app(runtime: ChatRuntime | None = None, eval_cases_path: Path | None 
             a2a_peer_url=os.environ.get("A2A_PEER_URL"),
             trace_dir=_REPO_ROOT / ".data" / "traces",
             compaction_token_limit=int(os.environ.get("COMPACTION_TOKEN_LIMIT", "16000")),
+            # 工具可靠性安全网（各工具自身超时更短，这里只是兵底）：空值回退到默认。
+            tool_timeout_seconds=float(os.environ.get("TOOL_TIMEOUT_SECONDS") or 120),
+            circuit_failure_threshold=int(os.environ.get("TOOL_CIRCUIT_FAILURE_THRESHOLD") or 3),
+            circuit_recovery_seconds=float(os.environ.get("TOOL_CIRCUIT_RECOVERY_SECONDS") or 300),
         )
     if eval_cases_path is None:
         eval_cases_path = _REPO_ROOT / ".data" / "eval_cases.json"
