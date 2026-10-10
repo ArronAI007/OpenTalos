@@ -1,12 +1,14 @@
 "use client";
 
-import { useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type HTMLAttributes } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import rehypeHighlight from "rehype-highlight";
 import type { UiMessage } from "@/lib/chat-events";
 import { shouldShowThinkingHint, visibleIndexes } from "@/lib/chat-events";
 import { humanizeToolCall } from "@/lib/humanize";
+import { copyText } from "@/lib/clipboard";
 import { isNearBottom } from "@/lib/scroll-stick";
 import { LogoMark } from "@/components/sidebar/Logo";
 import { CirclePauseIcon } from "@/components/ui/icons";
@@ -49,6 +51,43 @@ function BrandHeader() {
 // 消息行行壳：列宽与内边距约束收回到行级（与原先 max-w-3xl + px-4 的几何等同）。
 const rowCls = "mx-auto w-full max-w-3xl px-4";
 
+// 代码块：右上角「复制」按钮（hover/键盘聚焦显现），复制该块的纯文本。
+function CodeBlock({ children, ...props }: HTMLAttributes<HTMLPreElement> & { node?: unknown }) {
+  const ref = useRef<HTMLPreElement>(null);
+  const [copied, setCopied] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // react-markdown 会把 mdast 的 node 一并传入，直接 spread 到 <pre> 会变成非法属性。
+  const preProps = { ...props } as Record<string, unknown>;
+  delete preProps.node;
+  useEffect(
+    () => () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    },
+    [],
+  );
+  const handleCopy = async () => {
+    const ok = await copyText(ref.current?.innerText ?? "");
+    setCopied(ok);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => setCopied(false), 1500);
+  };
+  return (
+    <div className="group/code relative">
+      <button
+        type="button"
+        onClick={() => void handleCopy()}
+        aria-label="复制代码"
+        className="absolute right-2 top-2 rounded border border-border bg-surface px-1.5 py-0.5 text-xs text-text-secondary opacity-0 transition-opacity group-hover/code:opacity-100 focus:opacity-100"
+      >
+        {copied ? "已复制" : "复制"}
+      </button>
+      <pre ref={ref} {...(preProps as HTMLAttributes<HTMLPreElement>)}>
+        {children}
+      </pre>
+    </div>
+  );
+}
+
 export function MessageList({
   messages,
   taskId,
@@ -72,6 +111,8 @@ export function MessageList({
   // 跟随滚动开关：初始 true（进入任务/历史加载后落在最新消息）；用户上翻超过阈值即停跟，回到底部恢复。
   const stickRef = useRef(true);
   const prevLenRef = useRef(0);
+  // 是否贴底（用于显示"回到底部"按钮）；stickRef 是即时判断，这个是渲染状态。
+  const [atBottom, setAtBottom] = useState(true);
 
   const rows = visibleIndexes(messages);
   const showHint = shouldShowThinkingHint(messages, busy);
@@ -141,7 +182,13 @@ export function MessageList({
             <BrandHeader />
             {thinking.length > 0 && <ThinkingBubble items={thinking} streaming={thinkingStreaming} />}
             <div className="md">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                rehypePlugins={[rehypeHighlight]}
+                components={{ pre: CodeBlock }}
+              >
+                {message.content}
+              </ReactMarkdown>
             </div>
             {message.streaming && <span className="animate-pulse text-text-secondary">▍</span>}
             {/* 本轮被停止：停止提示并入本块收尾（品牌头不重复），复制/时间行照常保留 */}
@@ -301,15 +348,18 @@ export function MessageList({
   );
 
   return (
-    <div
-      ref={scrollRef}
-      data-message-scroll
-      aria-busy={busy}
-      onScroll={(e) => {
-        stickRef.current = isNearBottom(e.currentTarget);
-      }}
-      className="relative flex-1 overflow-y-auto py-6"
-    >
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      <div
+        ref={scrollRef}
+        data-message-scroll
+        aria-busy={busy}
+        onScroll={(e) => {
+          const near = isNearBottom(e.currentTarget);
+          stickRef.current = near;
+          setAtBottom(near);
+        }}
+        className="relative flex-1 overflow-y-auto py-6"
+      >
       {/* 屏幕阅读器状态区：只播报“生成中”状态，不逐 token 朗读整个回复。 */}
       <p className="sr-only" role="status" aria-live="polite">
         {busy ? "正在生成回复…" : ""}
@@ -326,6 +376,21 @@ export function MessageList({
           </div>
         ))}
       </div>
+      </div>
+      {!atBottom && count > 0 && (
+        <button
+          type="button"
+          onClick={() => {
+            stickRef.current = true;
+            setAtBottom(true);
+            virtualizer.scrollToIndex(count - 1, { align: "end" });
+          }}
+          aria-label="回到底部"
+          className="absolute bottom-4 right-4 z-10 rounded-full border border-border bg-surface px-3 py-2 text-sm shadow-md hover:bg-sidebar"
+        >
+          ↓
+        </button>
+      )}
     </div>
   );
 }
