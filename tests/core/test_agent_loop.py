@@ -5,7 +5,7 @@ import pytest
 from context import OutputTrimmer
 from core.cancellation import CancellationToken
 from core.protocol import ChatMessage, Completion, ToolCompletion, ToolInvocation
-from core.errors import OperationCancelled
+from core.errors import AgentRuntimeError, EmptyModelResponse, OperationCancelled, OutputLimitError
 from core.model import FakeModelBackend, ModelClient
 from tool.outcome import ToolOutcome
 from tool.registry import ToolRegistry
@@ -426,3 +426,141 @@ async def test_run_tool_turn_runs_tool_calls_concurrently_not_sequentially():
     # "second" 反而先结束——用完成顺序反证两个工具调用确实是并发跑的。
     assert started_order == ["first", "second"]
     assert finished_order == ["second", "first"]
+
+
+# ==================== 输出上限 / 空响应 / 工具 id 校验 / 中断回执 ====================
+
+
+async def test_run_tool_turn_raises_on_output_limit_without_a_registry(scripted_client):
+    client = scripted_client(completions=[Completion(text="partial", model_id="mock", finish_reason="length")])
+
+    with pytest.raises(OutputLimitError, match="output limit"):
+        await run_tool_turn(client, [{"role": "user", "content": "hi"}], None, 3)
+
+
+async def test_run_tool_turn_raises_on_empty_response_without_a_registry(scripted_client):
+    client = scripted_client(completions=[Completion(text="   ", model_id="mock")])
+
+    with pytest.raises(EmptyModelResponse):
+        await run_tool_turn(client, [{"role": "user", "content": "hi"}], None, 3)
+
+
+async def test_run_tool_turn_raises_on_output_limit_in_the_iteration_fallback(scripted_client, echo_tool_registry):
+    looping = ToolCompletion(
+        text=None,
+        requested_tools=[ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text": "hi"}')],
+        model_id="mock",
+        finish_reason="tool_calls",
+    )
+    client = scripted_client(
+        completions=[Completion(text="truncated", model_id="mock", finish_reason="length")],
+        tool_completions=[looping],
+    )
+
+    with pytest.raises(OutputLimitError, match="output limit"):
+        await run_tool_turn(client, [{"role": "user", "content": "loop"}], echo_tool_registry, 1)
+
+
+async def test_execute_model_step_raises_on_output_limit(scripted_client):
+    client = scripted_client(
+        tool_completions=[ToolCompletion(text="partial", requested_tools=[], model_id="mock", finish_reason="length")]
+    )
+
+    async def handle_invocation(invocation):
+        raise AssertionError("should not be called")
+
+    with pytest.raises(OutputLimitError, match="output limit"):
+        await execute_model_step(client, [{"role": "user", "content": "hi"}], [], handle_invocation=handle_invocation)
+
+
+async def test_execute_model_step_raises_on_empty_response(scripted_client):
+    client = scripted_client(
+        tool_completions=[ToolCompletion(text="", requested_tools=[], model_id="mock")]
+    )
+
+    async def handle_invocation(invocation):
+        raise AssertionError("should not be called")
+
+    with pytest.raises(EmptyModelResponse):
+        await execute_model_step(client, [{"role": "user", "content": "hi"}], [], handle_invocation=handle_invocation)
+
+
+def _duplicate_tool_completion(call_id: str) -> ToolCompletion:
+    return ToolCompletion(
+        text=None,
+        requested_tools=[
+            ToolInvocation(call_id=call_id, tool_name="a", arguments_json="{}"),
+            ToolInvocation(call_id=call_id, tool_name="b", arguments_json="{}"),
+        ],
+        model_id="mock",
+    )
+
+
+async def test_execute_model_step_rejects_duplicate_tool_call_ids():
+    client = ModelClient(provider="mock")
+
+    async def fake_acomplete_with_tools(messages, tools, tool_choice="auto", **kwargs):
+        return _duplicate_tool_completion("dup")
+
+    client.acomplete_with_tools = fake_acomplete_with_tools  # type: ignore[method-assign]
+
+    async def handle_invocation(invocation):
+        return {"role": "tool", "tool_call_id": invocation.call_id, "content": "x"}
+
+    with pytest.raises(AgentRuntimeError, match="tool call ids"):
+        await execute_model_step(
+            client, [{"role": "user", "content": "hi"}], [], handle_invocation=handle_invocation
+        )
+
+
+async def test_execute_model_step_rejects_empty_tool_call_id():
+    client = ModelClient(provider="mock")
+
+    async def fake_acomplete_with_tools(messages, tools, tool_choice="auto", **kwargs):
+        return ToolCompletion(
+            text=None,
+            requested_tools=[ToolInvocation(call_id="  ", tool_name="a", arguments_json="{}")],
+            model_id="mock",
+        )
+
+    client.acomplete_with_tools = fake_acomplete_with_tools  # type: ignore[method-assign]
+
+    async def handle_invocation(invocation):
+        return {"role": "tool", "tool_call_id": invocation.call_id, "content": "x"}
+
+    with pytest.raises(AgentRuntimeError, match="tool call ids"):
+        await execute_model_step(
+            client, [{"role": "user", "content": "hi"}], [], handle_invocation=handle_invocation
+        )
+
+
+async def test_execute_model_step_records_unknown_receipts_for_interrupted_tool_calls():
+    client = ModelClient(provider="mock")
+
+    async def fake_acomplete_with_tools(messages, tools, tool_choice="auto", **kwargs):
+        return ToolCompletion(
+            text=None,
+            requested_tools=[
+                ToolInvocation(call_id="c1", tool_name="a", arguments_json="{}"),
+                ToolInvocation(call_id="c2", tool_name="b", arguments_json="{}"),
+            ],
+            model_id="mock",
+        )
+
+    client.acomplete_with_tools = fake_acomplete_with_tools  # type: ignore[method-assign]
+    recorded: list[tuple] = []
+
+    async def handle_invocation(invocation):
+        raise RuntimeError("tool exploded")
+
+    with pytest.raises(RuntimeError, match="tool exploded"):
+        await execute_model_step(
+            client,
+            [{"role": "user", "content": "hi"}],
+            [],
+            handle_invocation=handle_invocation,
+            on_tool_result=lambda *args: recorded.append(args),
+        )
+
+    assert {receipt[0] for receipt in recorded} == {"c1", "c2"}
+    assert all("unknown" in receipt[3] for receipt in recorded)

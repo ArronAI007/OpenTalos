@@ -43,6 +43,7 @@ def test_completion_to_dict_includes_all_fields():
         "token_usage": {},
         "duration_ms": 0,
         "thinking_trace": None,
+        "finish_reason": None,
     }
 
 
@@ -56,6 +57,13 @@ def test_tool_invocation_and_tool_completion_hold_expected_fields():
     completion = ToolCompletion(text=None, requested_tools=[invocation], model_id="mock-model")
     assert completion.requested_tools == [invocation]
     assert completion.text is None
+    assert completion.finish_reason is None
+
+
+def test_completion_and_stream_summary_carry_finish_reason():
+    completion = Completion(text="hi", model_id="mock-model", finish_reason="length")
+    assert completion.finish_reason == "length"
+    assert StreamSummary(model_id="mock-model", finish_reason="max_tokens").finish_reason == "max_tokens"
 
 
 def test_stream_summary_to_dict_includes_thinking_trace_when_present():

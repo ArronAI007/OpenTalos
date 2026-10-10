@@ -4,7 +4,7 @@ import pytest
 
 from core.cancellation import CancellationToken
 from core.protocol import ToolCompletion, ToolInvocation
-from core.errors import OperationCancelled
+from core.errors import EmptyModelResponse, OperationCancelled, OutputLimitError
 from core.model import ModelClient
 from tool.outcome import ToolOutcome
 from tool.tool import Tool, ToolParameter
@@ -101,6 +101,24 @@ async def test_arespond_streams_text_when_on_text_delta_is_given():
 
     assert answer == "42"
     assert seen == ["42"]
+
+
+async def test_arespond_raises_on_output_limit(scripted_client):
+    client = scripted_client(
+        tool_completions=[ToolCompletion(text="truncated", requested_tools=[], model_id="mock", finish_reason="length")]
+    )
+    agent = ReActAgent(name="bot", model_client=client)
+
+    with pytest.raises(OutputLimitError, match="output limit"):
+        await agent.arespond("write a very long essay")
+
+
+async def test_arespond_raises_on_empty_model_response(scripted_client):
+    client = scripted_client(tool_completions=[ToolCompletion(text="", requested_tools=[], model_id="mock")])
+    agent = ReActAgent(name="bot", model_client=client)
+
+    with pytest.raises(EmptyModelResponse):
+        await agent.arespond("say nothing")
 
 
 async def test_arespond_raises_when_already_cancelled():

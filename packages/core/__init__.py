@@ -1,7 +1,7 @@
 from .agent import Agent, AgentPhase, PhaseCallback, PhaseSignal, RuntimeSettings
 from .agent_loop import build_reply_message, execute_model_step, resolve_tool_call, run_tool_turn
 from .cancellation import CancellationToken
-from .errors import AgentRuntimeError, CoreError, ModelError, OperationCancelled, SettingsError
+from .errors import AgentRuntimeError, CoreError, EmptyModelResponse, ModelError, OperationCancelled, OutputLimitError, SettingsError
 from .model import ModelClient
 from .protocol import ChatMessage, Completion, SpeakerRole, StreamSummary, ToolCompletion, ToolInvocation
 
@@ -13,6 +13,8 @@ __all__ = [
     "ModelError",
     "AgentRuntimeError",
     "OperationCancelled",
+    "EmptyModelResponse",
+    "OutputLimitError",
     "CancellationToken",
     "PhaseSignal",
     "AgentPhase",

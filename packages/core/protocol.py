@@ -42,6 +42,9 @@ class ToolCompletion:
     model_id: str
     token_usage: dict[str, int] = field(default_factory=dict)
     duration_ms: int = 0
+    # 供应商原始结束原因（OpenAI 的 finish_reason / Anthropic 的 stop_reason）。用于区分
+    # "模型自然说完" 与 "撞上 max_tokens 被截断"——后者不能当作完整答案。
+    finish_reason: str | None = None
 
 
 @dataclass
@@ -51,6 +54,7 @@ class Completion:
     token_usage: dict[str, int] = field(default_factory=dict)
     duration_ms: int = 0
     thinking_trace: str | None = None
+    finish_reason: str | None = None
 
     def __str__(self) -> str:
         return self.text
@@ -65,6 +69,7 @@ class StreamSummary:
     token_usage: dict[str, int] = field(default_factory=dict)
     duration_ms: int = 0
     thinking_trace: str | None = None
+    finish_reason: str | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)

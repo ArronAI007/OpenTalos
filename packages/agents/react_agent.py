@@ -88,6 +88,7 @@ class ReActAgent(Agent):
                 on_text_delta=on_text_delta,
                 cancellation=cancellation,
                 handle_invocation=handle_invocation,
+                on_tool_result=self.record_tool_result,
                 **kwargs,
             )
             if not completion.requested_tools:

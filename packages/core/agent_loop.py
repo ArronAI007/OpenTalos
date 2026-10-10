@@ -13,10 +13,51 @@ from observability import RunRecorder
 from tool.registry import ToolRegistry
 
 from .cancellation import CancellationToken
-from .protocol import ToolCompletion, ToolInvocation
+from .errors import AgentRuntimeError, EmptyModelResponse, OutputLimitError
+from .protocol import Completion, ToolCompletion, ToolInvocation
 from .model import ModelClient
 
 ToolInvocationHandler = Callable[[ToolInvocation], Awaitable[dict[str, str]]]
+
+# 各供应商表示"被输出上限截断"的 finish_reason/stop_reason（OpenAI 用 length，Anthropic 用 max_tokens）。
+_OUTPUT_LIMIT_REASONS = frozenset({"length", "max_tokens", "max_output_tokens"})
+
+
+def stopped_by_limit(finish_reason: str | None) -> bool:
+    return finish_reason in _OUTPUT_LIMIT_REASONS
+
+
+def _validate_tool_call_ids(invocations: list[ToolInvocation]) -> None:
+    """工具调用 id 非空且批内唯一，否则下一轮 assistant(tool_calls)+tool 序列在 OpenAI 协议下非法。"""
+    ids = [invocation.call_id for invocation in invocations]
+    if any(not isinstance(call_id, str) or not call_id.strip() for call_id in ids) or len(set(ids)) != len(ids):
+        raise AgentRuntimeError("Model returned empty or duplicate tool call ids; the next request would be invalid.")
+
+
+def _unknown_execution_receipt(invocation: ToolInvocation) -> dict[str, str]:
+    """工具批次被中断时为未完成的调用补一条回执：不把未知结果当成失败，提醒先核实外部状态再决定重试。"""
+    return {
+        "role": "tool",
+        "tool_call_id": invocation.call_id,
+        "content": json.dumps(
+            {
+                "status": "error",
+                "execution_status": "unknown",
+                "text": "运行已中断，未取得此工具调用的执行回执。请先核实外部状态，不要直接重试有副作用的操作。",
+            },
+            ensure_ascii=False,
+        ),
+    }
+
+
+def _guard_text_completion(completion: Completion) -> None:
+    """撞输出上限或完全空响应都不能当成完整答案——显式报错优于静默返回截断/空白。"""
+    if stopped_by_limit(completion.finish_reason):
+        raise OutputLimitError(
+            f"Model stopped at the output limit (finish_reason={completion.finish_reason!r}); the reply is truncated."
+        )
+    if not completion.text.strip():
+        raise EmptyModelResponse("Model returned neither visible text nor a tool request.")
 
 
 def build_reply_message(text: str | None, requested_tools: list[ToolInvocation]) -> dict[str, Any]:
@@ -88,19 +129,26 @@ async def _complete_text(
     messages: list[dict[str, Any]],
     on_text_delta: Callable[[str], Awaitable[None]] | None,
     **kwargs: Any,
-) -> tuple[str, dict[str, int]]:
+) -> Completion:
     """纯文本补全（不带工具schema）。on_text_delta 为空时走原来的 acomplete；给了回调就换成
-    astream 逐块转发，再拼回完整文本——两条路径对调用方都返回同样的 (text, token_usage)。"""
+    astream 逐块转发，再拼回完整文本并附上 last_stream_summary 的统计。两条路径对调用方都返回
+    同样的 Completion。"""
     if on_text_delta is None:
-        completion = await model_client.acomplete(messages, **kwargs)
-        return completion.text, completion.token_usage
+        return await model_client.acomplete(messages, **kwargs)
 
     parts: list[str] = []
     async for chunk in model_client.astream(messages, **kwargs):
         parts.append(chunk)
         await on_text_delta(chunk)
-    usage = model_client.last_stream_summary.token_usage if model_client.last_stream_summary else {}
-    return "".join(parts), usage
+    summary = model_client.last_stream_summary
+    return Completion(
+        text="".join(parts),
+        model_id=summary.model_id if summary else (model_client.model_name or ""),
+        token_usage=summary.token_usage if summary else {},
+        duration_ms=summary.duration_ms if summary else 0,
+        thinking_trace=summary.thinking_trace if summary else None,
+        finish_reason=summary.finish_reason if summary else None,
+    )
 
 
 async def execute_model_step(
@@ -114,6 +162,7 @@ async def execute_model_step(
     on_reasoning_delta: Callable[[str], Awaitable[None]] | None = None,
     cancellation: CancellationToken | None = None,
     handle_invocation: ToolInvocationHandler,
+    on_tool_result: Callable[[str, str, str, str], None] | None = None,
     **kwargs: Any,
 ) -> ToolCompletion:
     """带工具 schema 的单步：调一次模型 -> 有工具请求就并行执行并把结果追加回 messages。
@@ -147,13 +196,33 @@ async def execute_model_step(
             {"content": completion.text, "tool_calls": len(completion.requested_tools), "usage": completion.token_usage},
             step=step,
         )
+    if stopped_by_limit(completion.finish_reason):
+        raise OutputLimitError(
+            f"Model stopped at the output limit (finish_reason={completion.finish_reason!r}); the reply is truncated."
+        )
     if not completion.requested_tools:
+        if not (completion.text or "").strip():
+            raise EmptyModelResponse("Model returned neither visible text nor a tool request.")
         return completion
 
+    _validate_tool_call_ids(completion.requested_tools)
     messages.append(build_reply_message(completion.text, completion.requested_tools))
     if cancellation is not None:
         cancellation.raise_if_cancelled()
-    results = await asyncio.gather(*(handle_invocation(invocation) for invocation in completion.requested_tools))
+
+    async def run_one(invocation: ToolInvocation) -> dict[str, str]:
+        # 任何中断（取消/异常）都为未完成的调用补一条"执行状态未知"的回执，避免 transcript
+        # 里出现"模型请求了工具但没有任何回执"的悬空回合。
+        try:
+            return await handle_invocation(invocation)
+        except BaseException:
+            receipt = _unknown_execution_receipt(invocation)
+            messages.append(receipt)
+            if on_tool_result is not None:
+                on_tool_result(invocation.call_id, invocation.tool_name, invocation.arguments_json, receipt["content"])
+            raise
+
+    results = await asyncio.gather(*(run_one(invocation) for invocation in completion.requested_tools))
     messages.extend(results)
     return completion
 
@@ -182,11 +251,12 @@ async def run_tool_turn(
     if tool_registry is None:
         if cancellation is not None:
             cancellation.raise_if_cancelled()
-        text, usage = await _complete_text(model_client, messages, on_text_delta, **kwargs)
-        _record_usage(cancellation, usage)
+        text_completion = await _complete_text(model_client, messages, on_text_delta, **kwargs)
+        _record_usage(cancellation, text_completion.token_usage)
         if recorder:
-            recorder.log_event("model_output", {"content": text, "usage": usage})
-        return text
+            recorder.log_event("model_output", {"content": text_completion.text, "usage": text_completion.token_usage})
+        _guard_text_completion(text_completion)
+        return text_completion.text
 
     tools = tool_registry.function_schemas()
 
@@ -204,13 +274,15 @@ async def run_tool_turn(
             on_reasoning_delta=on_reasoning_delta,
             cancellation=cancellation,
             handle_invocation=handle_invocation,
+            on_tool_result=on_tool_result,
             **kwargs,
         )
         if not completion.requested_tools:
             return completion.text or ""
 
-    fallback_text, fallback_usage = await _complete_text(model_client, messages, on_text_delta, **kwargs)
-    _record_usage(cancellation, fallback_usage)
+    fallback = await _complete_text(model_client, messages, on_text_delta, **kwargs)
+    _record_usage(cancellation, fallback.token_usage)
     if recorder:
-        recorder.log_event("model_output", {"content": fallback_text, "note": "fallback after max_iterations"})
-    return fallback_text
+        recorder.log_event("model_output", {"content": fallback.text, "note": "fallback after max_iterations"})
+    _guard_text_completion(fallback)
+    return fallback.text

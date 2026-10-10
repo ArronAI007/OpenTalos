@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from core.protocol import Completion
-from core.errors import SettingsError
+from core.errors import ModelError, SettingsError
 from core.model import (
     ClaudeBackend,
     FakeModelBackend,
@@ -74,9 +74,9 @@ def test_create_model_backend_rejects_unknown_provider():
         create_model_backend("does-not-exist", api_key="k", base_url=None, timeout=60, model_name="m")
 
 
-def _fake_openai_response(content, *, tool_calls=None):
+def _fake_openai_response(content, *, tool_calls=None, finish_reason=None):
     message = SimpleNamespace(content=content, tool_calls=tool_calls)
-    choice = SimpleNamespace(message=message)
+    choice = SimpleNamespace(message=message, finish_reason=finish_reason)
     usage = SimpleNamespace(prompt_tokens=10, completion_tokens=5, total_tokens=15)
     return SimpleNamespace(choices=[choice], usage=usage)
 
@@ -242,12 +242,12 @@ def test_create_model_backend_returns_openai_compatible_backend_for_that_provide
     assert isinstance(backend, OpenAICompatibleBackend)
 
 
-def _fake_claude_message(text, *, tool_use_blocks=None):
+def _fake_claude_message(text, *, tool_use_blocks=None, stop_reason="end_turn"):
     blocks = [SimpleNamespace(type="text", text=text)]
     if tool_use_blocks:
         blocks += tool_use_blocks
     usage = SimpleNamespace(input_tokens=20, output_tokens=8)
-    return SimpleNamespace(content=blocks, usage=usage)
+    return SimpleNamespace(content=blocks, usage=usage, stop_reason=stop_reason)
 
 
 class _FakeClaudeStream:
@@ -457,3 +457,157 @@ def test_model_client_complete_with_tools_sync_wrapper_matches_async_result():
     client._backend = FakeModelBackend(model_name="mock-model", response=Completion(text="hi", model_id="mock-model"))
     result = client.complete_with_tools([{"role": "user", "content": "hello"}], tools=[])
     assert result.text == "hi"
+
+
+# ==================== finish_reason / 流式 usage / 资源释放 ====================
+
+
+async def test_openai_backend_acomplete_captures_finish_reason(monkeypatch):
+    fake_response = _fake_openai_response("partial", finish_reason="length")
+    fake_client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=AsyncMock(return_value=fake_response)))
+    )
+    monkeypatch.setattr("core.model.AsyncOpenAI", lambda **kwargs: fake_client)
+
+    backend = OpenAICompatibleBackend(api_key="k", base_url=None, timeout=60, model_name="gpt-test")
+    result = await backend.acomplete([{"role": "user", "content": "hi"}])
+
+    assert result.finish_reason == "length"
+
+
+async def test_openai_backend_acomplete_with_tools_captures_finish_reason(monkeypatch):
+    fake_response = _fake_openai_response("done", finish_reason="tool_calls")
+    fake_client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=AsyncMock(return_value=fake_response)))
+    )
+    monkeypatch.setattr("core.model.AsyncOpenAI", lambda **kwargs: fake_client)
+
+    backend = OpenAICompatibleBackend(api_key="k", base_url=None, timeout=60, model_name="gpt-test")
+    result = await backend.acomplete_with_tools([{"role": "user", "content": "hi"}], tools=[])
+
+    assert result.finish_reason == "tool_calls"
+
+
+async def test_openai_backend_astream_captures_usage_and_finish_reason(monkeypatch):
+    async def fake_stream():
+        yield SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="hi"), finish_reason=None)], usage=None)
+        yield SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=None), finish_reason="stop")], usage=None)
+        yield SimpleNamespace(choices=[], usage=SimpleNamespace(prompt_tokens=3, completion_tokens=4, total_tokens=7))
+
+    fake_client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=AsyncMock(return_value=fake_stream())))
+    )
+    monkeypatch.setattr("core.model.AsyncOpenAI", lambda **kwargs: fake_client)
+
+    backend = OpenAICompatibleBackend(api_key="k", base_url=None, timeout=60, model_name="gpt-test")
+    chunks = [chunk async for chunk in backend.astream([{"role": "user", "content": "hi"}])]
+
+    assert chunks == ["hi"]
+    assert backend.last_stream_summary is not None
+    assert backend.last_stream_summary.finish_reason == "stop"
+    assert backend.last_stream_summary.token_usage == {
+        "prompt_tokens": 3,
+        "completion_tokens": 4,
+        "total_tokens": 7,
+    }
+
+
+async def test_openai_backend_astream_with_tools_captures_usage_and_finish_reason(monkeypatch):
+    async def fake_stream():
+        yield SimpleNamespace(
+            choices=[SimpleNamespace(delta=SimpleNamespace(content="hi", tool_calls=None), finish_reason="tool_calls")],
+            usage=None,
+        )
+        yield SimpleNamespace(choices=[], usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1, total_tokens=2))
+
+    fake_client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=AsyncMock(return_value=fake_stream())))
+    )
+    monkeypatch.setattr("core.model.AsyncOpenAI", lambda **kwargs: fake_client)
+
+    backend = OpenAICompatibleBackend(api_key="k", base_url=None, timeout=60, model_name="gpt-test")
+    result = await backend.astream_with_tools([{"role": "user", "content": "hi"}], tools=[])
+
+    assert result.finish_reason == "tool_calls"
+    assert result.token_usage == {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
+
+
+async def test_openai_backend_falls_back_when_stream_options_are_rejected(monkeypatch):
+    calls: list[dict] = []
+
+    async def fake_stream():
+        yield SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="hi"), finish_reason="stop")], usage=None)
+
+    async def create(**kwargs):
+        calls.append(kwargs)
+        if "stream_options" in kwargs:
+            raise RuntimeError("stream_options not supported")
+        return fake_stream()
+
+    fake_client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    monkeypatch.setattr("core.model.AsyncOpenAI", lambda **kwargs: fake_client)
+
+    backend = OpenAICompatibleBackend(api_key="k", base_url=None, timeout=60, model_name="gpt-test")
+    chunks = [chunk async for chunk in backend.astream([{"role": "user", "content": "hi"}])]
+
+    assert chunks == ["hi"]
+    assert "stream_options" in calls[0]
+    assert "stream_options" not in calls[1]
+    assert backend._stream_usage_enabled is False
+
+    # 已判定不支持后，后续流式请求别再白打一次带 stream_options 的失败请求。
+    [chunk async for chunk in backend.astream([{"role": "user", "content": "again"}])]
+    assert all("stream_options" not in call for call in calls[2:])
+
+
+async def test_claude_backend_captures_stop_reason_as_finish_reason(monkeypatch):
+    fake_response = _fake_claude_message("done", stop_reason="max_tokens")
+    fake_client = SimpleNamespace(messages=SimpleNamespace(create=AsyncMock(return_value=fake_response)))
+    monkeypatch.setattr("core.model.AsyncAnthropic", lambda **kwargs: fake_client)
+
+    backend = ClaudeBackend(api_key="k", base_url=None, timeout=60, model_name="claude-test")
+    result = await backend.acomplete([{"role": "user", "content": "hi"}])
+
+    assert result.finish_reason == "max_tokens"
+
+
+async def test_openai_backend_aclose_closes_the_underlying_client(monkeypatch):
+    fake_client = SimpleNamespace(close=AsyncMock())
+    monkeypatch.setattr("core.model.AsyncOpenAI", lambda **kwargs: fake_client)
+
+    backend = OpenAICompatibleBackend(api_key="k", base_url=None, timeout=60, model_name="gpt-test")
+    await backend.aclose()
+
+    fake_client.close.assert_awaited_once()
+
+
+async def test_model_client_aclose_is_idempotent_and_blocks_further_calls():
+    client = ModelClient(provider="mock")
+    closed = {"count": 0}
+
+    async def fake_aclose() -> None:
+        closed["count"] += 1
+
+    client._backend.aclose = fake_aclose  # type: ignore[method-assign]
+
+    await client.aclose()
+    await client.aclose()
+
+    assert closed["count"] == 1
+    with pytest.raises(ModelError, match="closed"):
+        await client.acomplete([{"role": "user", "content": "hi"}])
+
+
+async def test_model_client_works_as_an_async_context_manager():
+    client = ModelClient(provider="mock")
+    closed = {"count": 0}
+
+    async def fake_aclose() -> None:
+        closed["count"] += 1
+
+    client._backend.aclose = fake_aclose  # type: ignore[method-assign]
+
+    async with client as entered:
+        assert entered is client
+
+    assert closed["count"] == 1

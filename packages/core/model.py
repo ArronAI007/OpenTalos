@@ -5,6 +5,7 @@
 """
 
 import asyncio
+import inspect
 import json
 import os
 import time
@@ -17,7 +18,7 @@ from anthropic import AsyncAnthropic
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
-from .errors import SettingsError
+from .errors import ModelError, SettingsError
 from .protocol import Completion, StreamSummary, ToolCompletion, ToolInvocation
 
 DEFAULT_TIMEOUT_SECONDS = 60
@@ -56,6 +57,10 @@ class ModelBackend(ABC):
         **kwargs: Any,
     ) -> ToolCompletion: ...
 
+    async def aclose(self) -> None:
+        """释放后端持有的网络客户端；默认无操作，具体后端按需覆盖。"""
+        return None
+
 
 class FakeModelBackend(ModelBackend):
     def __init__(
@@ -91,6 +96,7 @@ class FakeModelBackend(ModelBackend):
             token_usage=response.token_usage,
             duration_ms=response.duration_ms,
             thinking_trace=response.thinking_trace,
+            finish_reason=response.finish_reason,
         )
 
     async def acomplete_with_tools(self, messages: list[dict], tools: list[dict], **kwargs: Any) -> ToolCompletion:
@@ -101,6 +107,7 @@ class FakeModelBackend(ModelBackend):
             model_id=response.model_id,
             token_usage=response.token_usage,
             duration_ms=response.duration_ms,
+            finish_reason=response.finish_reason,
         )
 
     async def astream_with_tools(
@@ -122,6 +129,7 @@ class FakeModelBackend(ModelBackend):
             model_id=response.model_id,
             token_usage=response.token_usage,
             duration_ms=response.duration_ms,
+            finish_reason=response.finish_reason,
         )
 
 
@@ -132,6 +140,9 @@ class OpenAICompatibleBackend(ModelBackend):
         if base_url is not None:
             client_kwargs["base_url"] = base_url
         self._client = AsyncOpenAI(**client_kwargs)
+        # 是否随流式请求发送 stream_options={include_usage}。部分 openai-compatible 供应商不支持
+        # 该字段（请求构造即 400），首次被拒后置 False，后续不再重试，避免每次流式都白打一次请求。
+        self._stream_usage_enabled = True
 
     @staticmethod
     def _extract_usage(usage: Any) -> dict[str, int]:
@@ -154,21 +165,45 @@ class OpenAICompatibleBackend(ModelBackend):
             token_usage=self._extract_usage(response.usage),
             duration_ms=duration_ms,
             thinking_trace=getattr(choice.message, "reasoning_content", None),
+            finish_reason=getattr(choice, "finish_reason", None),
         )
+
+    async def _create_stream(self, **params: Any) -> Any:
+        """开启流式请求。优先带上 stream_options 以取回 usage；供应商不支持时（请求构造即
+        报错）自动降级重试一次，并记住不再重试。"""
+        if self._stream_usage_enabled:
+            try:
+                return await self._client.chat.completions.create(
+                    stream=True, stream_options={"include_usage": True}, **params
+                )
+            except Exception:
+                self._stream_usage_enabled = False
+        return await self._client.chat.completions.create(stream=True, **params)
 
     async def astream(self, messages: list[dict], **kwargs: Any) -> AsyncIterator[str]:
         start = time.monotonic()
-        stream = await self._client.chat.completions.create(
-            model=self.model_name, messages=messages, stream=True, **kwargs
-        )
+        stream = await self._create_stream(model=self.model_name, messages=messages, **kwargs)
+        usage: dict[str, int] = {}
+        finish_reason: str | None = None
         async for chunk in stream:
-            if not chunk.choices:
+            # usage 只在开启 include_usage 后的终帧出现，且该帧 choices 为空——必须先读 usage
+            # 再跳过空 choices，否则永远拿不到用量（进而让 token 预算在流式下失效）。
+            chunk_usage = getattr(chunk, "usage", None)
+            if chunk_usage is not None:
+                usage = self._extract_usage(chunk_usage)
+            if not getattr(chunk, "choices", None):
                 continue
-            content = getattr(chunk.choices[0].delta, "content", None)
+            choice = chunk.choices[0]
+            content = getattr(choice.delta, "content", None)
             if content:
                 yield content
+            if getattr(choice, "finish_reason", None):
+                finish_reason = choice.finish_reason
         self.last_stream_summary = StreamSummary(
-            model_id=self.model_name, duration_ms=int((time.monotonic() - start) * 1000)
+            model_id=self.model_name,
+            token_usage=usage,
+            duration_ms=int((time.monotonic() - start) * 1000),
+            finish_reason=finish_reason,
         )
 
     async def acomplete_with_tools(
@@ -190,6 +225,7 @@ class OpenAICompatibleBackend(ModelBackend):
             model_id=self.model_name,
             token_usage=self._extract_usage(response.usage),
             duration_ms=duration_ms,
+            finish_reason=getattr(choice, "finish_reason", None),
         )
 
     async def astream_with_tools(
@@ -203,19 +239,26 @@ class OpenAICompatibleBackend(ModelBackend):
         **kwargs: Any,
     ) -> ToolCompletion:
         # 逐 chunk 累积文本增量和按 index 分片的 tool_call 增量（OpenAI 流式协议里，一次 tool_call
-        # 的 name/arguments 会拆成多个 delta 陆续吐出，要按 index 拼回一个完整调用）。没有
-        # stream_options={"include_usage": True}，因为不是所有 openai-compatible 供应商都支持它；
-        # 跟现有的 astream() 一样，流式路径下 token_usage 留空。
+        # 的 name/arguments 会拆成多个 delta 陆续吐出，要按 index 拼回一个完整调用）。开启
+        # stream_options 取回 usage；供应商不支持时由 _create_stream 自动降级重试。
         start = time.monotonic()
-        stream = await self._client.chat.completions.create(
-            model=self.model_name, messages=messages, tools=tools, tool_choice=tool_choice, stream=True, **kwargs
+        stream = await self._create_stream(
+            model=self.model_name, messages=messages, tools=tools, tool_choice=tool_choice, **kwargs
         )
         text_parts: list[str] = []
         pending_calls: dict[int, dict[str, str | None]] = {}
+        usage: dict[str, int] = {}
+        finish_reason: str | None = None
         async for chunk in stream:
-            if not chunk.choices:
+            chunk_usage = getattr(chunk, "usage", None)
+            if chunk_usage is not None:
+                usage = self._extract_usage(chunk_usage)
+            if not getattr(chunk, "choices", None):
                 continue
-            delta = chunk.choices[0].delta
+            choice = chunk.choices[0]
+            delta = choice.delta
+            if getattr(choice, "finish_reason", None):
+                finish_reason = choice.finish_reason
             # 推理模型（kimi-k3 等）先吐 reasoning_content 增量再吐正文——单独通道转出去，
             # 不混进 text_parts（正文要原样拼回，思维链混入会污染最终回复与工具回合上下文）。
             reasoning = getattr(delta, "reasoning_content", None)
@@ -249,9 +292,18 @@ class OpenAICompatibleBackend(ModelBackend):
             text="".join(text_parts) or None,
             requested_tools=requested_tools,
             model_id=self.model_name,
-            token_usage={},
+            token_usage=usage,
             duration_ms=duration_ms,
+            finish_reason=finish_reason,
         )
+
+    async def aclose(self) -> None:
+        closer = getattr(self._client, "close", None)
+        if closer is None:
+            return
+        result = closer()
+        if inspect.isawaitable(result):
+            await result
 
 
 class ClaudeBackend(ModelBackend):
@@ -295,7 +347,11 @@ class ClaudeBackend(ModelBackend):
         duration_ms = int((time.monotonic() - start) * 1000)
         text = "".join(block.text for block in response.content if block.type == "text")
         return Completion(
-            text=text, model_id=self.model_name, token_usage=self._extract_usage(response.usage), duration_ms=duration_ms
+            text=text,
+            model_id=self.model_name,
+            token_usage=self._extract_usage(response.usage),
+            duration_ms=duration_ms,
+            finish_reason=getattr(response, "stop_reason", None),
         )
 
     async def astream(self, messages: list[dict], *, max_tokens: int = 4096, **kwargs: Any) -> AsyncIterator[str]:
@@ -311,6 +367,7 @@ class ClaudeBackend(ModelBackend):
             model_id=self.model_name,
             token_usage=self._extract_usage(final.usage),
             duration_ms=int((time.monotonic() - start) * 1000),
+            finish_reason=getattr(final, "stop_reason", None),
         )
 
     async def acomplete_with_tools(
@@ -346,6 +403,7 @@ class ClaudeBackend(ModelBackend):
             model_id=self.model_name,
             token_usage=self._extract_usage(response.usage),
             duration_ms=duration_ms,
+            finish_reason=getattr(response, "stop_reason", None),
         )
 
     async def astream_with_tools(
@@ -390,7 +448,16 @@ class ClaudeBackend(ModelBackend):
             model_id=self.model_name,
             token_usage=self._extract_usage(final.usage),
             duration_ms=duration_ms,
+            finish_reason=getattr(final, "stop_reason", None),
         )
+
+    async def aclose(self) -> None:
+        closer = getattr(self._client, "close", None)
+        if closer is None:
+            return
+        result = closer()
+        if inspect.isawaitable(result):
+            await result
 
 
 def create_model_backend(
@@ -451,6 +518,25 @@ class ModelClient:
             self.provider, api_key=self.api_key, base_url=self.base_url, timeout=self.timeout, model_name=self.model_name
         )
         self.last_stream_summary: StreamSummary | None = None
+        self._closed = False
+
+    def _ensure_open(self) -> None:
+        if self._closed:
+            raise ModelError("ModelClient is closed; create a new instance or call before aclose().")
+
+    async def aclose(self) -> None:
+        """释放后端持有的网络客户端（httpx 连接池）；幂等，可重复调用。"""
+        if self._closed:
+            return
+        await self._backend.aclose()
+        self._closed = True
+
+    async def __aenter__(self) -> "ModelClient":
+        self._ensure_open()
+        return self
+
+    async def __aexit__(self, *_exc: object) -> None:
+        await self.aclose()
 
     def _build_call_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         """把实例上的采样配置和单次调用的覆盖值合成一份请求参数——值为 None 的一律不发。"""
@@ -468,9 +554,11 @@ class ModelClient:
         return call_kwargs
 
     async def acomplete(self, messages: list[dict], **kwargs: Any) -> Completion:
+        self._ensure_open()
         return await self._backend.acomplete(messages, **self._build_call_kwargs(kwargs))
 
     async def astream(self, messages: list[dict], **kwargs: Any) -> AsyncIterator[str]:
+        self._ensure_open()
         async for chunk in self._backend.astream(messages, **self._build_call_kwargs(kwargs)):
             yield chunk
         self.last_stream_summary = self._backend.last_stream_summary
@@ -478,6 +566,7 @@ class ModelClient:
     async def acomplete_with_tools(
         self, messages: list[dict], tools: list[dict], tool_choice: str | dict = "auto", **kwargs: Any
     ) -> ToolCompletion:
+        self._ensure_open()
         call_kwargs = self._build_call_kwargs(kwargs)
         call_kwargs["tool_choice"] = tool_choice
         return await self._backend.acomplete_with_tools(messages, tools, **call_kwargs)
@@ -491,6 +580,7 @@ class ModelClient:
         on_reasoning_delta: Callable[[str], Awaitable[None]] | None = None,
         **kwargs: Any,
     ) -> ToolCompletion:
+        self._ensure_open()
         call_kwargs = self._build_call_kwargs(kwargs)
         call_kwargs["tool_choice"] = tool_choice
         return await self._backend.astream_with_tools(
