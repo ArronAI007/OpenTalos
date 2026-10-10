@@ -17,7 +17,9 @@ export type ChatEvent =
   | { type: "approval_required"; approval_id: string; name: string; arguments: Record<string, unknown> }
   | { type: "approval_resolved"; approval_id: string; approved: boolean }
   // 服务端显式停止该轮（重连时才会收到；正在连接的客户端已 abort 不看）：终结流式并加提示行。
-  | { type: "stopped" };
+  | { type: "stopped" }
+  // 生成被运行中注入的纠偏打断：前端丢弃当前流式 assistant/reasoning 泡（将被重新生成）。
+  | { type: "steer_interrupt" };
 
 export type UiMessage =
   // completedAt（epoch ms）：assistant 回复定稿时刻（done/停止/error 定稿）或历史行 created_at；
@@ -280,5 +282,8 @@ export function reduceChatEvent(prev: UiMessage[], event: ChatEvent, now = Date.
     case "stopped":
       // 服务端显式停止：终结流式泡并加"已停止"提示行（重连场景才会经过这里）。
       return appendStoppedNotice(finalizeStreaming(prev, now));
+    case "steer_interrupt":
+      // 生成被纠偏打断：丢弃当前流式 assistant/reasoning 泡（重跑时会重新生成）。
+      return prev.filter((m) => !((m.kind === "assistant" || m.kind === "reasoning") && m.streaming));
   }
 }

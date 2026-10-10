@@ -365,6 +365,24 @@ describe("suggestions", () => {
   });
 });
 
+describe("steer_interrupt", () => {
+  it("drops the streaming assistant/reasoning bubbles", () => {
+    let msgs = reduceChatEvent([], { type: "delta", text: "旧" });
+    msgs = reduceChatEvent(msgs, { type: "steer_interrupt" });
+    expect(msgs).toEqual([]);
+  });
+
+  it("keeps finalized and non-streaming rows", () => {
+    const msgs: UiMessage[] = [
+      { id: "row-1", kind: "user", content: "问" },
+      { id: "row-2", kind: "assistant", content: "旧答" },
+      { id: "live-1", kind: "assistant", content: "半截", streaming: true },
+      { id: "live-2", kind: "reasoning", content: "想", streaming: true },
+    ];
+    expect(reduceChatEvent(msgs, { type: "steer_interrupt" }).map((m) => m.id)).toEqual(["row-1", "row-2"]);
+  });
+});
+
 describe("title", () => {
   it("does not change the message list — only use-chat forwards it to the sidebar", () => {
     const prev: UiMessage[] = [{ id: "row-1", kind: "user", content: "问" }];

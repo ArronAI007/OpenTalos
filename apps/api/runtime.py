@@ -117,6 +117,7 @@ class _LiveRun:
     condition: asyncio.Condition = field(default_factory=asyncio.Condition)
     stop_event: asyncio.Event = field(default_factory=asyncio.Event)
     steer: asyncio.Queue[str] = field(default_factory=asyncio.Queue)
+    steer_event: asyncio.Event = field(default_factory=asyncio.Event)
     done: bool = False
     finished_at: float | None = None
     runner: asyncio.Task[None] | None = None
@@ -402,6 +403,7 @@ class ChatRuntime:
         user_row = await asyncio.to_thread(self._store.append_message, task_id, "user", content)
         await self._append(run, {"type": "user_stored", "id": user_row["id"], "created_at": user_row["created_at"]})
         run.steer.put_nowait(content)
+        run.steer_event.set()  # 唤醒在飞的模型调用，令其立即打断重跑
         return True
 
     def _sweep_runs(self) -> None:
@@ -487,6 +489,8 @@ class ChatRuntime:
                     on_reasoning_delta=lambda chunk: emit({"type": "reasoning", "text": chunk}),
                     cancellation=cancellation,
                     drain_steer=lambda: _drain_queue(run.steer),
+                    steer_event=run.steer_event,
+                    on_steer_interrupt=lambda: emit({"type": "steer_interrupt"}),
                 )
             except Exception as exc:  # noqa: BLE001 - 转成 error 事件交给前端
                 error = str(exc)
@@ -521,6 +525,8 @@ class ChatRuntime:
                     break
                 if event["type"] == "delta":
                     parts.append(event["text"])
+                elif event["type"] == "steer_interrupt":
+                    parts.clear()  # 被打断的部分丢弃，重新生成的文本随后重新累计
                 elif event["type"] == "tool_call":
                     pending_calls.append(event)
                 elif event["type"] == "tool_result":

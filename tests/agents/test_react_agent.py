@@ -266,3 +266,56 @@ async def test_steering_injects_a_user_message_at_the_next_step(scripted_client,
     assert any(m.get("content") == "改用中文回答" for m in seen[1])  # 工具调用后注入
     # transcript 顺序：本轮提问 -> steer
     assert [m.content for m in agent.history_snapshot() if m.role == "user"] == ["原始问题", "改用中文回答"]
+
+
+async def test_steering_interrupts_an_in_flight_model_call_and_retries():
+    client = ModelClient(provider="mock")
+    calls = {"n": 0}
+    seen: list[list[dict]] = []
+    first_started = asyncio.Event()
+
+    async def fake_acomplete_with_tools(messages, tools, tool_choice="auto", **kwargs):
+        calls["n"] += 1
+        seen.append([dict(m) for m in messages])
+        if calls["n"] == 1:
+            first_started.set()
+            await asyncio.sleep(3600)  # 只能被 steer 打断，不会自然醒
+        return ToolCompletion(text="重跑后的回答", requested_tools=[], model_id="mock")
+
+    client.acomplete_with_tools = fake_acomplete_with_tools  # type: ignore[method-assign]
+
+    steer_event = asyncio.Event()
+    pending: list[str] = []
+
+    def drain_steer() -> list[str]:
+        out = list(pending)
+        pending.clear()
+        return out
+
+    interrupts = {"n": 0}
+
+    async def on_steer_interrupt() -> None:
+        interrupts["n"] += 1
+
+    agent = ReActAgent(name="bot", model_client=client)
+
+    async def scenario() -> str:
+        task = asyncio.create_task(
+            agent.arespond(
+                "原始问题",
+                drain_steer=drain_steer,
+                steer_event=steer_event,
+                on_steer_interrupt=on_steer_interrupt,
+            )
+        )
+        await first_started.wait()
+        pending.append("改用中文")
+        steer_event.set()
+        return await task
+
+    answer = await scenario()
+
+    assert answer == "重跑后的回答"
+    assert interrupts["n"] == 1  # 打断了一次
+    assert calls["n"] == 2  # 第一步重跑了一次
+    assert any(m.get("content") == "改用中文" for m in seen[1])  # 重跑时已带上 steer

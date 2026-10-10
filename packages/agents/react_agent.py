@@ -1,9 +1,10 @@
+import asyncio
 import json
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 from core.agent import Agent, AssemblyConfig, OutputTrimmer, RuntimeSettings
-from core.agent_loop import execute_model_step, resolve_tool_call
+from core.agent_loop import ModelInterrupted, execute_model_step, resolve_tool_call
 from core.cancellation import CancellationToken
 from core.protocol import ChatMessage, ToolInvocation
 from core.model import ModelClient
@@ -76,8 +77,10 @@ class ReActAgent(Agent):
     async def arespond(self, input_text: str, **kwargs: object) -> str:
         cancellation: CancellationToken | None = kwargs.pop("cancellation", None)
         on_text_delta: Callable[[str], Awaitable[None]] | None = kwargs.pop("on_text_delta", None)
-        # 运行中的"打断纠偏"：每步开头排空待注入的用户消息（由 runtime 提供）。
+        # 运行中的"打断纠偏"：每步开头排空待注入的用户消息；steer_event 用于打断在飞的模型调用。
         drain_steer: Callable[[], list[str]] | None = kwargs.pop("drain_steer", None)
+        steer_event: asyncio.Event | None = kwargs.pop("steer_event", None)
+        on_steer_interrupt = kwargs.pop("on_steer_interrupt", None)
         messages = self.build_messages(input_text)
         # 本轮 user 先记入 transcript（在工具结果之前）——保证重放/后续轮次的顺序正确，
         # 也让中途 steer 的 user 消息排在本轮提问之后。
@@ -85,28 +88,45 @@ class ReActAgent(Agent):
         tools = self._tool_schemas()
         answer: str | None = None
 
+        def inject_steer() -> None:
+            if drain_steer is None:
+                return
+            for steer in drain_steer():
+                if steer.strip():
+                    messages.append({"role": "user", "content": steer})
+                    self.record_message(ChatMessage(content=steer, role="user"))
+
         for step in range(1, self.max_steps + 1):
-            if drain_steer is not None:
-                for steer in drain_steer():
-                    if steer.strip():
-                        messages.append({"role": "user", "content": steer})
-                        self.record_message(ChatMessage(content=steer, role="user"))
+            inject_steer()
 
             async def handle_invocation(invocation: ToolInvocation, step: int = step) -> dict[str, str]:
                 return await self._handle(invocation, step)
 
-            completion = await execute_model_step(
-                self.model_client,
-                messages,
-                tools,
-                recorder=self.recorder,
-                step=step,
-                on_text_delta=on_text_delta,
-                cancellation=cancellation,
-                handle_invocation=handle_invocation,
-                on_tool_result=self.record_tool_result,
-                **kwargs,
-            )
+            while True:
+                if steer_event is not None:
+                    steer_event.clear()
+                try:
+                    completion = await execute_model_step(
+                        self.model_client,
+                        messages,
+                        tools,
+                        recorder=self.recorder,
+                        step=step,
+                        on_text_delta=on_text_delta,
+                        cancellation=cancellation,
+                        handle_invocation=handle_invocation,
+                        on_tool_result=self.record_tool_result,
+                        interrupt=steer_event,
+                        **kwargs,
+                    )
+                except ModelInterrupted:
+                    # 生成中被 steer 打断：通知前端丢弃被打断的流式内容，注入后重跑该步。
+                    if on_steer_interrupt is not None:
+                        await on_steer_interrupt()
+                    inject_steer()
+                    continue
+                break
+
             if not completion.requested_tools:
                 answer = completion.text or ""
                 break
