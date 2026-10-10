@@ -19,7 +19,6 @@ from agents.builder import AGENT_TYPES  # noqa: E402
 from db import ChatStore  # noqa: E402
 from deepresearch import run_research, start_live_run, stream_run_events  # noqa: E402
 from mcpclient.client import MCPConnectionError, MCPServerConfig, connect_and_list_tools  # noqa: E402
-from a2apeer.client import A2APeerError, verify_peer_reachable  # noqa: E402
 from evaluation import (  # noqa: E402
     add_eval_case,
     load_eval_cases,
@@ -89,16 +88,6 @@ class CreateMCPServerBody(BaseModel):
 
 
 class UpdateMCPServerBody(BaseModel):
-    enabled: bool
-
-
-class CreateAgentRoleBody(BaseModel):
-    name: str
-    description: str
-    peer_url: str
-
-
-class UpdateAgentRoleBody(BaseModel):
     enabled: bool
 
 
@@ -456,33 +445,6 @@ def create_app(runtime: ChatRuntime | None = None, eval_cases_path: Path | None 
     async def delete_mcp_server_route(server_id: str) -> None:
         if not store.delete_mcp_server(server_id):
             raise HTTPException(404, "server not found")
-
-    @app.post("/api/roles")
-    async def create_agent_role_route(request: CreateAgentRoleBody) -> dict:
-        name = request.name.strip()
-        if not name:
-            raise HTTPException(400, "name must not be blank")
-        try:
-            await verify_peer_reachable(request.peer_url)
-        except A2APeerError as error:
-            raise HTTPException(502, str(error)) from error
-        return store.create_agent_role(name=name, description=request.description, peer_url=request.peer_url)
-
-    @app.get("/api/roles")
-    async def list_agent_roles_route() -> dict:
-        return {"roles": store.list_agent_roles()}
-
-    @app.patch("/api/roles/{role_id}")
-    async def update_agent_role_route(role_id: str, request: UpdateAgentRoleBody) -> dict:
-        updated = store.set_agent_role_enabled(role_id, request.enabled)
-        if updated is None:
-            raise HTTPException(404, "role not found")
-        return updated
-
-    @app.delete("/api/roles/{role_id}", status_code=204)
-    async def delete_agent_role_route(role_id: str) -> None:
-        if not store.delete_agent_role(role_id):
-            raise HTTPException(404, "role not found")
 
     return app
 
