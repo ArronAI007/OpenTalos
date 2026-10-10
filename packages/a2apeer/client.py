@@ -25,3 +25,11 @@ async def send_message(peer_url: str, text: str) -> str:
     except Exception as exc:  # noqa: BLE001
         raise A2APeerError(f"{type(exc).__name__}: {exc}") from exc
     raise A2APeerError("no message response received")
+
+
+async def verify_peer_reachable(peer_url: str) -> None:
+    """只解析一次 AgentCard，确认 peer 存活——不发送任何消息，不触发对方的真实 LLM 调用。"""
+    try:
+        await create_client(peer_url)
+    except Exception as exc:  # noqa: BLE001
+        raise A2APeerError(f"{type(exc).__name__}: {exc}") from exc

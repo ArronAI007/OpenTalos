@@ -2,7 +2,7 @@
 经过自己写的 send_message 包装调用，不直接用官方 SDK 的 client。"""
 import pytest
 
-from a2apeer.client import A2APeerError, send_message
+from a2apeer.client import A2APeerError, send_message, verify_peer_reachable
 
 
 class TestSendMessage:
@@ -13,3 +13,12 @@ class TestSendMessage:
     async def test_unreachable_peer_raises_a2a_peer_error(self) -> None:
         with pytest.raises(A2APeerError):
             await send_message("http://127.0.0.1:1/", "hi")
+
+
+class TestVerifyPeerReachable:
+    async def test_reachable_peer_does_not_raise(self, demo_peer: str) -> None:
+        await verify_peer_reachable(demo_peer)  # 不抛异常即算通过
+
+    async def test_unreachable_peer_raises_a2a_peer_error(self) -> None:
+        with pytest.raises(A2APeerError):
+            await verify_peer_reachable("http://127.0.0.1:1/")
