@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 from core.protocol import Completion, ToolCompletion, ToolInvocation
 from db import ChatStore
@@ -939,3 +940,74 @@ async def test_non_plan_execute_agent_type_unaffected_by_roles_table(store, scri
     agent = await runtime._get_agent(task)  # 不应该因为 roles/role_dispatcher 这两个未知 kwargs 报 TypeError
 
     assert not hasattr(agent, "roles")
+
+
+import os
+import socket
+
+
+def _free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+@pytest.fixture
+async def role_peer():
+    """真实起一个 a2apeer/demo_server.py 子进程当测试用的角色 peer——和
+    test_api_routes.py 里的同名 fixture 是各自独立的拷贝（本仓库既有约定）。"""
+    demo_server = str(
+        Path(__file__).resolve().parent.parent.parent.parent / "packages" / "a2apeer" / "demo_server.py"
+    )
+    packages_dir = str(Path(__file__).resolve().parent.parent.parent.parent / "packages")
+    port = _free_port()
+    env = {**os.environ, "PYTHONPATH": packages_dir}
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable, demo_server, "--port", str(port), "--reply", "HELLO FROM ROLE PEER",
+        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL, env=env,
+    )
+    url = f"http://127.0.0.1:{port}/"
+    try:
+        for _ in range(30):
+            try:
+                async with httpx.AsyncClient() as http:
+                    resp = await http.get(f"http://127.0.0.1:{port}/health", timeout=1.0)
+                if resp.status_code == 200:
+                    break
+            except Exception:  # noqa: BLE001
+                pass
+            await asyncio.sleep(0.2)
+        else:
+            raise RuntimeError("role peer did not become healthy in time")
+        yield url
+    finally:
+        proc.terminate()
+        await proc.wait()
+
+
+async def test_plan_execute_role_dispatch_reaches_real_peer(store, scripted_client, tmp_path, role_peer) -> None:
+    store.create_agent_role(name="researcher", description="finds facts", peer_url=role_peer)
+    planning_client = scripted_client(
+        tool_completions=[
+            ToolCompletion(
+                text=None,
+                requested_tools=[
+                    ToolInvocation(
+                        call_id="c1", tool_name="propose_steps",
+                        arguments_json='{"steps": [{"text": "look this up", "role": "researcher"}]}',
+                    )
+                ],
+                model_id="mock",
+            ),
+        ],
+    )
+    runtime = _runtime(store, planning_client, tmp_path)
+    task = store.create_task("plan_execute")
+
+    events = await _collect(runtime, task["id"], "what's the answer?")
+
+    # role_dispatcher 直接返回完整字符串，不经过 on_text_delta 回调，所以不会产生任何
+    # "delta" 事件——runtime.py 的 stream_reply 对这种"后端未流式"的情况有专门兜底
+    # （"if not parts and reply: parts.append(reply)"），完整回复体现在 done 事件里。
+    assert events[-1]["type"] == "done"
+    assert events[-1]["reply"] == "HELLO FROM ROLE PEER"
