@@ -725,3 +725,97 @@ async def test_delete_mcp_server(api) -> None:
 async def test_delete_missing_mcp_server_returns_404(api) -> None:
     resp = await api.delete("/api/mcp/servers/no-such-id")
     assert resp.status_code == 404
+
+
+import os
+import socket
+
+
+def _free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+@pytest.fixture
+async def role_peer():
+    """真实起一个 a2apeer/demo_server.py 子进程当测试用的角色 peer——和
+    tests/a2apeer/conftest.py 的 demo_peer 同款模式，复制一份而不是跨目录共享
+    fixture（本仓库对测试 fixture 的既有约定：参见 test_runtime.py 和本文件各自
+    独立定义的 _mcp_demo_server_config()）。"""
+    demo_server = str(
+        Path(__file__).resolve().parent.parent.parent.parent / "packages" / "a2apeer" / "demo_server.py"
+    )
+    packages_dir = str(Path(__file__).resolve().parent.parent.parent.parent / "packages")
+    port = _free_port()
+    env = {**os.environ, "PYTHONPATH": packages_dir}
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable, demo_server, "--port", str(port), "--reply", "HELLO FROM ROLE PEER",
+        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL, env=env,
+    )
+    url = f"http://127.0.0.1:{port}/"
+    try:
+        for _ in range(30):
+            try:
+                async with httpx.AsyncClient() as http:
+                    resp = await http.get(f"http://127.0.0.1:{port}/health", timeout=1.0)
+                if resp.status_code == 200:
+                    break
+            except Exception:  # noqa: BLE001
+                pass
+            await asyncio.sleep(0.2)
+        else:
+            raise RuntimeError("role peer did not become healthy in time")
+        yield url
+    finally:
+        proc.terminate()
+        await proc.wait()
+
+
+async def test_create_agent_role_probes_and_persists(api, role_peer) -> None:
+    resp = await api.post(
+        "/api/roles", json={"name": "researcher", "description": "finds facts", "peer_url": role_peer}
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["name"] == "researcher"
+    assert body["peer_url"] == role_peer
+    assert body["enabled"] is True
+
+    listed = await api.get("/api/roles")
+    assert [r["id"] for r in listed.json()["roles"]] == [body["id"]]
+
+
+async def test_create_agent_role_rejects_unreachable_peer(api) -> None:
+    resp = await api.post(
+        "/api/roles", json={"name": "bad", "description": "d", "peer_url": "http://127.0.0.1:1/"}
+    )
+    assert resp.status_code == 502
+
+
+async def test_patch_agent_role_toggles_enabled(api, role_peer) -> None:
+    created = (
+        await api.post("/api/roles", json={"name": "a", "description": "d", "peer_url": role_peer})
+    ).json()
+    resp = await api.patch(f"/api/roles/{created['id']}", json={"enabled": False})
+    assert resp.status_code == 200
+    assert resp.json()["enabled"] is False
+
+
+async def test_patch_missing_agent_role_returns_404(api) -> None:
+    resp = await api.patch("/api/roles/no-such-id", json={"enabled": False})
+    assert resp.status_code == 404
+
+
+async def test_delete_agent_role(api, role_peer) -> None:
+    created = (
+        await api.post("/api/roles", json={"name": "a", "description": "d", "peer_url": role_peer})
+    ).json()
+    resp = await api.delete(f"/api/roles/{created['id']}")
+    assert resp.status_code == 204
+    assert (await api.get("/api/roles")).json()["roles"] == []
+
+
+async def test_delete_missing_agent_role_returns_404(api) -> None:
+    resp = await api.delete("/api/roles/no-such-id")
+    assert resp.status_code == 404
