@@ -913,3 +913,29 @@ async def test_a2a_peer_tool_present_with_url(store, scripted_client, tmp_path) 
     await runtime._get_agent(task)
     registry = runtime._registries[task["id"]]
     assert registry.get("ask_peer_agent") is not None
+
+
+from a2apeer.client import send_message
+
+
+async def test_plan_execute_agent_receives_enabled_roles_only(store, scripted_client, tmp_path) -> None:
+    store.create_agent_role(name="researcher", description="finds facts", peer_url="http://127.0.0.1:8431/")
+    disabled = store.create_agent_role(name="writer", description="writes prose", peer_url="http://127.0.0.1:8432/")
+    store.set_agent_role_enabled(disabled["id"], False)
+    runtime = _runtime(store, scripted_client(tool_completions=[]), tmp_path)
+    task = store.create_task("plan_execute")
+
+    agent = await runtime._get_agent(task)
+
+    assert [r.name for r in agent.roles] == ["researcher"]
+    assert agent.role_dispatcher is send_message
+
+
+async def test_non_plan_execute_agent_type_unaffected_by_roles_table(store, scripted_client, tmp_path) -> None:
+    store.create_agent_role(name="researcher", description="finds facts", peer_url="http://127.0.0.1:8431/")
+    runtime = _runtime(store, scripted_client(tool_completions=[]), tmp_path)
+    task = store.create_task("react")
+
+    agent = await runtime._get_agent(task)  # 不应该因为 roles/role_dispatcher 这两个未知 kwargs 报 TypeError
+
+    assert not hasattr(agent, "roles")
