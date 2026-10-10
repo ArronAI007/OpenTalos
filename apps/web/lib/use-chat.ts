@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { API_URL, deleteTurn as deleteTurnApi, listMessages, type StoredMessage } from "./api";
+import { API_URL, deleteTurn as deleteTurnApi, listMessages, respondToApproval as respondToApprovalApi, type StoredMessage } from "./api";
 import {
   appendStoppedNotice,
+  denyPendingApprovals,
   dropStoppedNotice,
   dropSuggestions,
   dropTurn,
@@ -95,8 +96,8 @@ export function useChat(taskId: string) {
         if (error instanceof Error && error.name === "AbortError") {
           // done 已收到 = 回复已正常定稿，此刻点停止只掐推荐尾巴：不加"已停止"行
           if (!doneRef.current) {
-            // 定稿部分内容 + 追加"已停止，发送消息以继续"提示行
-            setMessages((prev) => appendStoppedNotice(finalizeStreaming(prev)));
+            // 定稿部分内容 + 未决审批标为拒绝（服务端也会拒，但回流事件可能已随流断开）+ "已停止"提示行
+            setMessages((prev) => appendStoppedNotice(denyPendingApprovals(finalizeStreaming(prev))));
           }
         } else {
           setMessages((prev) => [...prev, { id: nextUiId(prev), kind: "error", content: String(error) }]);
@@ -126,5 +127,17 @@ export function useChat(taskId: string) {
     [taskId],
   );
 
-  return { messages, busy, send, stop, deleteTurn };
+  // 审批决定回传：本地状态由流内的 approval_resolved 事件更新（不在此处改，避免与流乱序）。
+  const respondToApproval = useCallback(
+    async (approvalId: string, approved: boolean) => {
+      try {
+        await respondToApprovalApi(taskId, approvalId, approved);
+      } catch {
+        setMessages((prev) => [...prev, { id: nextUiId(prev), kind: "error", content: "审批提交失败，请重试" }]);
+      }
+    },
+    [taskId],
+  );
+
+  return { messages, busy, send, stop, deleteTurn, respondToApproval };
 }

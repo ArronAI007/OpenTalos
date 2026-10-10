@@ -16,9 +16,11 @@ class ToolParameter:
 
 
 class Tool(ABC):
-    def __init__(self, name: str, description: str) -> None:
+    def __init__(self, name: str, description: str, *, requires_approval: bool = False) -> None:
         self.name = name
         self.description = description
+        # 副作用/不可撤销工具置 True：执行前必须经人工审批（见 core.agent_loop.resolve_tool_call）。
+        self.requires_approval = requires_approval
 
     @abstractmethod
     def parameters(self) -> list[ToolParameter]: ...

@@ -14,7 +14,7 @@ export default function TaskPage({ params }: { params: Promise<{ taskId: string 
 }
 
 function TaskChat({ taskId }: { taskId: string }) {
-  const { messages, busy, send, stop, deleteTurn } = useChat(taskId);
+  const { messages, busy, send, stop, deleteTurn, respondToApproval } = useChat(taskId);
   // Composer 受控化：编辑操作把气泡内容回填进输入框；提交后清空由父负责（受控模式自清职责在父）。
   const [draft, setDraft] = useState("");
   // 回填后聚焦的触发计数：同一内容再次编辑也要重新聚焦，用 nonce 而非直接比对 draft
@@ -49,6 +49,7 @@ function TaskChat({ taskId }: { taskId: string }) {
         onDeleteTurn={(messageId) => void deleteTurn(messageId)}
         // 推荐问题点击直接发送（不回填输入框）；手头草稿保持不动
         onPickSuggestion={(text) => void send(text)}
+        onApproval={(approvalId, approved) => void respondToApproval(approvalId, approved)}
       />
       <div className="mx-auto w-full max-w-3xl">
         <Composer

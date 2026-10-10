@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { UiMessage } from "@/lib/chat-events";
 import { shouldShowThinkingHint } from "@/lib/chat-events";
+import { humanizeToolCall } from "@/lib/humanize";
 import { isNearBottom, scrollToBottom } from "@/lib/scroll-stick";
 import { LogoMark } from "@/components/sidebar/Logo";
 import { CirclePauseIcon } from "@/components/ui/icons";
@@ -53,6 +54,7 @@ export function MessageList({
   onEditUser,
   onDeleteTurn,
   onPickSuggestion,
+  onApproval,
 }: {
   messages: UiMessage[];
   taskId: string;
@@ -60,6 +62,7 @@ export function MessageList({
   onEditUser: (content: string) => void;
   onDeleteTurn: (messageId: string) => void;
   onPickSuggestion: (text: string) => void;
+  onApproval: (approvalId: string, approved: boolean) => void;
 }) {
   const listRef = useRef<HTMLOListElement>(null);
   // 跟随滚动开关：初始 true（进入任务/历史加载后落在最新消息）；用户上翻超过阈值即停跟，回到底部恢复。
@@ -215,6 +218,43 @@ export function MessageList({
                     {item}
                   </button>
                 ))}
+              </div>
+            </li>
+          );
+        }
+        if (message.kind === "approval") {
+          // 副作用工具的人工确认卡片：pending 时两个按钮，resolve 后转为结果文案。
+          const { label, detail } = humanizeToolCall(message.name, message.arguments);
+          return (
+            <li key={message.id} className={rowCls}>
+              <div className="mx-auto w-full max-w-xl rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                <div className="flex items-baseline gap-1.5">
+                  <span aria-hidden>⚠️</span>
+                  <span className="font-medium">需要确认：{label}</span>
+                  {detail && <span className="truncate text-amber-700">：{detail}</span>}
+                </div>
+                {message.status === "pending" ? (
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => onApproval(message.approvalId, true)}
+                      className="rounded-full bg-amber-600 px-3 py-1 text-xs font-medium text-white hover:bg-amber-700"
+                    >
+                      允许
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onApproval(message.approvalId, false)}
+                      className="rounded-full border border-amber-400 px-3 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100"
+                    >
+                      拒绝
+                    </button>
+                  </div>
+                ) : (
+                  <div className="mt-1 text-xs text-amber-700">
+                    {message.status === "approved" ? "已允许" : "已拒绝"}
+                  </div>
+                )}
               </div>
             </li>
           );

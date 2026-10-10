@@ -7,6 +7,7 @@ from core.protocol import ToolCompletion, ToolInvocation
 from core.errors import EmptyModelResponse, OperationCancelled, OutputLimitError
 from core.model import ModelClient
 from tool.outcome import ToolOutcome
+from tool.registry import ToolRegistry
 from tool.tool import Tool, ToolParameter
 from agents.react_agent import FINISH_TOOL_NAME, STEP_LIMIT_MESSAGE, ReActAgent
 
@@ -179,3 +180,53 @@ async def test_arespond_runs_a_batch_of_tool_calls_concurrently(echo_tool_regist
     assert answer == "done"
     assert started_order == ["first", "second"]
     assert finished_order == ["second", "first"]
+
+
+class _GatedTool(Tool):
+    def __init__(self) -> None:
+        super().__init__(name="danger", description="Side-effecting tool.", requires_approval=True)
+        self.calls = 0
+
+    def parameters(self) -> list[ToolParameter]:
+        return []
+
+    async def acall(self, arguments):
+        self.calls += 1
+        return ToolOutcome.ok("executed")
+
+
+async def test_arespond_asks_for_approval_and_continues_when_denied(scripted_client):
+    registry = ToolRegistry()
+    tool = _GatedTool()
+    registry.register(tool)
+    asked: list[str] = []
+
+    async def gate(invocation):
+        asked.append(invocation.tool_name)
+        return False
+
+    client = scripted_client(
+        tool_completions=[
+            ToolCompletion(
+                text=None,
+                requested_tools=[ToolInvocation(call_id="c1", tool_name="danger", arguments_json="{}")],
+                model_id="mock",
+            ),
+            ToolCompletion(
+                text=None,
+                requested_tools=[
+                    ToolInvocation(call_id="c2", tool_name=FINISH_TOOL_NAME, arguments_json='{"final_answer": "moved on"}')
+                ],
+                model_id="mock",
+            ),
+        ]
+    )
+    agent = ReActAgent(
+        name="bot", model_client=client, tool_registry=registry, approval_gate=gate, max_steps=5
+    )
+
+    answer = await agent.arespond("do the risky thing")
+
+    assert asked == ["danger"]
+    assert tool.calls == 0  # 被拒绝，未执行
+    assert answer == "moved on"

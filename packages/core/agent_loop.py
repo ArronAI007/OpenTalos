@@ -18,6 +18,13 @@ from .protocol import Completion, ToolCompletion, ToolInvocation
 from .model import ModelClient
 
 ToolInvocationHandler = Callable[[ToolInvocation], Awaitable[dict[str, str]]]
+ApprovalGate = Callable[[ToolInvocation], Awaitable[bool]]
+
+# 拒绝时回给模型的文案：模型据此不再重试，转而换方案或询问用户。
+_DENIED_MESSAGE = (
+    "The user denied this tool call. Do not retry it with the same arguments; "
+    "continue without it or ask the user how to proceed."
+)
 
 # 各供应商表示"被输出上限截断"的 finish_reason/stop_reason（OpenAI 用 length，Anthropic 用 max_tokens）。
 _OUTPUT_LIMIT_REASONS = frozenset({"length", "max_tokens", "max_output_tokens"})
@@ -97,6 +104,7 @@ async def resolve_tool_call(
     step: int | None = None,
     trimmer: OutputTrimmer | None = None,
     on_tool_result: Callable[[str, str, str, str], None] | None = None,
+    approve: ApprovalGate | None = None,
 ) -> dict[str, str]:
     if recorder:
         recorder.log_event("tool_call", {"tool_name": invocation.tool_name, "arguments": invocation.arguments_json}, step=step)
@@ -108,6 +116,19 @@ async def resolve_tool_call(
         if recorder:
             recorder.log_event("tool_result", {"tool_name": invocation.tool_name, "result": message["content"]}, step=step)
         return message
+
+    tool = tool_registry.get(invocation.tool_name)
+    if tool is not None and tool.requires_approval:
+        # 无审批通道（approve=None）时按拒绝处理：副作用工具 fail-closed，绝不默默放行。
+        allowed = approve is not None and await approve(invocation)
+        if not allowed:
+            if recorder:
+                recorder.log_event(
+                    "tool_denied", {"tool_name": invocation.tool_name, "arguments": invocation.arguments_json}, step=step
+                )
+            if on_tool_result is not None:
+                on_tool_result(invocation.call_id, invocation.tool_name, invocation.arguments_json, _DENIED_MESSAGE)
+            return {"role": "tool", "tool_call_id": invocation.call_id, "content": _DENIED_MESSAGE}
 
     outcome = await tool_registry.acall(invocation.tool_name, arguments, call_id=invocation.call_id)
     content = _trim_output(trimmer, invocation.tool_name, outcome.output)
@@ -238,6 +259,7 @@ async def run_tool_turn(
     cancellation: CancellationToken | None = None,
     trimmer: OutputTrimmer | None = None,
     on_tool_result: Callable[[str, str, str, str], None] | None = None,
+    approve: ApprovalGate | None = None,
     **kwargs: Any,
 ) -> str:
     """调用 LLM -> 按需执行工具 -> 把结果喂回去，直到模型不再请求工具或用光 max_iterations。
@@ -261,7 +283,7 @@ async def run_tool_turn(
     tools = tool_registry.function_schemas()
 
     async def handle_invocation(invocation: ToolInvocation) -> dict[str, str]:
-        return await resolve_tool_call(tool_registry, invocation, recorder, step, trimmer, on_tool_result)
+        return await resolve_tool_call(tool_registry, invocation, recorder, step, trimmer, on_tool_result, approve)
 
     for step in range(1, max_iterations + 1):
         completion = await execute_model_step(

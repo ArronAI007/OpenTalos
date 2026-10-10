@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from .compaction import summarize_history
 from .model import ModelClient
-from .protocol import ChatMessage
+from .protocol import ChatMessage, ToolInvocation
 from memory import ShortTermMemory
 
 
@@ -61,6 +61,7 @@ class Agent(ABC):
         trace_metadata: dict[str, Any] | None = None,
         compaction_token_limit: int | None = None,
         output_trimmer: OutputTrimmer | None = None,
+        approval_gate: Callable[[ToolInvocation], Awaitable[bool]] | None = None,
     ) -> None:
         self.name = name
         self.model_client = model_client
@@ -75,6 +76,8 @@ class Agent(ABC):
         # 供按 HTTP 请求/task 关联 trace。
         self._trace_dir = trace_dir
         self._trace_metadata = trace_metadata or {}
+        # 副作用工具的审批回调：返回 True 才执行（None 时危险工具 fail-closed 拒绝）。由应用注入。
+        self.approval_gate = approval_gate
         self.compaction_token_limit = compaction_token_limit
         # 不为空时，工具输出超限会被截断、完整内容落盘（OutputTrimmer 构造即建目录，所以默认不建）。
         self.output_trimmer = output_trimmer

@@ -742,3 +742,9 @@ async def test_app_lifespan_closes_the_runtime_model_client(tmp_path) -> None:
         pass
 
     assert closed["count"] == 1
+
+
+async def test_resolve_unknown_approval_returns_404(api) -> None:
+    task = (await api.post("/api/tasks", json={"agent_type": "react"})).json()
+    resp = await api.post(f"/api/tasks/{task['id']}/approvals/nope", json={"approved": True})
+    assert resp.status_code == 404

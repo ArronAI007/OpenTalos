@@ -11,6 +11,7 @@ from core.model import ModelClient
 from db import ChatStore
 from runtime import ChatRuntime
 from tool.outcome import FailureCode, ToolOutcome
+from tool.registry import ToolRegistry
 from tool.tool import Tool, ToolParameter
 
 
@@ -1021,6 +1022,126 @@ def test_registry_trips_the_shared_circuit_breaker_across_tasks(store) -> None:
     outcome = asyncio.run(other.acall("boom", {}))
 
     assert outcome.failure_code == FailureCode.CIRCUIT_OPEN
+
+
+async def test_request_approval_roundtrip_emits_and_resolves(store) -> None:
+    runtime = ChatRuntime(store, model_client=ModelClient(provider="mock"), skill_service_url="http://127.0.0.1:1")
+    registry = runtime._build_registry("t1")
+    events: list[dict[str, Any]] = []
+
+    async def sink(event: dict[str, Any]) -> None:
+        events.append(event)
+
+    registry.sink = sink
+    invocation = ToolInvocation(call_id="c1", tool_name="danger", arguments_json='{"x": 1}')
+    task = asyncio.create_task(runtime._request_approval("t1", invocation))
+    for _ in range(100):  # 等 _request_approval 跑到挂起等待
+        if runtime._pending_approvals:
+            break
+        await asyncio.sleep(0)
+
+    required = next(e for e in events if e["type"] == "approval_required")
+    assert required["name"] == "danger"
+    assert required["arguments"] == {"x": 1}
+    assert runtime.resolve_approval("t1", required["approval_id"], True) is True
+
+    assert await task is True
+    assert any(e["type"] == "approval_resolved" and e["approved"] for e in events)
+
+
+async def test_request_approval_times_out_as_denied(store) -> None:
+    runtime = ChatRuntime(
+        store,
+        model_client=ModelClient(provider="mock"),
+        skill_service_url="http://127.0.0.1:1",
+        approval_timeout_seconds=0.01,
+    )
+    registry = runtime._build_registry("t1")
+
+    async def sink(event: dict[str, Any]) -> None:
+        return None
+
+    registry.sink = sink
+    invocation = ToolInvocation(call_id="c1", tool_name="danger", arguments_json="{}")
+
+    assert await runtime._request_approval("t1", invocation) is False
+
+
+async def test_request_approval_is_denied_without_an_active_stream(store) -> None:
+    runtime = ChatRuntime(store, model_client=ModelClient(provider="mock"), skill_service_url="http://127.0.0.1:1")
+    runtime._build_registry("t1")  # sink 默认 None
+    invocation = ToolInvocation(call_id="c1", tool_name="danger", arguments_json="{}")
+
+    assert await runtime._request_approval("t1", invocation) is False
+
+
+def test_resolve_approval_rejects_unknown_id_or_wrong_task(store) -> None:
+    runtime = ChatRuntime(store, model_client=ModelClient(provider="mock"), skill_service_url="http://127.0.0.1:1")
+
+    assert runtime.resolve_approval("t1", "nope", True) is False
+
+
+class _ApprovalTool(Tool):
+    def __init__(self) -> None:
+        super().__init__(name="danger", description="Side-effecting tool.", requires_approval=True)
+        self.calls = 0
+
+    def parameters(self) -> list[ToolParameter]:
+        return []
+
+    async def acall(self, arguments):
+        self.calls += 1
+        return ToolOutcome.ok("executed")
+
+
+def _approval_runtime(store, scripted_client, tmp_path):
+    registry = ToolRegistry()
+    tool = _ApprovalTool()
+    registry.register(tool)
+    client = scripted_client(
+        tool_completions=[
+            ToolCompletion(
+                text=None,
+                requested_tools=[ToolInvocation(call_id="c1", tool_name="danger", arguments_json="{}")],
+                model_id="mock-model",
+            ),
+            ToolCompletion(text="done", requested_tools=[], model_id="mock-model"),
+        ]
+    )
+    runtime = _runtime(store, client, tmp_path, tool_registry_factory=lambda: registry)
+    return runtime, tool
+
+
+async def _drive_with_decision(runtime: ChatRuntime, task_id: str, approved: bool) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    async for event in runtime.stream_reply(task_id, "go"):
+        events.append(event)
+        if event["type"] == "approval_required":
+            assert runtime.resolve_approval(task_id, event["approval_id"], approved) is True
+    return events
+
+
+async def test_stream_executes_a_gated_tool_after_the_user_approves(store, scripted_client, tmp_path) -> None:
+    runtime, tool = _approval_runtime(store, scripted_client, tmp_path)
+    task = store.create_task("react")
+
+    events = await _drive_with_decision(runtime, task["id"], True)
+
+    types = [e["type"] for e in events]
+    assert "approval_required" in types and "approval_resolved" in types
+    assert tool.calls == 1
+    assert any(e["type"] == "tool_result" and e.get("result") == "executed" for e in events)
+    assert types[-1] == "done"
+
+
+async def test_stream_denies_a_gated_tool_and_the_turn_continues(store, scripted_client, tmp_path) -> None:
+    runtime, tool = _approval_runtime(store, scripted_client, tmp_path)
+    task = store.create_task("react")
+
+    events = await _drive_with_decision(runtime, task["id"], False)
+
+    assert tool.calls == 0  # 被拒绝，未执行
+    assert events[-1]["type"] == "done"
 
 
 def test_stream_reply_writes_a_complete_trace_with_task_id(store, scripted_client, tmp_path) -> None:

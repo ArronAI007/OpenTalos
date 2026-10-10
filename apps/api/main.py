@@ -88,6 +88,10 @@ class CreateMCPServerBody(BaseModel):
     url: str | None = None
 
 
+class ApprovalDecisionBody(BaseModel):
+    approved: bool
+
+
 class UpdateMCPServerBody(BaseModel):
     enabled: bool
 
@@ -117,6 +121,7 @@ def create_app(runtime: ChatRuntime | None = None, eval_cases_path: Path | None 
             tool_timeout_seconds=float(os.environ.get("TOOL_TIMEOUT_SECONDS") or 120),
             circuit_failure_threshold=int(os.environ.get("TOOL_CIRCUIT_FAILURE_THRESHOLD") or 3),
             circuit_recovery_seconds=float(os.environ.get("TOOL_CIRCUIT_RECOVERY_SECONDS") or 300),
+            approval_timeout_seconds=float(os.environ.get("APPROVAL_TIMEOUT_SECONDS") or 300),
         )
     if eval_cases_path is None:
         eval_cases_path = _REPO_ROOT / ".data" / "eval_cases.json"
@@ -227,6 +232,15 @@ def create_app(runtime: ChatRuntime | None = None, eval_cases_path: Path | None 
         # 只置位信号，不等流真正退出：消费循环每轮首查信号，≤_STREAM_IDLE_S 内响应，
         # partial + stopped 标记由 stream_reply 的 finally 兜底落库。
         runtime.request_stop(task_id)
+        return {"ok": True}
+
+    @app.post("/api/tasks/{task_id}/approvals/{approval_id}")
+    async def resolve_approval(task_id: str, approval_id: str, request: ApprovalDecisionBody) -> dict:
+        if store.get_task(task_id) is None:
+            raise HTTPException(404, "task not found")
+        # 未知/已解决/不属于该任务的审批 → 404（审批是安全闸门，拒绝伪造调用）。
+        if not runtime.resolve_approval(task_id, approval_id, request.approved):
+            raise HTTPException(404, "unknown or already-resolved approval")
         return {"ok": True}
 
     @app.get("/api/tasks/{task_id}/messages")

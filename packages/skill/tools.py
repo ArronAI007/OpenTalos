@@ -40,6 +40,7 @@ class RunSkillScriptTool(Tool):
                 "Execute a script belonging to a skill and return its output. "
                 "Use read_skill first to learn the correct script_relative_path and args."
             ),
+            requires_approval=True,
         )
         self._client = client
 

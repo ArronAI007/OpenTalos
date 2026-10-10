@@ -49,6 +49,7 @@ class ReActAgent(Agent):
         trace_metadata: dict[str, Any] | None = None,
         compaction_token_limit: int | None = None,
         output_trimmer: OutputTrimmer | None = None,
+        approval_gate: Callable[[ToolInvocation], Awaitable[bool]] | None = None,
     ) -> None:
         super().__init__(
             name,
@@ -61,6 +62,7 @@ class ReActAgent(Agent):
             trace_metadata,
             compaction_token_limit,
             output_trimmer,
+            approval_gate,
         )
         self.tool_registry = tool_registry
         self.max_steps = max_steps
@@ -122,6 +124,7 @@ class ReActAgent(Agent):
         return await resolve_tool_call(
             self.tool_registry, invocation, self.recorder, step, self.output_trimmer,
             on_tool_result=self.record_tool_result,
+            approve=self.approval_gate,
         )
 
 

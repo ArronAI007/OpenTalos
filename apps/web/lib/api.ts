@@ -79,6 +79,17 @@ export async function deleteTurn(taskId: string, messageId: number): Promise<voi
     throw new Error(`API ${res.status} ${res.statusText}`);
   }
 }
+export async function respondToApproval(taskId: string, approvalId: string, approved: boolean): Promise<void> {
+  // 副作用工具的审批决定；结果由流内的 approval_resolved 事件回流（这里不本地改状态）。
+  const res = await fetch(`${API_URL}/api/tasks/${taskId}/approvals/${approvalId}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ approved }),
+  });
+  if (!res.ok) {
+    throw new Error(`API ${res.status} ${res.statusText}`);
+  }
+}
 export async function listProjects(): Promise<Project[]> {
   return fetchJson<{ projects: Project[] }>(`${API_URL}/api/projects`, { cache: "no-store" }).then((d) => d.projects);
 }

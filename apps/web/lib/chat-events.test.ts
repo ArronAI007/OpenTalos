@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   appendStoppedNotice,
+  denyPendingApprovals,
   dropStoppedNotice,
   dropSuggestions,
   dropTurn,
@@ -352,5 +353,44 @@ describe("title", () => {
     const prev: UiMessage[] = [{ id: "row-1", kind: "user", content: "问" }];
     const next = reduceChatEvent(prev, { type: "title", title: "新标题" });
     expect(next).toBe(prev); // 同引用：no-op，不触发多余渲染
+  });
+});
+
+describe("approval（副作用工具人工确认）", () => {
+  it("approval_required appends a pending approval card", () => {
+    const msgs = reduceChatEvent([], {
+      type: "approval_required",
+      approval_id: "a1",
+      name: "run_skill_script",
+      arguments: { skill_name: "date" },
+    });
+    expect(msgs).toEqual([
+      {
+        id: "live-1",
+        kind: "approval",
+        approvalId: "a1",
+        name: "run_skill_script",
+        arguments: { skill_name: "date" },
+        status: "pending",
+      },
+    ]);
+  });
+
+  it("approval_resolved flips the matching card status", () => {
+    let msgs = reduceChatEvent([], { type: "approval_required", approval_id: "a1", name: "t", arguments: {} });
+    msgs = reduceChatEvent(msgs, { type: "approval_resolved", approval_id: "a1", approved: true });
+    expect(msgs[0]).toMatchObject({ kind: "approval", status: "approved" });
+  });
+
+  it("approval_resolved no-ops with the same reference for an unknown id", () => {
+    const msgs = reduceChatEvent([], { type: "approval_required", approval_id: "a1", name: "t", arguments: {} });
+    expect(reduceChatEvent(msgs, { type: "approval_resolved", approval_id: "nope", approved: true })).toBe(msgs);
+  });
+
+  it("denyPendingApprovals marks pending cards denied and is a no-op afterwards", () => {
+    const msgs = reduceChatEvent([], { type: "approval_required", approval_id: "a1", name: "t", arguments: {} });
+    const denied = denyPendingApprovals(msgs);
+    expect(denied[0]).toMatchObject({ status: "denied" });
+    expect(denyPendingApprovals(denied)).toBe(denied);
   });
 });

@@ -10,7 +10,7 @@ from core.model import FakeModelBackend, ModelClient
 from tool.outcome import ToolOutcome
 from tool.registry import ToolRegistry
 from tool.tool import Tool, ToolParameter
-from core.agent_loop import build_reply_message, execute_model_step, run_tool_turn
+from core.agent_loop import build_reply_message, execute_model_step, resolve_tool_call, run_tool_turn
 
 
 def test_build_reply_message_shapes_tool_calls_for_the_wire():
@@ -564,3 +564,79 @@ async def test_execute_model_step_records_unknown_receipts_for_interrupted_tool_
 
     assert {receipt[0] for receipt in recorded} == {"c1", "c2"}
     assert all("unknown" in receipt[3] for receipt in recorded)
+
+
+# ==================== 副作用工具审批闸门 ====================
+
+
+class _DangerousTool(Tool):
+    def __init__(self) -> None:
+        super().__init__(name="danger", description="Side-effecting tool.", requires_approval=True)
+        self.calls = 0
+
+    def parameters(self) -> list[ToolParameter]:
+        return []
+
+    async def acall(self, arguments):
+        self.calls += 1
+        return ToolOutcome.ok("executed")
+
+
+def _dangerous_registry() -> tuple[ToolRegistry, _DangerousTool]:
+    registry = ToolRegistry()
+    tool = _DangerousTool()
+    registry.register(tool)
+    return registry, tool
+
+
+async def test_resolve_tool_call_denies_a_gated_tool_without_an_approve_channel():
+    registry, tool = _dangerous_registry()
+    invocation = ToolInvocation(call_id="c1", tool_name="danger", arguments_json="{}")
+
+    message = await resolve_tool_call(registry, invocation)
+
+    assert tool.calls == 0
+    assert "denied" in message["content"].lower()
+
+
+async def test_resolve_tool_call_denies_when_the_gate_returns_false():
+    registry, tool = _dangerous_registry()
+    invocation = ToolInvocation(call_id="c1", tool_name="danger", arguments_json="{}")
+
+    async def deny(_invocation):
+        return False
+
+    message = await resolve_tool_call(registry, invocation, approve=deny)
+
+    assert tool.calls == 0
+    assert "denied" in message["content"].lower()
+
+
+async def test_resolve_tool_call_executes_when_the_gate_approves():
+    registry, tool = _dangerous_registry()
+    invocation = ToolInvocation(call_id="c1", tool_name="danger", arguments_json="{}")
+    seen: list[str] = []
+
+    async def allow(invocation):
+        seen.append(invocation.call_id)
+        return True
+
+    message = await resolve_tool_call(registry, invocation, approve=allow)
+
+    assert seen == ["c1"]
+    assert tool.calls == 1
+    assert message["content"] == "executed"
+
+
+async def test_resolve_tool_call_does_not_gate_a_safe_tool(echo_tool_registry):
+    called: list[str] = []
+
+    async def gate(invocation):
+        called.append(invocation.tool_name)
+        return False
+
+    invocation = ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text": "hi"}')
+    message = await resolve_tool_call(echo_tool_registry, invocation, approve=gate)
+
+    assert called == []
+    assert message["content"] == "echoed: hi"

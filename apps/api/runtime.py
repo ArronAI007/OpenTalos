@@ -6,6 +6,7 @@ sink 在每条消息开始时绑到该消息的队列（per-task 锁保证同一
 """
 import asyncio
 import json
+import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -15,7 +16,7 @@ from agents.subagent_tool import DispatchSubagentTool
 from core.agent import Agent
 from core.cancellation import CancellationToken
 from core.model import ModelClient
-from core.protocol import ChatMessage
+from core.protocol import ChatMessage, ToolInvocation
 from skill.client import SkillClient, SkillServiceError
 from skill.prompt import format_skills_for_system_prompt
 from skill.tools import ReadSkillTool, RunSkillScriptTool
@@ -108,6 +109,7 @@ class ChatRuntime:
         tool_timeout_seconds: float | None = 120.0,
         circuit_failure_threshold: int = 3,
         circuit_recovery_seconds: float = 300.0,
+        approval_timeout_seconds: float = 300.0,
     ) -> None:
         self._store = store
         self._model_client = model_client  # None → 首次需要时按 env 构造
@@ -123,6 +125,9 @@ class ChatRuntime:
             if circuit_failure_threshold > 0
             else None
         )
+        # 待审批的副作用工具调用：approval_id -> (task_id, future[bool])。超时/流结束按拒绝。
+        self._approval_timeout_seconds = approval_timeout_seconds
+        self._pending_approvals: dict[str, tuple[str, asyncio.Future[bool]]] = {}
         self._agents: dict[str, Agent] = {}
         self._registries: dict[str, EventToolRegistry] = {}
         self._task_locks: dict[str, asyncio.Lock] = {}
@@ -229,7 +234,7 @@ class ChatRuntime:
 
         main_tools = self._new_registry()
         self._collect_base_tools(main_tools)
-        main_tools.register(DispatchSubagentTool(self._client(), subagent_tools))
+        main_tools.register(DispatchSubagentTool(self._client(), subagent_tools, approval_gate=self._gate_for(task_id)))
 
         wrapper = EventToolRegistry(main_tools)
         self._registries[task_id] = wrapper
@@ -240,6 +245,53 @@ class ChatRuntime:
         if self._tool_registry_factory is not None:
             return self._tool_registry_factory()
         return ToolRegistry(circuit_breaker=self._circuit_breaker, timeout_seconds=self._tool_timeout_seconds)
+
+    def _gate_for(self, task_id: str) -> Callable[[ToolInvocation], Awaitable[bool]]:
+        async def gate(invocation: ToolInvocation) -> bool:
+            return await self._request_approval(task_id, invocation)
+
+        return gate
+
+    async def _request_approval(self, task_id: str, invocation: ToolInvocation) -> bool:
+        """挂起一次副作用工具调用，向当前流发 approval_required，等前端回传决定。
+
+        无活动流（sink 未挂）或超时一律按拒绝处理——审批是安全闸门，宁可拒绝。
+        """
+        registry = self._registries.get(task_id)
+        sink = registry.sink if registry is not None else None
+        if sink is None:
+            return False
+        approval_id = uuid.uuid4().hex
+        future: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
+        self._pending_approvals[approval_id] = (task_id, future)
+        try:
+            arguments = json.loads(invocation.arguments_json) if invocation.arguments_json else {}
+        except json.JSONDecodeError:
+            arguments = {}
+        await sink({"type": "approval_required", "approval_id": approval_id, "name": invocation.tool_name, "arguments": arguments})
+        try:
+            approved = await asyncio.wait_for(future, timeout=self._approval_timeout_seconds)
+        except asyncio.TimeoutError:
+            approved = False
+        finally:
+            self._pending_approvals.pop(approval_id, None)
+        try:
+            await sink({"type": "approval_resolved", "approval_id": approval_id, "approved": approved})
+        except Exception:  # noqa: BLE001 - 流已断开时不再下发结果
+            pass
+        return approved
+
+    def resolve_approval(self, task_id: str, approval_id: str, approved: bool) -> bool:
+        """前端回传审批决定。未知/已解决的 approval_id 或被篡改的 task_id 返回 False。"""
+        entry = self._pending_approvals.get(approval_id)
+        if entry is None:
+            return False
+        pending_task, future = entry
+        if pending_task != task_id:
+            return False
+        if not future.done():
+            future.set_result(approved)
+        return True
 
     async def _get_agent(self, task: dict[str, Any]) -> Agent:
         agent = self._agents.get(task["id"])
@@ -254,6 +306,7 @@ class ChatRuntime:
             trace_dir=str(self._trace_dir) if self._trace_dir else None,
             trace_metadata={"task_id": task["id"]},
             compaction_token_limit=self._compaction_token_limit,
+            approval_gate=self._gate_for(task["id"]),
         )
 
         # 压缩成功后落一份 Surface 快照（summary + 保留近期）到 DB：重启据此恢复、不重新压。
@@ -466,6 +519,10 @@ class ChatRuntime:
                         pass
             finally:
                 self._active_stops.pop(task_id, None)
+                # 流结束（完成/停止/断连）：未决审批一律按拒绝处理，避免 producer 悬挂到超时。
+                for approval_id, (pending_task, future) in list(self._pending_approvals.items()):
+                    if pending_task == task_id and not future.done():
+                        future.set_result(False)
                 if not producer.done():
                     # 不等收敛：断连时 starlette 用 anyio cancel scope 取消响应，scope 内任何
                     # await（含 gather/to_thread）都会再抛 CancelledError（真机实测），

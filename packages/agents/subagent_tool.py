@@ -1,6 +1,8 @@
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from core.model import ModelClient
+from core.protocol import ToolInvocation
 from tool.outcome import ToolOutcome
 from tool.registry import ToolRegistry
 from tool.tool import Tool, ToolParameter
@@ -17,7 +19,12 @@ class DispatchSubagentTool(Tool):
     那份的引用，否则子 agent 会连带看到 dispatch_subagent 自己，能够递归再分派）。
     """
 
-    def __init__(self, model_client: ModelClient, subagent_tools: ToolRegistry) -> None:
+    def __init__(
+        self,
+        model_client: ModelClient,
+        subagent_tools: ToolRegistry,
+        approval_gate: Callable[[ToolInvocation], Awaitable[bool]] | None = None,
+    ) -> None:
         super().__init__(
             name="dispatch_subagent",
             description=(
@@ -29,6 +36,8 @@ class DispatchSubagentTool(Tool):
         )
         self._model_client = model_client
         self._subagent_tools = subagent_tools
+        # 子代理内层危险工具同样逐次走审批，不因"父任务已批准分派"而放行。
+        self._approval_gate = approval_gate
 
     def parameters(self) -> list[ToolParameter]:
         return [
@@ -41,7 +50,12 @@ class DispatchSubagentTool(Tool):
         ]
 
     async def acall(self, arguments: dict[str, Any]) -> ToolOutcome:
-        subagent = build_agent(DEFAULT_SUBAGENT_NAME, self._model_client, tool_registry=self._subagent_tools)
+        subagent = build_agent(
+            DEFAULT_SUBAGENT_NAME,
+            self._model_client,
+            tool_registry=self._subagent_tools,
+            approval_gate=self._approval_gate,
+        )
         try:
             answer = await subagent.arespond(arguments["prompt"])
         except Exception as exc:  # noqa: BLE001 - 子 agent 失败不连累主 agent 的整次请求

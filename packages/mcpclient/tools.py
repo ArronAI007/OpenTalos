@@ -30,7 +30,8 @@ class MCPTool(Tool):
     MCPToolInfo，acall() 时才真正建立连接执行。"""
 
     def __init__(self, server_config: MCPServerConfig, tool_info: MCPToolInfo) -> None:
-        super().__init__(name=tool_info.name, description=tool_info.description)
+        # MCP 工具来源不可信且行为未知，统一要求人工审批。
+        super().__init__(name=tool_info.name, description=tool_info.description, requires_approval=True)
         self._server_config = server_config
         self._tool_info = tool_info
 

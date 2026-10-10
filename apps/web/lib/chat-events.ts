@@ -11,7 +11,11 @@ export type ChatEvent =
   | { type: "suggestions"; items: string[] }
   // 首条消息时并行生成的概括性标题（成功才发，失败/超时不发——保留已落库的截断版兜底）。
   // 不对应任何聊天气泡，use-chat 里单独转发给侧栏任务列表，这里只负责"原样放行"。
-  | { type: "title"; title: string };
+  | { type: "title"; title: string }
+  // 副作用工具需要人工确认：SSE 下发（带工具名/参数），前端渲染确认卡片；
+  // 用户决定经 POST /approvals/{id} 回传，结果由 approval_resolved 再回流。
+  | { type: "approval_required"; approval_id: string; name: string; arguments: Record<string, unknown> }
+  | { type: "approval_resolved"; approval_id: string; approved: boolean };
 
 export type UiMessage =
   // completedAt（epoch ms）：assistant 回复定稿时刻（done/停止/error 定稿）或历史行 created_at；
@@ -32,7 +36,16 @@ export type UiMessage =
   | { kind: "stopped"; id: string }
   // 跟进问题推荐：本会话 UI 行（服务端 done 后追加；不落库、不进历史）。
   // 下一条用户消息发出即过时清除（dropSuggestions），点击条目直接发送。
-  | { kind: "suggestions"; id: string; items: string[] };
+  | { kind: "suggestions"; id: string; items: string[] }
+  // 副作用工具的人工确认卡片：pending 时显示允许/拒绝，resolve 后转为结果文案。
+  | {
+      kind: "approval";
+      id: string;
+      approvalId: string;
+      name: string;
+      arguments: Record<string, unknown>;
+      status: "pending" | "approved" | "denied";
+    };
 
 type AssistantMessage = { kind: "assistant"; id: string; content: string; streaming?: boolean };
 type ReasoningMessage = { kind: "reasoning"; id: string; content: string; streaming?: boolean };
@@ -84,7 +97,7 @@ export function shouldShowThinkingHint(messages: UiMessage[], busy: boolean): bo
   if (messages.some((m) => (m.kind === "assistant" || m.kind === "reasoning") && m.streaming)) return false;
   const last = messages[messages.length - 1];
   // 末尾是思考单元（思路/工具动作）：已可见"正在思考…"与活动，不再叠加占位
-  if (last?.kind === "reasoning" || last?.kind === "tool") return false;
+  if (last?.kind === "reasoning" || last?.kind === "tool" || last?.kind === "approval") return false;
   return last?.kind !== "assistant" && last?.kind !== "stopped";
 }
 
@@ -109,6 +122,13 @@ export function dropStoppedNotice(prev: UiMessage[]): UiMessage[] {
 export function dropSuggestions(prev: UiMessage[]): UiMessage[] {
   if (!prev.some((m) => m.kind === "suggestions")) return prev;
   return prev.filter((m) => m.kind !== "suggestions");
+}
+
+// 停止/断连时本地把未决审批卡片标为已拒绝（服务端也会按拒绝处理，但回流事件可能已随流断开）。
+// 无 pending 审批时返回原引用，不触发多余渲染。
+export function denyPendingApprovals(prev: UiMessage[]): UiMessage[] {
+  if (!prev.some((m) => m.kind === "approval" && m.status === "pending")) return prev;
+  return prev.map((m) => (m.kind === "approval" && m.status === "pending" ? { ...m, status: "denied" } : m));
 }
 
 // 删除整轮问答：目标 user 行 + 其后直到下一条 user 行之前的所有行（assistant/tool/stopped）。
@@ -198,5 +218,28 @@ export function reduceChatEvent(prev: UiMessage[], event: ChatEvent, now = Date.
     case "title":
       // 不改变本页消息列表——侧栏任务列表的更新由 use-chat 的事件回调单独转发。
       return prev;
+    case "approval_required":
+      return [
+        ...prev,
+        {
+          id: nextUiId(prev),
+          kind: "approval",
+          approvalId: event.approval_id,
+          name: event.name,
+          arguments: event.arguments,
+          status: "pending",
+        },
+      ];
+    case "approval_resolved": {
+      const at = prev.findIndex((m) => m.kind === "approval" && m.approvalId === event.approval_id);
+      if (at === -1) return prev;
+      const message = prev[at];
+      if (message.kind !== "approval") return prev;
+      return [
+        ...prev.slice(0, at),
+        { ...message, status: event.approved ? "approved" : "denied" },
+        ...prev.slice(at + 1),
+      ];
+    }
   }
 }
