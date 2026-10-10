@@ -39,7 +39,7 @@ export function DeleteTurnDialog({ open, busy, onCancel, onConfirm }: DeleteTurn
         aria-modal="true"
         aria-labelledby="delete-turn-dialog-title"
         aria-describedby="delete-turn-dialog-desc"
-        className="relative z-10 w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl"
+        className="relative z-10 w-full max-w-sm rounded-2xl bg-surface p-5 shadow-2xl"
       >
         <h2 id="delete-turn-dialog-title" className="text-sm font-semibold">
           删除这轮问答？

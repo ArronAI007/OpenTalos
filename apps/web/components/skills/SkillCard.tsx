@@ -20,7 +20,7 @@ export function SkillCard({ skill, onToggleAdded }: SkillCardProps) {
   return (
     <>
       <li
-        className="group relative cursor-pointer rounded-xl border border-border bg-white"
+        className="group relative cursor-pointer rounded-xl border border-border bg-surface"
         role="button"
         tabIndex={0}
         onClick={() => setDetailOpen(true)}
@@ -61,7 +61,7 @@ export function SkillCard({ skill, onToggleAdded }: SkillCardProps) {
                 e.stopPropagation();
                 void onToggleAdded(skill.name, skill.added);
               }}
-              className="flex h-7 w-7 items-center justify-center rounded-lg border border-border bg-white text-lg leading-none text-text hover:bg-gray-50"
+              className="flex h-7 w-7 items-center justify-center rounded-lg border border-border bg-surface text-lg leading-none text-text hover:bg-gray-50"
             >
               {skill.added ? <CheckIcon width={14} height={14} /> : "+"}
             </button>

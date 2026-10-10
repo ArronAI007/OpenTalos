@@ -83,7 +83,7 @@ function ConfirmDeleteRunDialog({
         aria-modal="true"
         aria-labelledby="delete-eval-run-dialog-title"
         aria-describedby="delete-eval-run-dialog-desc"
-        className="relative z-10 w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl"
+        className="relative z-10 w-full max-w-sm rounded-2xl bg-surface p-5 shadow-2xl"
       >
         <h2 id="delete-eval-run-dialog-title" className="text-sm font-semibold">
           删除这条评估记录？
@@ -278,7 +278,7 @@ export default function EvalPage() {
     <section className="p-6">
       <h1 className="mb-4 text-xl font-semibold">Agent 评估</h1>
 
-      <div className="mb-6 rounded-xl border border-border bg-white p-4">
+      <div className="mb-6 rounded-xl border border-border bg-surface p-4">
         <h2 className="mb-3 text-sm font-medium">测试用例</h2>
         <div className="mb-3 flex flex-col gap-2 sm:flex-row">
           <input
@@ -344,7 +344,7 @@ export default function EvalPage() {
         )}
       </div>
 
-      <div className="mb-6 rounded-xl border border-border bg-white p-4">
+      <div className="mb-6 rounded-xl border border-border bg-surface p-4">
         <button
           type="button"
           onClick={() => void handleRun()}
@@ -357,7 +357,7 @@ export default function EvalPage() {
         {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
       </div>
 
-      <div className="rounded-xl border border-border bg-white p-4">
+      <div className="rounded-xl border border-border bg-surface p-4">
         <h2 className="mb-3 text-sm font-medium">历史评估记录</h2>
         {historyError && <ErrorState message={historyError} onRetry={reloadRuns} />}
         {!runs || runs.length === 0 ? (

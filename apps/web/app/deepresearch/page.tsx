@@ -49,7 +49,7 @@ function ConfirmDeleteRunDialog({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
       <div className="absolute inset-0 bg-black/50" onClick={onCancel} aria-hidden="true" />
-      <div role="alertdialog" aria-modal="true" className="relative z-10 w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl">
+      <div role="alertdialog" aria-modal="true" className="relative z-10 w-full max-w-sm rounded-2xl bg-surface p-5 shadow-2xl">
         <h2 className="text-sm font-semibold">删除这条研究记录？</h2>
         <p className="mt-1.5 text-sm text-text-secondary">此操作不可撤销。</p>
         <div className="mt-4 flex justify-end gap-2">
@@ -174,7 +174,7 @@ export default function DeepResearchPage() {
         输入一个研究主题，自动拆解成若干子任务并行搜索、总结，最后合成一份带来源引用的报告。
       </p>
 
-      <div className="mb-6 rounded-xl border border-border bg-white p-4">
+      <div className="mb-6 rounded-xl border border-border bg-surface p-4">
         <h2 className="mb-3 text-sm font-medium">研究主题</h2>
         <div className="flex gap-2">
           <input
@@ -197,7 +197,7 @@ export default function DeepResearchPage() {
         {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
       </div>
 
-      <div className="rounded-xl border border-border bg-white p-4">
+      <div className="rounded-xl border border-border bg-surface p-4">
         <h2 className="mb-3 text-sm font-medium">研究记录</h2>
         {runs.length === 0 ? (
           <p className="text-sm text-text-secondary">还没有研究记录。</p>

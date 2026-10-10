@@ -17,6 +17,39 @@ body {
   font-family: ui-sans-serif, system-ui, "PingFang SC", "Helvetica Neue", sans-serif;
 }
 
+html { color-scheme: light; }
+html.dark { color-scheme: dark; }
+
+/* 深色主题：覆写 @theme 令牌，所有 token 工具类 / Markdown 样式随之切换。 */
+.dark {
+  --color-surface: #0f0f0e;
+  --color-sidebar: #1a1a18;
+  --color-border: #2e2e2a;
+  --color-text: #f0f0ea;
+  --color-text-secondary: #a1a19a;
+  --color-user-bubble: #6366f1;
+}
+
+/* 固定浅色语义底色/在暗色下压暗，避免刺眼（对 Tailwind 调色板类名的定向覆写）。 */
+.dark .bg-gray-50 { background-color: #1f1f1c; }
+.dark .bg-red-50 { background-color: #2a1616; }
+.dark .bg-red-100 { background-color: #3a1c1c; }
+.dark .bg-amber-50 { background-color: #2a2312; }
+.dark .bg-amber-100 { background-color: #3a2f16; }
+.dark .bg-green-50 { background-color: #14251a; }
+.dark .text-red-500, .dark .text-red-600 { color: #f87171; }
+.dark .text-amber-600, .dark .text-amber-700, .dark .text-amber-800, .dark .text-amber-900 { color: #fbbf24; }
+.dark .border-red-200 { border-color: #5b2b2b; }
+.dark .border-amber-300, .dark .border-amber-400 { border-color: #6b5a1f; }
+
+/* 代码高亮深色令牌 */
+.dark .hljs-comment, .dark .hljs-quote { color: #8b949e; }
+.dark .hljs-keyword, .dark .hljs-selector-tag, .dark .hljs-built_in, .dark .hljs-name { color: #ff7b72; }
+.dark .hljs-string, .dark .hljs-attr, .dark .hljs-template-variable { color: #a5d6ff; }
+.dark .hljs-number, .dark .hljs-literal, .dark .hljs-variable { color: #79c0ff; }
+.dark .hljs-title, .dark .hljs-section { color: #d2a8ff; }
+.dark .hljs-type, .dark .hljs-class .hljs-title, .dark .hljs-attribute { color: #7ee787; }
+
 /* 助手消息 Markdown 作用域样式 */
 .md { overflow-wrap: break-word; }
 .md > :first-child { margin-top: 0; }

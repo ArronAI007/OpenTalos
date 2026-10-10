@@ -36,7 +36,7 @@ function ConfirmDeleteServerDialog({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
       <div className="absolute inset-0 bg-black/50" onClick={onCancel} aria-hidden="true" />
-      <div role="alertdialog" aria-modal="true" className="relative z-10 w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl">
+      <div role="alertdialog" aria-modal="true" className="relative z-10 w-full max-w-sm rounded-2xl bg-surface p-5 shadow-2xl">
         <h2 className="text-sm font-semibold">删除这个 MCP Server 连接？</h2>
         <p className="mt-1.5 text-sm text-text-secondary">此操作不可撤销。</p>
         <div className="mt-4 flex justify-end gap-2">
@@ -117,7 +117,7 @@ export default function MCPPage() {
         连接外部 MCP（Model Context Protocol）server，把它暴露的工具接入 agent 的工具集。
       </p>
 
-      <div className="mb-6 rounded-xl border border-border bg-white p-4">
+      <div className="mb-6 rounded-xl border border-border bg-surface p-4">
         <h2 className="mb-3 text-sm font-medium">添加 MCP Server</h2>
         <div className="space-y-2">
           <input
@@ -171,7 +171,7 @@ export default function MCPPage() {
         {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
       </div>
 
-      <div className="rounded-xl border border-border bg-white p-4">
+      <div className="rounded-xl border border-border bg-surface p-4">
         <h2 className="mb-3 text-sm font-medium">已配置的 Server</h2>
         {servers.length === 0 ? (
           <p className="text-sm text-text-secondary">还没有配置任何 MCP Server。</p>

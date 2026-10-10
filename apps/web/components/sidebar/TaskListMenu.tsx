@@ -88,7 +88,7 @@ export function TaskListMenu({ task, projects, onShare, onClose, onRename, onOpe
       ref={menuRef}
       role="menu"
       aria-label={`任务「${task.title || "未命名任务"}」操作`}
-      className={`absolute right-2 z-10 w-44 rounded-lg border border-border bg-white p-1 shadow-lg ${flipUp ? "bottom-full mb-1" : "top-full mt-1"}`}
+      className={`absolute right-2 z-10 w-44 rounded-lg border border-border bg-surface p-1 shadow-lg ${flipUp ? "bottom-full mb-1" : "top-full mt-1"}`}
     >
       <MenuItem
         icon={shareState === "copied" ? <CheckIcon /> : <ShareIcon />}
@@ -154,7 +154,7 @@ export function TaskListMenu({ task, projects, onShare, onClose, onRename, onOpe
                 autoFocus
                 aria-label="新建项目名称"
                 placeholder="项目名称"
-                className="w-full rounded border border-border bg-white px-2 py-1 text-sm outline-none focus:border-accent"
+                className="w-full rounded border border-border bg-surface px-2 py-1 text-sm outline-none focus:border-accent"
               />
             ) : (
               <button type="button" role="menuitem" className={subItemCls} onClick={() => setCreatingProject(true)}>

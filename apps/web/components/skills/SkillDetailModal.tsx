@@ -101,7 +101,7 @@ export function SkillDetailModal({ open, onClose, skill, onToggleAdded }: SkillD
         role="dialog"
         aria-modal="true"
         aria-label={skill.name}
-        className="relative z-10 mt-[8vh] flex max-h-[80vh] w-full max-w-2xl flex-col rounded-2xl bg-white shadow-2xl"
+        className="relative z-10 mt-[8vh] flex max-h-[80vh] w-full max-w-2xl flex-col rounded-2xl bg-surface shadow-2xl"
       >
         {contentOpen ? (
           <>

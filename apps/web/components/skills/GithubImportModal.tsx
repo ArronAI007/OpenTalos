@@ -110,7 +110,7 @@ export function GithubImportModal({ open, onClose, onImported }: GithubImportMod
         role="dialog"
         aria-modal="true"
         aria-label="从 GitHub 导入"
-        className="relative z-10 mt-[15vh] w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"
+        className="relative z-10 mt-[15vh] w-full max-w-md rounded-2xl bg-surface p-6 shadow-2xl"
       >
         <button
           type="button"

@@ -12,7 +12,7 @@ export default function AgentsPage() {
       <p className="mb-4 text-sm text-text-secondary">在首页或任务页顶部的下拉中选择类型，新建任务将使用该类型。</p>
       <ul className="grid gap-3">
         {TYPES.map((t) => (
-          <li key={t.key} className="rounded-lg border border-border bg-white p-4">
+          <li key={t.key} className="rounded-lg border border-border bg-surface p-4">
             <p className="text-sm font-medium">{t.key}</p>
             <p className="mt-1 text-sm text-text-secondary"><strong>{t.name}</strong> — {t.desc}</p>
           </li>

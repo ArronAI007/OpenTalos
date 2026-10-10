@@ -158,7 +158,7 @@ export function UserActionRow({ content, completedAt, taskId, busy, onEdit, onDe
             ref={panelRef}
             role="menu"
             aria-label="提问操作"
-            className={`absolute right-0 z-10 w-32 rounded-lg border border-border bg-white p-1 shadow-lg ${flipUp ? "bottom-full mb-1" : "top-full mt-1"}`}
+            className={`absolute right-0 z-10 w-32 rounded-lg border border-border bg-surface p-1 shadow-lg ${flipUp ? "bottom-full mb-1" : "top-full mt-1"}`}
           >
             <button
               type="button"

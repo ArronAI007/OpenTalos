@@ -25,7 +25,7 @@ export function Logo() {
     <Link
       href="/"
       aria-label="OpenTalos 首页"
-      className="flex items-center gap-2 rounded-lg px-1 py-1 hover:bg-white"
+      className="flex items-center gap-2 rounded-lg px-1 py-1 hover:bg-surface"
     >
       <LogoMark />
       <span className="text-[15px] font-semibold tracking-tight">OpenTalos</span>

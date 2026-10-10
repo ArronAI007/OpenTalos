@@ -22,7 +22,7 @@ export function ProjectFolder({ project, tasks, renderTask }: ProjectFolderProps
         aria-label={`项目文件夹 ${project.name}`}
         aria-expanded={expanded}
         onClick={() => setExpanded(!expanded)}
-        className="flex w-full items-center gap-1.5 rounded-lg px-3 py-1.5 text-left text-xs text-text-secondary hover:bg-white"
+        className="flex w-full items-center gap-1.5 rounded-lg px-3 py-1.5 text-left text-xs text-text-secondary hover:bg-surface"
       >
         {expanded ? <ChevronDownIcon width={12} height={12} /> : <ChevronRightIcon width={12} height={12} />}
         <FolderIcon width={12} height={12} />

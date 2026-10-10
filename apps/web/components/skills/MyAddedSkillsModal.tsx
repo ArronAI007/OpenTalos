@@ -51,7 +51,7 @@ export function MyAddedSkillsModal({ open, onClose, skills, onToggleAdded, onImp
         role="dialog"
         aria-modal="true"
         aria-label="已添加的技能"
-        className="relative z-10 mt-[6vh] flex max-h-[85vh] w-full max-w-4xl flex-col rounded-2xl bg-white p-6 shadow-2xl"
+        className="relative z-10 mt-[6vh] flex max-h-[85vh] w-full max-w-4xl flex-col rounded-2xl bg-surface p-6 shadow-2xl"
       >
         <button
           type="button"

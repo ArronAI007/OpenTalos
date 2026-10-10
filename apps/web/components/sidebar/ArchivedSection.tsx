@@ -14,14 +14,14 @@ interface ArchivedSectionProps {
 // 侧栏底部「已归档」折叠区：默认折叠；展开后由父组件拉取归档任务。
 // 行内只放恢复/删除两个图标按钮，不复用任务菜单。
 export function ArchivedSection({ expanded, tasks, onToggle, onRestore, onDelete }: ArchivedSectionProps) {
-  const iconBtn = "rounded p-1 text-text-secondary hover:bg-white hover:text-text";
+  const iconBtn = "rounded p-1 text-text-secondary hover:bg-surface hover:text-text";
   return (
     <div className="mt-2 border-t border-border pt-1">
       <button
         type="button"
         aria-expanded={expanded}
         onClick={onToggle}
-        className="flex w-full items-center gap-1.5 rounded-lg px-3 py-1.5 text-left text-xs text-text-secondary hover:bg-white"
+        className="flex w-full items-center gap-1.5 rounded-lg px-3 py-1.5 text-left text-xs text-text-secondary hover:bg-surface"
       >
         {expanded ? <ChevronDownIcon width={12} height={12} /> : <ChevronRightIcon width={12} height={12} />}
         已归档
@@ -33,7 +33,7 @@ export function ArchivedSection({ expanded, tasks, onToggle, onRestore, onDelete
             <li className="px-3 py-1 text-xs text-text-secondary">暂无已归档任务</li>
           )}
           {(tasks ?? []).map((task) => (
-            <li key={task.id} className="flex items-center gap-1 rounded-lg px-3 py-1.5 hover:bg-white">
+            <li key={task.id} className="flex items-center gap-1 rounded-lg px-3 py-1.5 hover:bg-surface">
               <span className="min-w-0 flex-1 truncate text-sm">{task.title || "（未命名任务）"}</span>
               <button type="button" aria-label="恢复任务" title="恢复任务" onClick={() => onRestore(task)} className={iconBtn}>
                 <ArchiveRestoreIcon width={14} height={14} />

@@ -42,7 +42,7 @@ export function CreateSkillMenu({ onImported, label = "创建我的专属技能"
       <button
         type="button"
         onClick={() => setMenuOpen((v) => !v)}
-        className="flex items-center gap-1.5 rounded-lg border border-border bg-white px-3 py-1.5 text-sm font-medium hover:bg-gray-50"
+        className="flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm font-medium hover:bg-gray-50"
       >
         {label}
         <ChevronDownIcon width={14} height={14} />
@@ -51,7 +51,7 @@ export function CreateSkillMenu({ onImported, label = "创建我的专属技能"
       {menuOpen && (
         <div
           role="menu"
-          className="absolute right-0 z-20 mt-1 w-56 rounded-xl border border-border bg-white p-1.5 shadow-lg"
+          className="absolute right-0 z-20 mt-1 w-56 rounded-xl border border-border bg-surface p-1.5 shadow-lg"
         >
           <button
             type="button"

@@ -69,7 +69,7 @@ function ConfirmDeleteRunDialog({
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="delete-agentrl-run-dialog-title"
-        className="relative z-10 w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl"
+        className="relative z-10 w-full max-w-sm rounded-2xl bg-surface p-5 shadow-2xl"
       >
         <h2 id="delete-agentrl-run-dialog-title" className="text-sm font-semibold">
           删除这条训练记录？
@@ -148,7 +148,7 @@ export default function AgentRLPage() {
         在 Qwen3-0.6B 上跑一次真实的 SFT→GRPO 训练演示（CPU，分钟级，规模很小——仅用于展示流程）。
       </p>
 
-      <div className="mb-6 rounded-xl border border-border bg-white p-4">
+      <div className="mb-6 rounded-xl border border-border bg-surface p-4">
         <h2 className="mb-3 text-sm font-medium">训练配置</h2>
         <div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
           {(Object.keys(DEFAULTS) as (keyof typeof DEFAULTS)[]).map((key) => (
@@ -171,7 +171,7 @@ export default function AgentRLPage() {
         {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
       </div>
 
-      <div className="rounded-xl border border-border bg-white p-4">
+      <div className="rounded-xl border border-border bg-surface p-4">
         <h2 className="mb-3 text-sm font-medium">训练记录</h2>
         {runs.length === 0 ? (
           <p className="text-sm text-text-secondary">还没有训练记录。</p>

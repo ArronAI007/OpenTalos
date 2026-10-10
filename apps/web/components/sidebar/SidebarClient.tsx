@@ -52,7 +52,7 @@ export function NewTaskButton({ busy, error, onCreate }: NewTaskButtonProps) {
       <button
         onClick={onCreate}
         disabled={busy}
-        className="mb-2 rounded-lg border border-border bg-white px-3 py-2 text-left text-sm font-medium hover:border-text-secondary disabled:opacity-50"
+        className="mb-2 rounded-lg border border-border bg-surface px-3 py-2 text-left text-sm font-medium hover:border-text-secondary disabled:opacity-50"
       >
         ＋ 新建任务
       </button>
@@ -70,7 +70,7 @@ interface SidebarRailProps {
 }
 
 export function SidebarRail({ busy, onCreate, onExpand, onOpenSearch, className }: SidebarRailProps) {
-  const iconBtn = "rounded-lg p-1.5 text-text-secondary hover:bg-white hover:text-text";
+  const iconBtn = "rounded-lg p-1.5 text-text-secondary hover:bg-surface hover:text-text";
   return (
     <nav aria-label="主导航" className={`flex w-14 shrink-0 flex-col items-center gap-1 border-r border-border bg-sidebar p-2 ${className ?? ""}`}>
       <button type="button" aria-label="打开侧栏" title="打开侧栏" onClick={onExpand} className={iconBtn}>
@@ -301,7 +301,7 @@ export function TaskList() {
               autoFocus
               onFocus={(e) => e.target.select()}
               aria-label="重命名任务"
-              className="w-full rounded border border-border bg-white px-2 py-1 text-sm outline-none focus:border-accent"
+              className="w-full rounded border border-border bg-surface px-2 py-1 text-sm outline-none focus:border-accent"
             />
             {editError && <p className="mt-1 text-xs text-red-500">{editError}</p>}
           </div>
@@ -312,7 +312,7 @@ export function TaskList() {
               // pr-8（而非 px-3 两侧统一）：右侧要给悬浮出现的 ⋯ 按钮（absolute right-2，约
               // 28px 宽）留出净空，否则标题的 truncate 省略号会截到按钮的位置，悬浮时两处
               // 的"点点"重叠在一起，视觉上看起来像三个点在随鼠标移动时跳动/漂移。
-              className={`block rounded-lg py-2 pl-3 pr-8 text-sm hover:bg-white ${active ? "bg-white font-medium" : ""}`}
+              className={`block rounded-lg py-2 pl-3 pr-8 text-sm hover:bg-surface ${active ? "bg-surface font-medium" : ""}`}
             >
               <span className="flex items-center gap-1.5">
                 {task.pinned && (

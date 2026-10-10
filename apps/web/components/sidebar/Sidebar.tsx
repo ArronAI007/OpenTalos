@@ -22,7 +22,7 @@ interface SidebarProps {
   onCloseMobile: () => void;
 }
 
-const navLinkCls = "flex items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-white";
+const navLinkCls = "flex items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-surface";
 
 export function Sidebar({ collapsed, mobileOpen, onToggleCollapse, onCloseMobile }: SidebarProps) {
   const [searchOpen, setSearchOpen] = useState(false);
@@ -65,7 +65,7 @@ export function Sidebar({ collapsed, mobileOpen, onToggleCollapse, onCloseMobile
             type="button"
             aria-label="关闭导航"
             onClick={onCloseMobile}
-            className="rounded-lg p-1.5 text-text-secondary hover:bg-white"
+            className="rounded-lg p-1.5 text-text-secondary hover:bg-surface"
           >
             <XIcon />
           </button>

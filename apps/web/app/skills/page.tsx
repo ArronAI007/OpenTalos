@@ -70,7 +70,7 @@ export default function SkillsPage() {
           <button
             type="button"
             onClick={() => setMyAddedOpen(true)}
-            className="rounded-lg border border-border bg-white px-3 py-1.5 text-sm font-medium hover:bg-gray-50"
+            className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm font-medium hover:bg-gray-50"
           >
             我的技能
           </button>
@@ -78,7 +78,7 @@ export default function SkillsPage() {
         </div>
       </div>
 
-      <div className="mb-4 flex items-center gap-2 rounded-lg border border-border bg-white px-3 py-2">
+      <div className="mb-4 flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2">
         <SearchIcon width={16} height={16} className="shrink-0 text-text-secondary" />
         <input
           value={query}

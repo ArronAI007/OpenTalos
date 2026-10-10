@@ -67,7 +67,7 @@ export function Composer({
       className="p-4"
       onSubmit={(event) => { event.preventDefault(); submit(); }}
     >
-      <div className="mx-auto flex max-w-3xl items-end gap-2 rounded-composer border border-border bg-white px-4 py-2">
+      <div className="mx-auto flex max-w-3xl items-end gap-2 rounded-composer border border-border bg-surface px-4 py-2">
         <textarea
           ref={textareaRef}
           rows={1}

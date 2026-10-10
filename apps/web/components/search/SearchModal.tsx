@@ -74,7 +74,7 @@ export function SearchModal({ open, onClose }: SearchModalProps) {
         role="dialog"
         aria-modal="true"
         aria-label="搜索任务"
-        className="relative z-10 mt-[15vh] flex max-h-[75vh] w-full max-w-xl flex-col rounded-2xl bg-white p-3 shadow-2xl"
+        className="relative z-10 mt-[15vh] flex max-h-[75vh] w-full max-w-xl flex-col rounded-2xl bg-surface p-3 shadow-2xl"
       >
         {/* 顶部搜索行 */}
         <div className="flex items-center gap-2 border-b border-border pb-2">
