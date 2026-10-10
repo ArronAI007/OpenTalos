@@ -86,12 +86,18 @@ async def execute_script(
     input_text: str | None,
     timeout_ms: int,
 ) -> ScriptResult:
-    """宿主机子进程直跑脚本（沙箱后续专门重做，现阶段只面向本地聊天场景）。
+    """执行技能脚本。SANDBOX_MODE=docker 时走一次性容器（packages/skill/sandbox.py），
+    否则默认宿主机子进程直跑（面向本地聊天场景）。
 
     script_path 必须已经是 resolve_script_path 校验过的真实路径——这个函数不重复校验，
-    只负责执行。input_text 通过 stdin 传给脚本；没给 input_text 时 stdin 接 DEVNULL，
-    主动读 stdin 的脚本会立即拿到 EOF 而不是挂到超时。
+    只负责执行。宿主机模式下 input_text 通过 stdin 传给脚本；没给 input_text 时 stdin 接
+    DEVNULL，主动读 stdin 的脚本会立即拿到 EOF 而不是挂到超时。
     """
+    if os.environ.get("SANDBOX_MODE", "host").lower() == "docker":
+        from .sandbox import run_in_sandbox
+
+        return await run_in_sandbox(script_path, args, input_text, timeout_ms)
+
     interpreter, _ = resolve_interpreter(script_path)
     process = await asyncio.create_subprocess_exec(
         interpreter,

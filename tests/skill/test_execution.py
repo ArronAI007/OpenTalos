@@ -113,3 +113,24 @@ async def test_execute_script_kills_the_process_on_timeout(tmp_path: Path) -> No
 
     assert result.timed_out is True
     assert result.exit_code == -1
+
+
+async def test_execute_script_routes_to_the_sandbox_when_configured(monkeypatch, tmp_path):
+    import skill.sandbox as sandbox_module
+    from skill.execution import ScriptResult
+
+    seen: list[Path] = []
+
+    async def fake_run_in_sandbox(script_path, args, input_text, timeout_ms):
+        seen.append(script_path)
+        return ScriptResult(stdout="sandboxed", stderr="", exit_code=0, timed_out=False)
+
+    monkeypatch.setattr(sandbox_module, "run_in_sandbox", fake_run_in_sandbox)
+    monkeypatch.setenv("SANDBOX_MODE", "docker")
+    script = tmp_path / "x.py"
+    script.write_text("print(1)", encoding="utf-8")
+
+    result = await execute_script(script, [], None, 1000)
+
+    assert result.stdout == "sandboxed"
+    assert seen == [script]
