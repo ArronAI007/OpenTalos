@@ -7,6 +7,7 @@ from typing import Any
 import httpx
 import pytest
 from core.protocol import Completion, ToolCompletion
+from core.model import ModelClient
 from db import ChatStore
 from main import _sse, create_app
 from runtime import ChatRuntime
@@ -720,3 +721,24 @@ async def test_delete_mcp_server(api) -> None:
 async def test_delete_missing_mcp_server_returns_404(api) -> None:
     resp = await api.delete("/api/mcp/servers/no-such-id")
     assert resp.status_code == 404
+
+
+async def test_app_lifespan_closes_the_runtime_model_client(tmp_path) -> None:
+    client = ModelClient(provider="mock")
+    closed = {"count": 0}
+
+    async def fake_aclose() -> None:
+        closed["count"] += 1
+
+    client.aclose = fake_aclose  # type: ignore[method-assign]
+    runtime = ChatRuntime(
+        ChatStore(tmp_path / "chat.db"),
+        model_client=client,
+        skill_service_url="http://127.0.0.1:1",
+    )
+    app = create_app(runtime)
+
+    async with app.router.lifespan_context(app):
+        pass
+
+    assert closed["count"] == 1

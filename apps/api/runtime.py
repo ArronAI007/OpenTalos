@@ -157,6 +157,14 @@ class ChatRuntime:
             self._model_client = ModelClient()
         return self._model_client
 
+    async def aclose(self) -> None:
+        """释放运行时持有的模型客户端（httpx 连接池）；未构造过则 no-op。
+
+        由应用 lifespan 在进程关闭时调用；ModelClient.aclose 自身幂等，重复调用安全。
+        """
+        if self._model_client is not None:
+            await self._model_client.aclose()
+
     async def suggest_skill_usage(self, name: str, description: str) -> list[str]:
         return await suggest_skill_usage_examples(self._client(), name, description)
 

@@ -7,6 +7,7 @@ from typing import Any
 import httpx
 import pytest
 from core.protocol import Completion, ToolCompletion, ToolInvocation
+from core.model import ModelClient
 from db import ChatStore
 from runtime import ChatRuntime
 
@@ -939,3 +940,24 @@ async def test_subagent_tool_registry_includes_the_other_configured_tools(store,
     subagent_schema_names = {s["function"]["name"] for s in dispatch_tool._subagent_tools.function_schemas()}
     assert "ask_peer_agent" in subagent_schema_names
     assert "dispatch_subagent" not in subagent_schema_names
+
+
+def test_aclose_closes_the_model_client(store, tmp_path) -> None:
+    client = ModelClient(provider="mock")
+    closed = {"count": 0}
+
+    async def fake_aclose() -> None:
+        closed["count"] += 1
+
+    client.aclose = fake_aclose  # type: ignore[method-assign]
+    runtime = _runtime(store, client, tmp_path)
+
+    asyncio.run(runtime.aclose())
+
+    assert closed["count"] == 1
+
+
+def test_aclose_is_a_noop_when_no_model_client_was_constructed(store) -> None:
+    runtime = ChatRuntime(store, model_client=None, skill_service_url="http://127.0.0.1:1")
+
+    asyncio.run(runtime.aclose())  # 懒构造从未发生，不应抛异常

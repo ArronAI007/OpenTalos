@@ -3,6 +3,7 @@ import asyncio
 import json
 import os
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query, UploadFile
@@ -115,7 +116,16 @@ def create_app(runtime: ChatRuntime | None = None, eval_cases_path: Path | None 
         )
     if eval_cases_path is None:
         eval_cases_path = _REPO_ROOT / ".data" / "eval_cases.json"
-    app = FastAPI(title="OpenTalos Chat API")
+
+    @asynccontextmanager
+    async def _lifespan(app: FastAPI):
+        try:
+            yield
+        finally:
+            # 进程关闭时释放 runtime 懒构造的模型客户端（httpx 连接池）。
+            await app.state.runtime.aclose()
+
+    app = FastAPI(title="OpenTalos Chat API", lifespan=_lifespan)
     app.state.runtime = runtime
     cors_origins = [
         origin.strip()
