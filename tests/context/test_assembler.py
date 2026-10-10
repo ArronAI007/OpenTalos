@@ -127,3 +127,81 @@ def test_recency_favors_newer_slices_when_relevance_ties():
     result = assembler.assemble("irrelevant", extra_slices=[old_slice, new_slice])
 
     assert result.index("irrelevant but new") < result.index("irrelevant but old")
+
+
+def _turn(user_content: str, assistant_content: str) -> list[ChatMessage]:
+    return [
+        ChatMessage(content=user_content, role="user"),
+        ChatMessage(content=assistant_content, role="assistant"),
+    ]
+
+
+def test_select_recent_turns_keeps_most_recent_turns_within_budget():
+    assembler = ContextAssembler()
+    turns = [_turn(f"question {i}", f"answer {i}") for i in range(5)]
+    messages = [m for turn in turns for m in turn]
+    one_turn_tokens = assembler._tokens.estimate_messages(turns[-1])
+    budget = one_turn_tokens * 2 + 1  # 刚好够装下最近两轮
+
+    selected = assembler.select_recent_turns(messages, budget)
+
+    assert selected == turns[-2] + turns[-1]
+
+
+def test_select_recent_turns_never_splits_a_tool_call_pair():
+    # 预算小到理论上只能塞下 tool 那一条消息，但筛选是整轮粒度，不能把 tool_calls 和它的
+    # 结果拆开——所以要么整轮三条都在，要么一条都不在（这里断言整轮都在，因为"至少保留
+    # 最新一轮"的保证）。
+    messages = [
+        ChatMessage(content="查一下", role="user"),
+        ChatMessage(
+            content="echoed: hi", role="tool",
+            metadata={"tool_call_id": "c1", "tool_name": "echo", "arguments": '{"text": "hi"}'},
+        ),
+        ChatMessage(content="结果是 hi", role="assistant"),
+    ]
+    assembler = ContextAssembler()
+
+    selected = assembler.select_recent_turns(messages, budget_tokens=1)
+
+    assert selected == messages
+
+
+def test_select_recent_turns_keeps_at_least_the_newest_turn_even_if_it_exceeds_budget():
+    assembler = ContextAssembler()
+    turns = [_turn(f"question {i}", f"answer {i}") for i in range(3)]
+    messages = [m for turn in turns for m in turn]
+
+    selected = assembler.select_recent_turns(messages, budget_tokens=1)
+
+    assert selected == turns[-1]
+
+
+def test_select_recent_turns_returns_empty_for_empty_input():
+    assembler = ContextAssembler()
+    assert assembler.select_recent_turns([], budget_tokens=1000) == []
+
+
+def test_select_recent_turns_preserves_chronological_order():
+    assembler = ContextAssembler()
+    turns = [_turn(f"question {i}", f"answer {i}") for i in range(4)]
+    messages = [m for turn in turns for m in turn]
+    budget = assembler._tokens.estimate_messages(messages) * 10  # 预算远超全部历史
+
+    selected = assembler.select_recent_turns(messages, budget)
+
+    assert selected == messages
+
+
+def test_select_recent_turns_treats_a_leading_non_user_message_as_its_own_turn():
+    messages = [
+        ChatMessage(content="earlier discussion", role="summary"),
+        ChatMessage(content="new question", role="user"),
+        ChatMessage(content="new answer", role="assistant"),
+    ]
+    assembler = ContextAssembler()
+    budget = assembler._tokens.estimate_messages(messages)  # 刚好够装下全部
+
+    selected = assembler.select_recent_turns(messages, budget)
+
+    assert selected == messages

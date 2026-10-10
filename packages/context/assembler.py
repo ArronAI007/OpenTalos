@@ -64,6 +64,34 @@ class ContextAssembler:
         layout = self._layout(selected, user_query)
         return self._condense(layout)
 
+    def select_recent_turns(self, messages: list[MessageLike], budget_tokens: int) -> list[MessageLike]:
+        """按"轮次"（一条 role=="user" 的消息开始，到下一条 user 消息之前的全部内容）为最小
+        粒度做筛选——按时间倒序保留最近几轮直到装满 token 预算，整轮保留或整轮丢弃，从不
+        拆开单轮内部（避免把 tool_calls 和它的工具结果拆散，那样会让 messages 列表对
+        OpenAI/Anthropic 风格的 API 来说是非法请求）。不做关键词相关性打分/MMR 多样性排序
+        ——和 assemble() 那条路径是平行的两套逻辑，互不影响。极端情况（单轮本身就超预算）
+        至少保留最新一轮，不返回空列表（除非输入本来就是空的）。
+        """
+        if not messages:
+            return []
+
+        turn_starts = [i for i, m in enumerate(messages) if m.role == "user"]
+        if not turn_starts or turn_starts[0] != 0:
+            turn_starts = [0, *turn_starts]
+        bounds = list(zip(turn_starts, [*turn_starts[1:], len(messages)]))
+        turns = [messages[start:end] for start, end in bounds]
+
+        kept: list[list[MessageLike]] = []
+        used = 0
+        for turn in reversed(turns):
+            turn_tokens = self._tokens.estimate_messages(turn)
+            if used + turn_tokens > budget_tokens and kept:
+                break
+            kept.append(turn)
+            used += turn_tokens
+        kept.reverse()
+        return [message for turn in kept for message in turn]
+
     def _collect(
         self,
         user_query: str,
