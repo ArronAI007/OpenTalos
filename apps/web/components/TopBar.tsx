@@ -11,7 +11,7 @@ export function TopBar() {
   }, []);
 
   return (
-    <header className="flex items-center justify-end border-b border-border px-4 py-2.5">
+    <header className="hidden items-center justify-end border-b border-border px-4 py-2.5 md:flex">
       <span className="text-xs text-text-secondary">{config?.model_name ?? "模型未配置"}</span>
     </header>
   );

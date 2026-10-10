@@ -66,12 +66,13 @@ interface SidebarRailProps {
   onCreate: () => void;
   onExpand: () => void;
   onOpenSearch: () => void;
+  className?: string;
 }
 
-export function SidebarRail({ busy, onCreate, onExpand, onOpenSearch }: SidebarRailProps) {
+export function SidebarRail({ busy, onCreate, onExpand, onOpenSearch, className }: SidebarRailProps) {
   const iconBtn = "rounded-lg p-1.5 text-text-secondary hover:bg-white hover:text-text";
   return (
-    <nav aria-label="主导航" className="flex w-14 shrink-0 flex-col items-center gap-1 border-r border-border bg-sidebar p-2">
+    <nav aria-label="主导航" className={`flex w-14 shrink-0 flex-col items-center gap-1 border-r border-border bg-sidebar p-2 ${className ?? ""}`}>
       <button type="button" aria-label="打开侧栏" title="打开侧栏" onClick={onExpand} className={iconBtn}>
         <LogoMark />
       </button>

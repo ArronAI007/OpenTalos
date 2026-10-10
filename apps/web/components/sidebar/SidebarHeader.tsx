@@ -25,7 +25,7 @@ export function SidebarHeader({ onOpenSearch, onToggleCollapse }: SidebarHeaderP
           type="button"
           aria-label="折叠侧栏"
           onClick={onToggleCollapse}
-          className="rounded-lg p-1.5 text-text-secondary hover:bg-white hover:text-text"
+          className="hidden rounded-lg p-1.5 text-text-secondary hover:bg-white hover:text-text md:inline-flex"
         >
           <PanelLeftCloseIcon />
         </button>
