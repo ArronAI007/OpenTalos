@@ -28,6 +28,8 @@ export function Composer({
   const isControlled = onChange !== undefined;
   const value = isControlled ? (controlledValue ?? "") : internalValue;
   const setValue = isControlled ? onChange : setInternalValue;
+  // 运行中（disabled 且有 onStop）：允许继续输入并以“纠偏”语义提交。
+  const steering = disabled && onStop !== undefined;
 
   // focusNonce 变化时聚焦并把光标挪到末尾（编辑回填场景：文本已就位，缺少的是焦点）
   useEffect(() => {
@@ -50,7 +52,10 @@ export function Composer({
 
   const submit = () => {
     const text = value.trim();
-    if (!text || disabled) return;
+    if (!text) return;
+    // disabled 且不可中断（如首页建任务 busy、无 onStop）时不允许提交；
+    // disabled 且有 onStop（任务页运行中）= steering：允许提交。
+    if (disabled && !steering) return;
     // 受控模式由父组件（HomeComposer）决定何时清空，失败时才能保留草稿；
     // 非受控模式保持“提交即清空”的原有行为（任务页复用）。
     if (!isControlled) setValue("");
@@ -77,12 +82,12 @@ export function Composer({
             event.preventDefault(); // 阻止换行插入，走发送
             submit();
           }}
-          disabled={disabled}
-          placeholder="给 OpenTalos 发任务…"
+          disabled={disabled && !steering}
+          placeholder={steering ? "补充指令以纠偏…" : "给 OpenTalos 发任务…"}
           className="max-h-40 flex-1 resize-none overflow-y-auto bg-transparent text-base leading-6 outline-none disabled:opacity-50"
           aria-label="输入消息"
         />
-        {disabled && onStop ? (
+        {disabled && onStop && (
           <button
             type="button"
             onClick={onStop}
@@ -91,15 +96,14 @@ export function Composer({
           >
             ■
           </button>
-        ) : (
-          <button
-            type="submit"
-            disabled={disabled || !value.trim()}
-            className="rounded-full bg-user-bubble px-3 py-1.5 text-sm text-white disabled:opacity-30"
-          >
-            ➤
-          </button>
         )}
+        <button
+          type="submit"
+          disabled={!value.trim() || (disabled && !steering)}
+          className="rounded-full bg-user-bubble px-3 py-1.5 text-sm text-white disabled:opacity-30"
+        >
+          ➤
+        </button>
       </div>
     </form>
   );

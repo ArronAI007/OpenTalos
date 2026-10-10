@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { API_URL, deleteTurn as deleteTurnApi, listMessages, respondToApproval as respondToApprovalApi, type StoredMessage } from "./api";
+import { API_URL, deleteTurn as deleteTurnApi, listMessages, respondToApproval as respondToApprovalApi, steerTask, type StoredMessage } from "./api";
 import {
   appendStoppedNotice,
   denyPendingApprovals,
@@ -94,6 +94,22 @@ export function useChat(taskId: string) {
     async (text: string) => {
       const content = text.trim();
       if (!content) return;
+      // 运行中：作为 steering 注入当前轮（乐观加 user 泡，服务端 user_stored 回流校准为 row-N），
+      // 不新起一轮、不开新流。
+      if (busy) {
+        setMessages((prev) => [
+          ...dropSuggestions(dropStoppedNotice(prev)),
+          { id: nextUiId(prev), kind: "user", content, completedAt: Date.now() },
+        ]);
+        const steered = await steerTask(taskId, content).catch(() => false);
+        if (!steered) {
+          setMessages((prev) => [
+            ...prev,
+            { id: nextUiId(prev), kind: "error", content: "纠偏失败：当前没有进行中的回复，请重试" },
+          ]);
+        }
+        return;
+      }
       // 新一轮发送清掉上一轮的"已停止"提示行与跟进问题推荐（两者都已过时）。
       // user 泡乐观带上本地时刻（操作行据此显示时间）；user_stored 回执到后即校准为服务端时间。
       doneRef.current = false;
@@ -138,7 +154,7 @@ export function useChat(taskId: string) {
         setBusy(false);
       }
     },
-    [taskId],
+    [busy, taskId],
   );
 
   // 删除整轮问答（目标 user 行 + 其后直到下一 user 前的所有行）：先服务端后本地，

@@ -1020,6 +1020,43 @@ def test_aclose_is_a_noop_when_no_model_client_was_constructed(store) -> None:
     asyncio.run(runtime.aclose())  # 懒构造从未发生，不应抛异常
 
 
+def test_steer_without_active_run_returns_false(store) -> None:
+    runtime = ChatRuntime(store, model_client=ModelClient(provider="mock"), skill_service_url="http://127.0.0.1:1")
+
+    assert asyncio.run(runtime.steer("t1", "改用中文")) is False
+
+
+async def test_steer_appends_a_user_row_and_emits_user_stored(store, scripted_client, tmp_path) -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+    client = scripted_client(tool_completions=[])
+
+    async def slow_stream(messages, tools, on_text_delta=None, on_reasoning_delta=None, **kwargs):
+        started.set()
+        await release.wait()
+        return ToolCompletion(text="完成", requested_tools=[], model_id="mock-model")
+
+    client.astream_with_tools = slow_stream  # type: ignore[method-assign]
+    runtime = _runtime(store, client, tmp_path)
+    task = store.create_task("react")
+    store.update_task(task["id"], title="已有标题")
+
+    async def scenario() -> list[dict[str, Any]]:
+        gen = runtime.stream_reply(task["id"], "原始问题")
+        await gen.__anext__()  # user_stored
+        await started.wait()  # 运行已开始，模型阻塞中
+        assert await runtime.steer(task["id"], "改用中文") is True
+        release.set()
+        return [event async for event in gen]
+
+    events = await scenario()
+
+    user_rows = [r for r in store.list_messages(task["id"]) if r["kind"] == "user"]
+    assert [r["content"] for r in user_rows] == ["原始问题", "改用中文"]
+    # 运行中注入的 user_stored 也通过 SSE 下发（前端据此把乐观泡换成 row-N）
+    assert any(e["type"] == "user_stored" for e in events)
+
+
 class _HangingTool(Tool):
     def __init__(self) -> None:
         super().__init__(name="hang", description="Never returns before the timeout.")

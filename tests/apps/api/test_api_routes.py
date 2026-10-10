@@ -768,3 +768,9 @@ async def test_resolve_unknown_approval_returns_404(api) -> None:
     task = (await api.post("/api/tasks", json={"agent_type": "react"})).json()
     resp = await api.post(f"/api/tasks/{task['id']}/approvals/nope", json={"approved": True})
     assert resp.status_code == 404
+
+
+async def test_steer_without_active_turn_returns_409(api) -> None:
+    task = (await api.post("/api/tasks", json={"agent_type": "react"})).json()
+    resp = await api.post(f"/api/tasks/{task['id']}/steer", json={"content": "改用中文"})
+    assert resp.status_code == 409

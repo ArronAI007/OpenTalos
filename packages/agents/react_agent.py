@@ -76,11 +76,21 @@ class ReActAgent(Agent):
     async def arespond(self, input_text: str, **kwargs: object) -> str:
         cancellation: CancellationToken | None = kwargs.pop("cancellation", None)
         on_text_delta: Callable[[str], Awaitable[None]] | None = kwargs.pop("on_text_delta", None)
+        # 运行中的"打断纠偏"：每步开头排空待注入的用户消息（由 runtime 提供）。
+        drain_steer: Callable[[], list[str]] | None = kwargs.pop("drain_steer", None)
         messages = self.build_messages(input_text)
+        # 本轮 user 先记入 transcript（在工具结果之前）——保证重放/后续轮次的顺序正确，
+        # 也让中途 steer 的 user 消息排在本轮提问之后。
+        self.record_message(ChatMessage(content=input_text, role="user"))
         tools = self._tool_schemas()
         answer: str | None = None
 
         for step in range(1, self.max_steps + 1):
+            if drain_steer is not None:
+                for steer in drain_steer():
+                    if steer.strip():
+                        messages.append({"role": "user", "content": steer})
+                        self.record_message(ChatMessage(content=steer, role="user"))
 
             async def handle_invocation(invocation: ToolInvocation, step: int = step) -> dict[str, str]:
                 return await self._handle(invocation, step)
@@ -111,7 +121,6 @@ class ReActAgent(Agent):
         if answer is None:
             answer = STEP_LIMIT_MESSAGE
 
-        self.record_message(ChatMessage(content=input_text, role="user"))
         self.record_message(ChatMessage(content=answer, role="assistant"))
         return answer
 

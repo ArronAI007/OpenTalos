@@ -287,6 +287,15 @@ def create_app(runtime: ChatRuntime | None = None, eval_cases_path: Path | None 
 
         return StreamingResponse(event_stream(), media_type="text/event-stream")
 
+    @app.post("/api/tasks/{task_id}/steer")
+    async def steer_turn(task_id: str, request: PostMessageRequest) -> dict:
+        if store.get_task(task_id) is None:
+            raise HTTPException(404, "task not found")
+        # 无进行中的运行时 409：前端据此改走普通发送（新起一轮）。
+        if not await runtime.steer(task_id, request.content):
+            raise HTTPException(409, "no active turn to steer")
+        return {"ok": True}
+
     @app.get("/api/skills")
     async def list_skills() -> dict:
         from skill.client import SkillClient, SkillServiceError

@@ -92,6 +92,14 @@ def _truncate_title(text: str, limit: int = 40) -> str:
     return text if len(text) <= limit else text[:limit] + "…"
 
 
+def _drain_queue(queue: asyncio.Queue[str]) -> list[str]:
+    """同步排空队列（单事件循环内安全）：供 agent 每步开头取走待注入的 steer 消息。"""
+    items: list[str] = []
+    while not queue.empty():
+        items.append(queue.get_nowait())
+    return items
+
+
 def _mcp_tool_info_from_dict(data: dict) -> MCPToolInfo:
     return MCPToolInfo(name=data["name"], description=data["description"], input_schema=data["input_schema"])
 
@@ -108,6 +116,7 @@ class _LiveRun:
     events: list[dict[str, Any]] = field(default_factory=list)
     condition: asyncio.Condition = field(default_factory=asyncio.Condition)
     stop_event: asyncio.Event = field(default_factory=asyncio.Event)
+    steer: asyncio.Queue[str] = field(default_factory=asyncio.Queue)
     done: bool = False
     finished_at: float | None = None
     runner: asyncio.Task[None] | None = None
@@ -382,6 +391,19 @@ class ChatRuntime:
         self._registries.pop(task_id, None)
         self._task_locks.pop(task_id, None)
 
+    async def steer(self, task_id: str, content: str) -> bool:
+        """运行中注入一条用户消息（打断纠偏）：落 user 行、下发 user_stored、入队待 agent 下一步采用。
+
+        无进行中的运行返回 False（前端据此改走普通发送）。
+        """
+        run = self._runs.get(task_id)
+        if run is None or run.done:
+            return False
+        user_row = await asyncio.to_thread(self._store.append_message, task_id, "user", content)
+        await self._append(run, {"type": "user_stored", "id": user_row["id"], "created_at": user_row["created_at"]})
+        run.steer.put_nowait(content)
+        return True
+
     def _sweep_runs(self) -> None:
         now = time.monotonic()
         for task_id, run in list(self._runs.items()):
@@ -464,6 +486,7 @@ class ChatRuntime:
                     on_text_delta=lambda chunk: emit({"type": "delta", "text": chunk}),
                     on_reasoning_delta=lambda chunk: emit({"type": "reasoning", "text": chunk}),
                     cancellation=cancellation,
+                    drain_steer=lambda: _drain_queue(run.steer),
                 )
             except Exception as exc:  # noqa: BLE001 - 转成 error 事件交给前端
                 error = str(exc)

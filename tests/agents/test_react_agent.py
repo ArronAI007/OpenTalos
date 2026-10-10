@@ -230,3 +230,39 @@ async def test_arespond_asks_for_approval_and_continues_when_denied(scripted_cli
     assert asked == ["danger"]
     assert tool.calls == 0  # 被拒绝，未执行
     assert answer == "moved on"
+
+
+async def test_steering_injects_a_user_message_at_the_next_step(scripted_client, echo_tool_registry):
+    seen: list[list[dict]] = []
+    client = scripted_client(
+        tool_completions=[
+            ToolCompletion(
+                text=None,
+                requested_tools=[ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text": "hi"}')],
+                model_id="mock",
+            ),
+            ToolCompletion(text="done", requested_tools=[], model_id="mock"),
+        ]
+    )
+    original = client.acomplete_with_tools
+
+    async def spy(messages, tools, tool_choice="auto", **kwargs):
+        seen.append([dict(m) for m in messages])
+        return await original(messages, tools, tool_choice, **kwargs)
+
+    client.acomplete_with_tools = spy  # type: ignore[method-assign]
+
+    calls = {"n": 0}
+
+    def drain_steer() -> list[str]:
+        calls["n"] += 1
+        return ["改用中文回答"] if calls["n"] == 2 else []
+
+    agent = ReActAgent(name="bot", model_client=client, tool_registry=echo_tool_registry, max_steps=5)
+    answer = await agent.arespond("原始问题", drain_steer=drain_steer)
+
+    assert answer == "done"
+    assert not any(m.get("content") == "改用中文回答" for m in seen[0])  # 第一步未注入
+    assert any(m.get("content") == "改用中文回答" for m in seen[1])  # 工具调用后注入
+    # transcript 顺序：本轮提问 -> steer
+    assert [m.content for m in agent.history_snapshot() if m.role == "user"] == ["原始问题", "改用中文回答"]

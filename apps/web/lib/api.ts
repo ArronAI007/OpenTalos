@@ -90,6 +90,17 @@ export async function respondToApproval(taskId: string, approvalId: string, appr
     throw new Error(`API ${res.status} ${res.statusText}`);
   }
 }
+export async function steerTask(taskId: string, content: string): Promise<boolean> {
+  // 运行中注入纠偏消息；无活动轮次返回 409 → false（调用方据此提示或改走普通发送）。
+  const res = await fetch(`${API_URL}/api/tasks/${taskId}/steer`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
+  if (res.status === 409) return false;
+  if (!res.ok) throw new Error(`API ${res.status} ${res.statusText}`);
+  return true;
+}
 export async function listProjects(): Promise<Project[]> {
   return fetchJson<{ projects: Project[] }>(`${API_URL}/api/projects`, { cache: "no-store" }).then((d) => d.projects);
 }
