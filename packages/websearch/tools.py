@@ -21,6 +21,7 @@ class WebSearchTool(Tool):
                 "results (title, url, snippet). Use web_extractor to read a result's full "
                 "page content."
             ),
+            untrusted_output=True,
         )
         self._client = client
 
@@ -65,6 +66,7 @@ class WebExtractorTool(Tool):
                 "Fetch the full page content of one or more URLs, typically ones found via "
                 "web_search. Long pages are truncated."
             ),
+            untrusted_output=True,
         )
         self._client = client
 

@@ -41,6 +41,7 @@ class RunSkillScriptTool(Tool):
                 "Use read_skill first to learn the correct script_relative_path and args."
             ),
             requires_approval=True,
+            untrusted_output=True,
         )
         self._client = client
 

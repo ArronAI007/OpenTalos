@@ -157,3 +157,8 @@ def test_web_extractor_schema_types_urls_as_a_required_string_array():
     assert properties["urls"]["type"] == "array"
     assert properties["urls"]["items"] == {"type": "string"}
     assert schema["function"]["parameters"]["required"] == ["urls"]
+
+
+def test_web_tools_mark_their_output_untrusted():
+    assert WebSearchTool(_build_client(_search_handler)).untrusted_output is True
+    assert WebExtractorTool(_build_client(_extract_handler)).untrusted_output is True

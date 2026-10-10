@@ -13,6 +13,7 @@ class A2ATool(Tool):
         super().__init__(
             name="ask_peer_agent",
             description="Ask another OpenTalos agent instance a question over the A2A protocol and get its reply.",
+            untrusted_output=True,
         )
         self._peer_url = peer_url
 

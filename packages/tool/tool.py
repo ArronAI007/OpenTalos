@@ -16,11 +16,21 @@ class ToolParameter:
 
 
 class Tool(ABC):
-    def __init__(self, name: str, description: str, *, requires_approval: bool = False) -> None:
+    def __init__(
+        self,
+        name: str,
+        description: str,
+        *,
+        requires_approval: bool = False,
+        untrusted_output: bool = False,
+    ) -> None:
         self.name = name
         self.description = description
         # 副作用/不可撤销工具置 True：执行前必须经人工审批（见 core.agent_loop.resolve_tool_call）。
         self.requires_approval = requires_approval
+        # 输出来自不可信外部（网页/MCP/脚本 stdout/协作 Agent）时置 True：进模型上下文时会被
+        # 包成"仅作数据、不得当作指令"的隔离块（spotlighting），降低 prompt injection 风险。
+        self.untrusted_output = untrusted_output
 
     @abstractmethod
     def parameters(self) -> list[ToolParameter]: ...

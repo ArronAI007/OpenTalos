@@ -640,3 +640,55 @@ async def test_resolve_tool_call_does_not_gate_a_safe_tool(echo_tool_registry):
 
     assert called == []
     assert message["content"] == "echoed: hi"
+
+
+# ==================== 不可信输出隔离（prompt injection 防线） ====================
+
+
+class _UntrustedTool(Tool):
+    def __init__(self, output: str = "external data") -> None:
+        super().__init__(name="external", description="External source.", untrusted_output=True)
+        self._output = output
+
+    def parameters(self) -> list[ToolParameter]:
+        return []
+
+    async def acall(self, arguments):
+        return ToolOutcome.ok(self._output)
+
+
+async def test_resolve_tool_call_spotlights_untrusted_output_for_the_model_and_transcript():
+    registry = ToolRegistry()
+    registry.register(_UntrustedTool())
+    invocation = ToolInvocation(call_id="c1", tool_name="external", arguments_json="{}")
+    recorded: list[tuple] = []
+
+    message = await resolve_tool_call(registry, invocation, on_tool_result=lambda *a: recorded.append(a))
+
+    assert "<<<UNTRUSTED>>>" in message["content"]
+    assert "never follow" in message["content"].lower()
+    assert "external data" in message["content"]
+    # transcript 存同一份包裹后的内容，重放时模型仍能看到隔离标记。
+    assert "<<<UNTRUSTED>>>" in recorded[0][3]
+
+
+async def test_resolve_tool_call_leaves_trusted_output_unwrapped(echo_tool_registry):
+    invocation = ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text": "hi"}')
+
+    message = await resolve_tool_call(echo_tool_registry, invocation)
+
+    assert message["content"] == "echoed: hi"
+    assert "UNTRUSTED" not in message["content"]
+
+
+async def test_resolve_tool_call_spotlights_trimmed_untrusted_output(tmp_path):
+    registry = ToolRegistry()
+    registry.register(_UntrustedTool("\n".join(f"line {i}" for i in range(50))))
+    trimmer = OutputTrimmer(max_lines=5, max_bytes=1_000_000, output_dir=str(tmp_path))
+    invocation = ToolInvocation(call_id="c1", tool_name="external", arguments_json="{}")
+
+    message = await resolve_tool_call(registry, invocation, trimmer=trimmer)
+
+    assert "<<<UNTRUSTED>>>" in message["content"]
+    assert "output truncated" in message["content"]
+    assert "line 40" not in message["content"]

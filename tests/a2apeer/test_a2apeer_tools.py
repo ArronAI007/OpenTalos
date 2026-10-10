@@ -11,6 +11,9 @@ class TestA2ATool:
         assert tool.name == "ask_peer_agent"
         assert "A2A" in tool.description
 
+    def test_output_is_marked_untrusted(self) -> None:
+        assert A2ATool("http://127.0.0.1:1/").untrusted_output is True
+
     def test_parameters(self) -> None:
         params = A2ATool("http://127.0.0.1:1/").parameters()
         assert params[0].name == "question"

@@ -58,6 +58,9 @@ class TestMCPTool:
         assert params[0].name == "city"
         assert params[0].required is True
 
+    def test_output_is_marked_untrusted(self) -> None:
+        assert self._tool().untrusted_output is True
+
     async def test_acall_returns_real_result(self) -> None:
         outcome = await self._tool().acall({"city": "Beijing"})
         assert outcome.status == OutcomeStatus.OK

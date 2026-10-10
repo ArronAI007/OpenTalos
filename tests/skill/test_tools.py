@@ -91,3 +91,9 @@ def test_run_skill_script_schema_types_args_as_a_string_array():
     assert "skill_name" in required
     assert "script_relative_path" in required
     assert "args" not in required
+
+
+def test_script_output_is_untrusted_but_skill_docs_stay_trusted():
+    # 脚本 stdout 是不可信外部数据；而 SKILL.md 本就是给模型看的指令，不能当成注入内容隔离。
+    assert RunSkillScriptTool(_build_client(_ok_skill_handler)).untrusted_output is True
+    assert ReadSkillTool(_build_client(_ok_skill_handler)).untrusted_output is False
