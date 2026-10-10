@@ -17,6 +17,10 @@ if TYPE_CHECKING:
 
 _ENCODING = "utf-8"
 
+# /eval 页面的类型对比标签——纯展示/校验用的字符串列表，不再驱动任何实际的 agent 构造
+# （collapse 成单一 ReActAgent 之后，这几个字符串跑起来行为完全一样）。
+EVAL_AGENT_TYPES = ["toolcall", "react", "reflection", "plan_execute"]
+
 
 class EvalCase(BaseModel):
     id: str

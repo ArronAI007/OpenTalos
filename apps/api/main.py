@@ -15,11 +15,11 @@ _PACKAGES_DIR = _REPO_ROOT / "packages"
 if str(_PACKAGES_DIR) not in sys.path:
     sys.path.insert(0, str(_PACKAGES_DIR))
 
-from agents.builder import AGENT_TYPES  # noqa: E402
 from db import ChatStore  # noqa: E402
 from deepresearch import run_research, start_live_run, stream_run_events  # noqa: E402
 from mcpclient.client import MCPConnectionError, MCPServerConfig, connect_and_list_tools  # noqa: E402
 from evaluation import (  # noqa: E402
+    EVAL_AGENT_TYPES,
     add_eval_case,
     load_eval_cases,
     remove_eval_case,
@@ -29,7 +29,7 @@ from runtime import ChatRuntime  # noqa: E402
 
 
 class CreateTaskRequest(BaseModel):
-    agent_type: str
+    pass
 
 
 class PostMessageRequest(BaseModel):
@@ -141,7 +141,7 @@ def create_app(runtime: ChatRuntime | None = None, eval_cases_path: Path | None 
             pass
         return {
             "model_name": model_name,
-            "agent_types": sorted(AGENT_TYPES.keys()),
+            "agent_types": EVAL_AGENT_TYPES,
             "skills_reachable": runtime.skills_reachable,
         }
 
@@ -155,9 +155,7 @@ def create_app(runtime: ChatRuntime | None = None, eval_cases_path: Path | None 
 
     @app.post("/api/tasks", status_code=201)
     async def create_task(request: CreateTaskRequest) -> dict:
-        if request.agent_type not in AGENT_TYPES:
-            raise HTTPException(422, f"unknown agent_type: {request.agent_type}")
-        return store.create_task(request.agent_type)
+        return store.create_task("react")
 
     @app.patch("/api/tasks/{task_id}")
     async def update_task(task_id: str, request: UpdateTaskRequest) -> dict:
@@ -331,7 +329,7 @@ def create_app(runtime: ChatRuntime | None = None, eval_cases_path: Path | None 
     @app.post("/api/eval/run")
     async def run_eval_route(request: EvalRunBody) -> dict:
         for agent_type in request.agent_types:
-            if agent_type not in AGENT_TYPES:
+            if agent_type not in EVAL_AGENT_TYPES:
                 raise HTTPException(422, f"unknown agent_type: {agent_type}")
         all_cases = {c.id: c for c in load_eval_cases(eval_cases_path)}
         cases = [all_cases[cid] for cid in request.case_ids if cid in all_cases]

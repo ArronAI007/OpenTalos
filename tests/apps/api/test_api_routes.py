@@ -213,11 +213,6 @@ async def test_patch_task_flag_regression_with_project_field(api) -> None:
     assert resp.json()["project_id"] is None
 
 
-async def test_post_invalid_agent_type_422(api) -> None:
-    resp = await api.post("/api/tasks", json={"agent_type": "nope"})
-    assert resp.status_code == 422
-
-
 async def test_message_sse_flow_and_persistence(api) -> None:
     task = (await api.post("/api/tasks", json={"agent_type": "react"})).json()
     async with api.stream("POST", f"/api/tasks/{task['id']}/messages", json={"content": "ping"}) as resp:
