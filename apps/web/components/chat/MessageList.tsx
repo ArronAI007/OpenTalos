@@ -10,24 +10,26 @@ import { LogoMark } from "@/components/sidebar/Logo";
 import { CirclePauseIcon } from "@/components/ui/icons";
 import { formatDateTimeCN } from "@/lib/format-time";
 import { CopyReplyButton } from "./CopyReplyButton";
-import { ReasoningBubble } from "./ReasoningBubble";
+import { ThinkingBubble, type ThinkingItem } from "./ThinkingBubble";
 import { UserActionRow } from "./UserActionRow";
 
-function ToolBubble({ message }: { message: Extract<UiMessage, { kind: "tool" }> }) {
-  const argsPreview = Object.entries(message.arguments)
-    .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
-    .join(", ");
-  return (
-    <details className="mx-auto w-full max-w-xl rounded-lg border border-border bg-sidebar px-3 py-2 text-xs text-text-secondary">
-      <summary className="cursor-pointer select-none">
-        🔧 {message.name}({argsPreview})
-        {message.ok !== undefined && (message.ok ? " ✓" : " ✗")}
-      </summary>
-      {message.result !== undefined && (
-        <pre className="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap break-all">{message.result}</pre>
-      )}
-    </details>
-  );
+// 从 start 起收集连续的 reasoning/tool —— 一个"思考过程"单元（自然语言思路 + 其中的工具动作）。
+function thinkingRunFrom(messages: UiMessage[], start: number): { items: ThinkingItem[]; end: number } {
+  const items: ThinkingItem[] = [];
+  let i = start;
+  while (i < messages.length && (messages[i].kind === "reasoning" || messages[i].kind === "tool")) {
+    items.push(messages[i] as ThinkingItem);
+    i++;
+  }
+  return { items, end: i };
+}
+
+// 思考单元是否仍在进行：有流式思维链/未返回的工具，或它位于列表末尾且整轮仍 busy。
+function isThinkingStreaming(items: ThinkingItem[], busy: boolean, isLast: boolean): boolean {
+  if (items.some((m) => (m.kind === "reasoning" && m.streaming) || (m.kind === "tool" && m.result === undefined))) {
+    return true;
+  }
+  return busy && isLast;
 }
 
 // 回复块品牌头：assistant 回复带；孤立的「已停止」提示（未流出内容即停）作为唯一可见块也带，
@@ -108,15 +110,24 @@ export function MessageList({
         if (message.kind === "assistant") {
           // 紧跟其后的 stopped（本轮有内容流出后被停止）并入本回复块渲染，品牌头一轮只出现一次
           const followedByStopped = messages[index + 1]?.kind === "stopped";
-          // 紧邻前一条的思维链并入本回复块（品牌头之后、正文之前），reasoning 行本身不再单列
-          const prevLine = index > 0 ? messages[index - 1] : undefined;
-          const reasoning = prevLine?.kind === "reasoning" ? prevLine : undefined;
+          // 紧邻本回复块之前的整段"思考单元"（reasoning/tool 连续段）并入本块，品牌头之后、正文之前统一渲染
+          let thinkingStart = index;
+          while (
+            thinkingStart > 0 &&
+            (messages[thinkingStart - 1].kind === "reasoning" || messages[thinkingStart - 1].kind === "tool")
+          ) {
+            thinkingStart--;
+          }
+          const thinking = messages.slice(thinkingStart, index) as ThinkingItem[];
+          const thinkingStreaming = thinking.some(
+            (m) => (m.kind === "reasoning" && m.streaming) || (m.kind === "tool" && m.result === undefined),
+          );
           return (
             <li key={message.id} className={`${rowCls} group`}>
               <div className="max-w-[85%] text-base leading-6">
                 {/* 每条回复带品牌头（流式与历史同等处理），对齐 Manus 版式 */}
                 <BrandHeader />
-                {reasoning && <ReasoningBubble content={reasoning.content} streaming={reasoning.streaming} />}
+                {thinking.length > 0 && <ThinkingBubble items={thinking} streaming={thinkingStreaming} />}
                 <div className="md">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
                 </div>
@@ -144,17 +155,23 @@ export function MessageList({
             </li>
           );
         }
-        if (message.kind === "reasoning") {
-          // 紧跟 assistant 的思维链已并入该回复块，这里不再单列；孤立的思维链（思考中被停止、
-          // 正文尚未流出）自成一行——此时它是本轮唯一可见的响应块，带头（与孤立 stopped 同处理），
-          // 紧跟的停止提示也并入本块收尾，品牌头仍只出现一次
-          const followedByStopped = messages[index + 1]?.kind === "stopped";
-          if (!followedByStopped && messages[index + 1]?.kind === "assistant") return null;
+        if (message.kind === "reasoning" || message.kind === "tool") {
+          // 同一思考单元只在起始行渲染一次；其余行（后续 reasoning/tool）由起始行统一渲染
+          const prev = index > 0 ? messages[index - 1] : undefined;
+          const isRunStart = prev === undefined || (prev.kind !== "reasoning" && prev.kind !== "tool");
+          if (!isRunStart) return null;
+          const run = thinkingRunFrom(messages, index);
+          // 紧跟 assistant 的思考单元已并入该回复块，这里不再单列
+          if (run.end < messages.length && messages[run.end].kind === "assistant") return null;
+          // 孤立的思考单元（思考中被停止、正文尚未流出）自成一行——此时它是本轮唯一可见的响应块，
+          // 带头（与孤立 stopped 同处理），紧跟的停止提示也并入本块收尾，品牌头仍只出现一次
+          const followedByStopped = run.end < messages.length && messages[run.end].kind === "stopped";
+          const streaming = isThinkingStreaming(run.items, busy, run.end >= messages.length);
           return (
             <li key={message.id} className={rowCls}>
               <div className="max-w-[85%] text-base leading-6">
                 <BrandHeader />
-                <ReasoningBubble content={message.content} streaming={message.streaming} />
+                <ThinkingBubble items={run.items} streaming={streaming} />
                 {followedByStopped && (
                   <div className="mt-1.5 flex items-center gap-2 text-amber-600">
                     <CirclePauseIcon />
@@ -169,7 +186,7 @@ export function MessageList({
           // 紧跟 assistant/reasoning（已有内容流出后被停止）的提示已并入该回复块，这里不再单列；
           // 仅立即停止（毫无内容流出）的孤立提示自成一行——那时它是唯一可见的响应块，带头
           const prevKind = messages[index - 1]?.kind;
-          if (prevKind === "assistant" || prevKind === "reasoning") return null;
+          if (prevKind === "assistant" || prevKind === "reasoning" || prevKind === "tool") return null;
           return (
             <li key={message.id} className={rowCls}>
               <div className="max-w-[85%] text-base leading-6">
@@ -201,9 +218,6 @@ export function MessageList({
               </div>
             </li>
           );
-        }
-        if (message.kind === "tool") {
-          return <li key={message.id} className={rowCls}><ToolBubble message={message} /></li>;
         }
         return (
           <li key={message.id} className={rowCls}>

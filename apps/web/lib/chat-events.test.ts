@@ -296,6 +296,15 @@ describe("shouldShowThinkingHint", () => {
     ];
     expect(shouldShowThinkingHint(msgs, true)).toBe(false);
   });
+
+  it("hides when the tail is a thinking unit (reasoning/tool) — activity is already visible", () => {
+    const msgs: UiMessage[] = [
+      { id: "live-1", kind: "user", content: "问" },
+      { id: "live-2", kind: "reasoning", content: "想", streaming: false },
+      { id: "live-3", kind: "tool", name: "web_search", arguments: {}, result: undefined },
+    ];
+    expect(shouldShowThinkingHint(msgs, true)).toBe(false);
+  });
 });
 
 describe("suggestions", () => {

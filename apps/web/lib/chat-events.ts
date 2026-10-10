@@ -83,6 +83,8 @@ export function shouldShowThinkingHint(messages: UiMessage[], busy: boolean): bo
   if (!busy) return false;
   if (messages.some((m) => (m.kind === "assistant" || m.kind === "reasoning") && m.streaming)) return false;
   const last = messages[messages.length - 1];
+  // 末尾是思考单元（思路/工具动作）：已可见"正在思考…"与活动，不再叠加占位
+  if (last?.kind === "reasoning" || last?.kind === "tool") return false;
   return last?.kind !== "assistant" && last?.kind !== "stopped";
 }
 
