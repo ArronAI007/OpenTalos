@@ -54,6 +54,12 @@ CREATE TABLE IF NOT EXISTS mcp_servers (
   cached_tools TEXT NOT NULL,    -- JSON 数组：[{name, description, input_schema}]
   last_error TEXT                -- 最近一次探测/刷新失败的错误信息；成功为 NULL
 );
+CREATE TABLE IF NOT EXISTS memories (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  content TEXT NOT NULL UNIQUE,  -- 一条跨会话的稳定用户信息；同内容去重
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 """
 
 
@@ -145,6 +151,24 @@ class ChatStore:
     def list_messages(self, task_id: str) -> list[dict]:
         with self._connect() as conn:
             rows = conn.execute("SELECT * FROM messages WHERE task_id = ? ORDER BY id", (task_id,)).fetchall()
+        return [dict(row) for row in rows]
+
+    def remember_memory(self, content: str) -> dict:
+        # 同内容 upsert：重复提取不叠加，只刷新 updated_at。
+        now = _now()
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO memories (content, created_at, updated_at) VALUES (?, ?, ?) "
+                "ON CONFLICT(content) DO UPDATE SET updated_at = excluded.updated_at",
+                (content, now, now),
+            )
+            row = conn.execute("SELECT * FROM memories WHERE content = ?", (content,)).fetchone()
+        return dict(row)
+
+    def list_memories(self) -> list[dict]:
+        # 新在前：召回同分时优先保留更新的记忆。
+        with self._connect() as conn:
+            rows = conn.execute("SELECT * FROM memories ORDER BY updated_at DESC, id DESC").fetchall()
         return [dict(row) for row in rows]
 
     def delete_turn(self, task_id: str, message_id: int) -> bool:

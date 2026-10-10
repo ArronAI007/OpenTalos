@@ -19,6 +19,7 @@ from core.agent import Agent
 from core.cancellation import CancellationToken
 from core.model import ModelClient
 from core.protocol import ChatMessage, ToolInvocation
+from memory import build_extraction_messages, parse_extraction, rank_memories
 from skill.client import SkillClient, SkillServiceError
 from skill.prompt import format_skills_for_system_prompt
 from skill.tools import ReadSkillTool, RunSkillScriptTool
@@ -140,6 +141,7 @@ class ChatRuntime:
         circuit_recovery_seconds: float = 300.0,
         approval_timeout_seconds: float = 300.0,
         run_ttl_seconds: float = 300.0,
+        memory_enabled: bool = False,
     ) -> None:
         self._store = store
         self._model_client = model_client  # None → 首次需要时按 env 构造
@@ -164,6 +166,8 @@ class ChatRuntime:
         # 每 task 的活动运行：事件日志/停止信号与连接解耦（断连不中止、可续传）。
         self._runs: dict[str, _LiveRun] = {}
         self._run_ttl_seconds = run_ttl_seconds
+        # 长期记忆（跨会话）：默认关闭，避免给所有会话平添一次提取模型调用。
+        self._memory_enabled = memory_enabled
         self._skill_tools: list[Any] = []
         self._skills_suffix: str | None = None
         self._skills_reachable: bool | None = None
@@ -406,6 +410,22 @@ class ChatRuntime:
         run.steer_event.set()  # 唤醒在飞的模型调用，令其立即打断重跑
         return True
 
+    async def _recall_memories(self, query: str) -> list[str]:
+        if not self._memory_enabled:
+            return []
+        rows = await asyncio.to_thread(self._store.list_memories)
+        return rank_memories(query, [row["content"] for row in rows])
+
+    async def _extract_and_remember(self, user_text: str, assistant_text: str) -> None:
+        # 记忆是锦上添花：任何失败静默吞掉，不影响对话主流程。
+        try:
+            completion = await self._client().acomplete(build_extraction_messages(user_text, assistant_text))
+            content = parse_extraction(completion.text)
+            if content:
+                await asyncio.to_thread(self._store.remember_memory, content)
+        except Exception:  # noqa: BLE001 - 提取失败不影响本轮
+            pass
+
     def _sweep_runs(self) -> None:
         now = time.monotonic()
         for task_id, run in list(self._runs.items()):
@@ -483,6 +503,7 @@ class ChatRuntime:
         async def produce() -> None:
             nonlocal error, reply
             try:
+                recalled = await self._recall_memories(content)
                 reply = await agent.arespond_with_callbacks(
                     content,
                     on_text_delta=lambda chunk: emit({"type": "delta", "text": chunk}),
@@ -491,6 +512,7 @@ class ChatRuntime:
                     drain_steer=lambda: _drain_queue(run.steer),
                     steer_event=run.steer_event,
                     on_steer_interrupt=lambda: emit({"type": "steer_interrupt"}),
+                    recalled=recalled,
                 )
             except Exception as exc:  # noqa: BLE001 - 转成 error 事件交给前端
                 error = str(exc)
@@ -576,6 +598,9 @@ class ChatRuntime:
                     await agent.maybe_compress_history()
                 except Exception:  # noqa: BLE001 - 摘要失败静默跳过，下轮继续
                     pass
+                # 长期记忆提取（默认关闭）：客户端已收到 done，这里多一次模型调用不影响其体验。
+                if self._memory_enabled:
+                    await self._extract_and_remember(content, final_reply)
         except Exception as exc:  # noqa: BLE001 - 兜底：任何异常都转成 error 事件，保证 run 收敛
             await self._append(run, {"type": "error", "message": str(exc)})
         finally:

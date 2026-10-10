@@ -268,6 +268,27 @@ async def test_steering_injects_a_user_message_at_the_next_step(scripted_client,
     assert [m.content for m in agent.history_snapshot() if m.role == "user"] == ["原始问题", "改用中文回答"]
 
 
+async def test_recalled_memories_are_injected_as_a_system_message(scripted_client):
+    seen: list[list[dict]] = []
+    client = scripted_client(
+        tool_completions=[ToolCompletion(text="好的", requested_tools=[], model_id="mock")]
+    )
+    original = client.acomplete_with_tools
+
+    async def spy(messages, tools, tool_choice="auto", **kwargs):
+        seen.append([dict(m) for m in messages])
+        return await original(messages, tools, tool_choice, **kwargs)
+
+    client.acomplete_with_tools = spy  # type: ignore[method-assign]
+
+    agent = ReActAgent(name="bot", model_client=client)
+    await agent.arespond("问题", recalled=["用户叫张三", "用户喜欢简洁"])
+
+    assert seen[0][0]["role"] == "system"  # 原始系统提示
+    assert seen[0][1]["role"] == "system"
+    assert "用户叫张三" in seen[0][1]["content"]
+
+
 async def test_steering_interrupts_an_in_flight_model_call_and_retries():
     client = ModelClient(provider="mock")
     calls = {"n": 0}

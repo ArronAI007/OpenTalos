@@ -1020,6 +1020,47 @@ def test_aclose_is_a_noop_when_no_model_client_was_constructed(store) -> None:
     asyncio.run(runtime.aclose())  # 懒构造从未发生，不应抛异常
 
 
+async def test_recall_injects_relevant_memories_into_the_prompt(store, scripted_client, tmp_path) -> None:
+    store.remember_memory("用户在做一个数据看板项目")
+    store.remember_memory("用户喜欢用中文")
+    seen: list[list[dict]] = []
+    client = scripted_client(tool_completions=[])
+
+    async def spy(messages, tools, on_text_delta=None, on_reasoning_delta=None, **kwargs):
+        seen.append([dict(m) for m in messages])
+        return ToolCompletion(text="好的", requested_tools=[], model_id="mock-model")
+
+    client.astream_with_tools = spy  # type: ignore[method-assign]
+    runtime = _runtime(store, client, tmp_path, memory_enabled=True)
+    task = store.create_task("react")
+    store.update_task(task["id"], title="已有标题")
+
+    async for _ in runtime.stream_reply(task["id"], "数据看板项目进展如何"):
+        pass
+
+    joined = json.dumps(seen[-1], ensure_ascii=False)
+    assert "Relevant memory" in joined
+    assert any(m["role"] == "system" and "数据看板项目" in m["content"] for m in seen[-1])
+
+
+async def test_completed_turn_extracts_and_saves_a_memory(store, scripted_client, tmp_path) -> None:
+    client = scripted_client(tool_completions=[ToolCompletion(text="你好张三", requested_tools=[], model_id="mock-model")])
+
+    async def routed_acomplete(messages, **kwargs):
+        if any("shouldSave" in (m.get("content") or "") for m in messages):
+            return Completion(text='{"shouldSave": true, "content": "用户叫张三"}', model_id="mock-model")
+        return Completion(text="[]", model_id="mock-model")
+
+    client.acomplete = routed_acomplete  # type: ignore[method-assign]
+    runtime = _runtime(store, client, tmp_path, memory_enabled=True)
+    task = store.create_task("react")
+    store.update_task(task["id"], title="已有标题")
+
+    await _collect(runtime, task["id"], "我叫张三")
+
+    assert [m["content"] for m in store.list_memories()] == ["用户叫张三"]
+
+
 def test_steer_without_active_run_returns_false(store) -> None:
     runtime = ChatRuntime(store, model_client=ModelClient(provider="mock"), skill_service_url="http://127.0.0.1:1")
 

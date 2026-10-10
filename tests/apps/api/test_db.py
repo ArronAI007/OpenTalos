@@ -11,6 +11,17 @@ def store(tmp_path: Path) -> ChatStore:
     return ChatStore(tmp_path / "chat.db")
 
 
+def test_remember_memory_upserts_and_lists_newest_first(store: ChatStore) -> None:
+    store.remember_memory("用户叫张三")
+    store.remember_memory("用户喜欢简洁回复")
+    store.remember_memory("用户叫张三")  # 同内容去重，只刷新 updated_at
+
+    memories = store.list_memories()
+
+    assert {m["content"] for m in memories} == {"用户叫张三", "用户喜欢简洁回复"}
+    assert len(memories) == 2
+
+
 def test_create_and_list_tasks(store: ChatStore) -> None:
     task = store.create_task("react")
     assert task["agent_type"] == "react"

@@ -81,7 +81,13 @@ class ReActAgent(Agent):
         drain_steer: Callable[[], list[str]] | None = kwargs.pop("drain_steer", None)
         steer_event: asyncio.Event | None = kwargs.pop("steer_event", None)
         on_steer_interrupt = kwargs.pop("on_steer_interrupt", None)
+        recalled: list[str] | None = kwargs.pop("recalled", None)
         messages = self.build_messages(input_text)
+        # 召回的相关长期记忆作为一条 system 注入（在系统提示之后、历史之前）。
+        if recalled:
+            block = "## Relevant memory about the user\n" + "\n".join(f"- {item}" for item in recalled)
+            insert_at = 1 if messages and messages[0].get("role") == "system" else 0
+            messages.insert(insert_at, {"role": "system", "content": block})
         # 本轮 user 先记入 transcript（在工具结果之前）——保证重放/后续轮次的顺序正确，
         # 也让中途 steer 的 user 消息排在本轮提问之后。
         self.record_message(ChatMessage(content=input_text, role="user"))
