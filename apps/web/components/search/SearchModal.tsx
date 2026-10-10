@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { listTasks, type Task } from "@/lib/api";
 import { filterTasksByTitle } from "@/lib/task-filter";
 import { formatTaskTime, groupTasksByDate } from "@/lib/task-groups";
 import { useCreateTask } from "@/components/sidebar/SidebarClient";
 import { SearchIcon } from "@/components/ui/icons";
+import { useFocusTrap } from "@/lib/focus-trap";
 
 interface SearchModalProps {
   open: boolean;
@@ -49,6 +50,9 @@ export function SearchModal({ open, onClose }: SearchModalProps) {
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef, open);
+
   if (!open) return null;
 
   const now = new Date();
@@ -66,6 +70,7 @@ export function SearchModal({ open, onClose }: SearchModalProps) {
       <div className="absolute inset-0 bg-black/50" onClick={onClose} aria-hidden="true" />
 
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label="搜索任务"

@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { SkillSummary } from "@/lib/api";
 import { filterSkills } from "@/lib/skills-filter";
 import { PuzzleIcon, SearchIcon } from "@/components/ui/icons";
 import { SkillCard } from "@/components/skills/SkillCard";
 import { CreateSkillMenu } from "@/components/skills/CreateSkillMenu";
+import { useFocusTrap } from "@/lib/focus-trap";
 
 interface MyAddedSkillsModalProps {
   open: boolean;
@@ -34,6 +35,9 @@ export function MyAddedSkillsModal({ open, onClose, skills, onToggleAdded, onImp
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef, open);
+
   if (!open) return null;
 
   const added = skills.filter((s) => s.added);
@@ -43,6 +47,7 @@ export function MyAddedSkillsModal({ open, onClose, skills, onToggleAdded, onImp
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto px-4">
       <div className="absolute inset-0 bg-black/50" onClick={onClose} aria-hidden="true" />
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label="已添加的技能"

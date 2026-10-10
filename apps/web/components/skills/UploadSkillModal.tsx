@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { uploadSkill } from "@/lib/api";
+import { useFocusTrap } from "@/lib/focus-trap";
 
 interface UploadSkillModalProps {
   open: boolean;
@@ -33,6 +34,9 @@ export function UploadSkillModal({ open, onClose, onUploaded }: UploadSkillModal
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef, open);
+
   if (!open) return null;
 
   const handleFile = async (file: File) => {
@@ -53,6 +57,7 @@ export function UploadSkillModal({ open, onClose, onUploaded }: UploadSkillModal
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto px-4">
       <div className="absolute inset-0 bg-black/50" onClick={onClose} aria-hidden="true" />
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label="上传技能"

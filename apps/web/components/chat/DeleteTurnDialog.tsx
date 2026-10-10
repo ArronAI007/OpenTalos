@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
+
+import { useFocusTrap } from "@/lib/focus-trap";
 
 export interface DeleteTurnDialogProps {
   open: boolean;
@@ -22,6 +24,9 @@ export function DeleteTurnDialog({ open, busy, onCancel, onConfirm }: DeleteTurn
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onCancel]);
 
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef, open);
+
   if (!open) return null;
 
   return (
@@ -29,6 +34,7 @@ export function DeleteTurnDialog({ open, busy, onCancel, onConfirm }: DeleteTurn
       {/* 半透明遮罩，点击取消 */}
       <div className="absolute inset-0 bg-black/50" onClick={onCancel} aria-hidden="true" />
       <div
+        ref={dialogRef}
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="delete-turn-dialog-title"

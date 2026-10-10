@@ -9,6 +9,7 @@ import { stashHomeDraft } from "@/lib/pending-message";
 import { copyText } from "@/lib/clipboard";
 import { CheckIcon, ChevronLeftIcon, CopyIcon, FileTextIcon, MessageCircleIcon } from "@/components/ui/icons";
 import { LogoMark } from "@/components/sidebar/Logo";
+import { useFocusTrap } from "@/lib/focus-trap";
 
 interface SkillDetailModalProps {
   open: boolean;
@@ -72,6 +73,9 @@ export function SkillDetailModal({ open, onClose, skill, onToggleAdded }: SkillD
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose, contentOpen]);
 
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef, open);
+
   if (!open) return null;
 
   const handlePickExample = (text: string) => {
@@ -93,6 +97,7 @@ export function SkillDetailModal({ open, onClose, skill, onToggleAdded }: SkillD
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto px-4">
       <div className="absolute inset-0 bg-black/50" onClick={onClose} aria-hidden="true" />
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label={skill.name}

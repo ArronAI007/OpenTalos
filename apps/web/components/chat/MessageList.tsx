@@ -273,7 +273,7 @@ export function MessageList({
     }
     return (
       <div className={rowCls}>
-        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-base text-red-600">
+        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-base text-red-600">
           出错了：{message.content}
         </div>
       </div>
@@ -304,11 +304,16 @@ export function MessageList({
     <div
       ref={scrollRef}
       data-message-scroll
+      aria-busy={busy}
       onScroll={(e) => {
         stickRef.current = isNearBottom(e.currentTarget);
       }}
       className="relative flex-1 overflow-y-auto py-6"
     >
+      {/* 屏幕阅读器状态区：只播报“生成中”状态，不逐 token 朗读整个回复。 */}
+      <p className="sr-only" role="status" aria-live="polite">
+        {busy ? "正在生成回复…" : ""}
+      </p>
       <div style={{ height: virtualizer.getTotalSize(), width: "100%", position: "relative" }}>
         {virtualizer.getVirtualItems().map((item) => (
           <div

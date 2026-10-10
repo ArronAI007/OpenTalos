@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useFocusTrap } from "@/lib/focus-trap";
 import {
   scanGithubSkills,
   importGithubSkills,
@@ -47,6 +48,9 @@ export function GithubImportModal({ open, onClose, onImported }: GithubImportMod
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
+
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef, open);
 
   if (!open) return null;
 
@@ -102,6 +106,7 @@ export function GithubImportModal({ open, onClose, onImported }: GithubImportMod
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto px-4">
       <div className="absolute inset-0 bg-black/50" onClick={onClose} aria-hidden="true" />
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label="从 GitHub 导入"
