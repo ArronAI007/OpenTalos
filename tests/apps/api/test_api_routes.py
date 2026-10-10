@@ -221,7 +221,11 @@ async def test_message_sse_flow_and_persistence(api) -> None:
         assert resp.headers["content-type"].startswith("text/event-stream")
         body = (await resp.aread()).decode()
     frames = [block for block in body.split("\n\n") if block.strip()]
-    events = [json.loads(frame.strip().removeprefix("data: ")) for frame in frames]
+    # 帧现含 id: 行（重连续传用），data: 与 id: 各占一行，取 data 行解析。
+    events = [
+        json.loads(next(line[6:] for line in frame.splitlines() if line.startswith("data: ")))
+        for frame in frames
+    ]
     assert events[0]["type"] == "user_stored"  # 落库回执是流内首事件
     # 首条消息紧跟一个 title 事件（截断兜底版）；这个 fixture 没配 completions，模型概括版
     # 调用返回空文本会静默降级为 None，不会有第二次 title 事件覆盖它。
@@ -232,6 +236,22 @@ async def test_message_sse_flow_and_persistence(api) -> None:
     assert [r["kind"] for r in rows] == ["user", "assistant"]
     assert events[0]["id"] == rows[0]["id"]
     assert events[0]["created_at"] == rows[0]["created_at"]
+
+
+async def test_resume_stream_endpoint_replays_from_after(api) -> None:
+    task = (await api.post("/api/tasks", json={"agent_type": "react"})).json()
+    async with api.stream("POST", f"/api/tasks/{task['id']}/messages", json={"content": "ping"}) as resp:
+        await resp.aread()
+
+    # 运行已结束但在 TTL 窗口内：续传端点按 after 补发全部事件（含 done），每帧带 id。
+    async with api.stream("GET", f"/api/tasks/{task['id']}/stream?after=0") as resp:
+        assert resp.status_code == 200
+        body = (await resp.aread()).decode()
+    frames = [f for f in body.split("\n\n") if f.strip()]
+    events = [json.loads(next(line[6:] for line in f.splitlines() if line.startswith("data: "))) for f in frames]
+    assert events[0]["type"] == "user_stored"
+    assert events[-1]["type"] == "done"
+    assert all(any(line.startswith("id: ") for line in f.splitlines()) for f in frames)
 
 
 async def test_message_on_missing_task_404(api) -> None:

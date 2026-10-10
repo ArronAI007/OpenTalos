@@ -105,7 +105,11 @@ def _sse(event: dict) -> str:
     # 唯二作用：保持连接、让客户端断开在下次写时暴露（uvicorn 只在写响应时发现断开）。
     if event["type"] == "ping":
         return ": keep-alive\n\n"
-    return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+    # 事件下标编成 SSE id（重连据此续传）；`_id` 是内部字段，不进 data。
+    event_id = event.get("_id")
+    payload = {key: value for key, value in event.items() if key != "_id"}
+    prefix = f"id: {event_id}\n" if event_id is not None else ""
+    return f"{prefix}data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
 def create_app(runtime: ChatRuntime | None = None, eval_cases_path: Path | None = None) -> FastAPI:
@@ -266,6 +270,19 @@ def create_app(runtime: ChatRuntime | None = None, eval_cases_path: Path | None 
 
         async def event_stream():
             async for event in runtime.stream_reply(task_id, request.content):
+                yield _sse(event)
+
+        return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+    @app.get("/api/tasks/{task_id}/stream")
+    async def resume_stream(task_id: str, after: int = Query(0, ge=0)) -> StreamingResponse:
+        # 续传：断连/刷新后按 after 补齐错过的 SSE 事件并跟随到本轮结束。
+        # 运行已结束/不存在时返回空流（前端据此改为刷新历史）。
+        if store.get_task(task_id) is None:
+            raise HTTPException(404, "task not found")
+
+        async def event_stream():
+            async for event in runtime.stream_reply(task_id, None, after=after):
                 yield _sse(event)
 
         return StreamingResponse(event_stream(), media_type="text/event-stream")

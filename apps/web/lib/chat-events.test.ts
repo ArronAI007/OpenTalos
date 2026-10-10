@@ -15,7 +15,16 @@ import {
 
 describe("parseSseBlock", () => {
   it("parses a data frame", () => {
-    expect(parseSseBlock('data: {"type":"delta","text":"你"}')).toEqual({ type: "delta", text: "你" });
+    expect(parseSseBlock('data: {"type":"delta","text":"你"}')).toEqual({
+      id: undefined,
+      event: { type: "delta", text: "你" },
+    });
+  });
+  it("parses an id line for resume", () => {
+    expect(parseSseBlock('id: 7\ndata: {"type":"delta","text":"你"}')).toEqual({
+      id: 7,
+      event: { type: "delta", text: "你" },
+    });
   });
   it("returns null for empty or non-data block", () => {
     expect(parseSseBlock("")).toBeNull();
@@ -108,6 +117,13 @@ describe("finalizeStreaming", () => {
 });
 
 describe("stopped notice", () => {
+  it("server stopped event finalizes streaming and appends a stopped notice", () => {
+    let msgs = reduceChatEvent([], { type: "delta", text: "半截" });
+    msgs = reduceChatEvent(msgs, { type: "stopped" }, 1700000000009);
+    expect(msgs[0]).toMatchObject({ kind: "assistant", streaming: false, completedAt: 1700000000009 });
+    expect(msgs[1]).toMatchObject({ kind: "stopped" });
+  });
+
   it("appendStoppedNotice appends a stopped row after the finalized reply", () => {
     let msgs: UiMessage[] = [{ id: "row-1", kind: "user", content: "问" }];
     msgs = reduceChatEvent(msgs, { type: "delta", text: "半截" });

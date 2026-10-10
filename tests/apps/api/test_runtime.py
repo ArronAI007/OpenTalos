@@ -38,6 +38,15 @@ async def _collect_kw(runtime: ChatRuntime, task_id: str, content: str, **kwargs
     return [event async for event in runtime.stream_reply(task_id, content, **kwargs)]
 
 
+async def _await_run_done(runtime: ChatRuntime, task_id: str) -> None:
+    run = runtime._runs[task_id]
+    for _ in range(500):
+        if run.done:
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError("run did not finish in time")
+
+
 def test_stream_plain_reply_deltas_and_persists(store, scripted_client, tmp_path) -> None:
     client = scripted_client(tool_completions=[
         ToolCompletion(text="你好，世界", requested_tools=[], model_id="mock-model"),
@@ -71,9 +80,8 @@ def test_user_stored_receipt_reports_persisted_row_identity(store, scripted_clie
     assert events[0]["created_at"] == user_rows[0]["created_at"]
 
 
-def test_disconnect_mid_stream_persists_partial(store, scripted_client, tmp_path) -> None:
-    # 前端"停止"会 abort fetch；SSE 断开时消费循环被中断，正常完成路径的落库不可达。
-    # 期望：已流出的部分内容兜底落库，刷新后仍可见。
+def test_disconnect_mid_stream_keeps_the_turn_running(store, scripted_client, tmp_path) -> None:
+    # 语义 A：断连只停止跟随，不再中止；运行照常跑完并落完整回复（不再落 partial+stopped）。
     client = scripted_client(tool_completions=[
         ToolCompletion(text="你好，世界！", requested_tools=[], model_id="mock-model"),
     ])
@@ -81,62 +89,57 @@ def test_disconnect_mid_stream_persists_partial(store, scripted_client, tmp_path
     task = store.create_task("react")
     store.update_task(task["id"], title="已有标题")  # 跳过首条消息才有的标题事件，不干扰事件序列断言
 
-    async def consume_one_delta_then_close() -> str:
+    async def consume_one_delta_then_close() -> None:
         gen = runtime.stream_reply(task["id"], "hi")
         receipt = await gen.__anext__()
         assert receipt["type"] == "user_stored"  # 落库回执是流内首事件
         first_delta = await gen.__anext__()
         assert first_delta["type"] == "delta"
-        partial = first_delta["text"]
-        await gen.aclose()  # 模拟客户端中途断开（关闭 SSE）
-        return partial
+        await gen.aclose()  # 客户端中途断开（关闭 SSE）：只脱离，不中止
+        await _await_run_done(runtime, task["id"])
 
-    partial = asyncio.run(consume_one_delta_then_close())
+    asyncio.run(consume_one_delta_then_close())
 
     rows = store.list_messages(task["id"])
-    assert [r["kind"] for r in rows] == ["user", "assistant", "stopped"]
-    assert rows[1]["content"] == partial  # 恰好是用户实际看到的部分
-    assert partial and "你好，世界！".startswith(partial)
-    assert rows[2]["content"] == ""  # 停止标记本身无内容，渲染文案在前端
+    assert [r["kind"] for r in rows] == ["user", "assistant"]
+    assert rows[1]["content"] == "你好，世界！"
 
 
-def test_disconnect_before_any_delta_persists_stopped_marker(store, scripted_client, tmp_path) -> None:
-    # 立即停止（一个 delta 都还没发出就断开）：没有内容可落，但"已停止"标记必须落库，
-    # 否则刷新后这次提问像从未发生过。
-    client = scripted_client(tool_completions=[])
-
-    async def slow_silent_astream(messages, tools, on_text_delta=None, **kwargs):
-        await asyncio.sleep(3600)  # 永不产出；断连后由 stream_reply 的 producer.cancel() 收敛
-        return ToolCompletion(text="", requested_tools=[], model_id="mock-model")  # pragma: no cover
-
-    client.astream_with_tools = slow_silent_astream  # type: ignore[method-assign]
+def test_disconnect_before_any_delta_does_not_persist_a_stopped_marker(store, scripted_client, tmp_path) -> None:
+    # 语义 A：断连不再落 stopped 标记；运行继续，产出后落完整回复。
+    client = scripted_client(tool_completions=[
+        ToolCompletion(text="迟到的回复", requested_tools=[], model_id="mock-model"),
+    ])
     runtime = _runtime(store, client, tmp_path)
     task = store.create_task("react")
-    store.update_task(task["id"], title="已有标题")  # 跳过首条消息才有的标题事件，不干扰事件序列断言
+    store.update_task(task["id"], title="已有标题")
 
     async def close_before_first_delta() -> None:
         gen = runtime.stream_reply(task["id"], "hi")
         receipt = await gen.__anext__()
-        assert receipt["type"] == "user_stored"  # 落库回执先行，之后才是模型事件
-        reader = asyncio.create_task(gen.__anext__())
-        await asyncio.sleep(0.05)  # 让消费循环进入 queue.get() 等待（producer 被 sleep 阻塞）
-        reader.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await reader
+        assert receipt["type"] == "user_stored"
         await gen.aclose()
+        await _await_run_done(runtime, task["id"])
 
     asyncio.run(close_before_first_delta())
 
     rows = store.list_messages(task["id"])
-    assert [r["kind"] for r in rows] == ["user", "stopped"]
+    assert [r["kind"] for r in rows] == ["user", "assistant"]
+    assert rows[1]["content"] == "迟到的回复"
 
 
 def test_request_stop_persists_partial_and_stopped_row(store, scripted_client, tmp_path) -> None:
-    # 用户点"停止"按钮（区别于断连）：前端先调 POST /stop 置位停止信号，再 abort 读取。
-    # 服务端消费循环每轮首查信号 → 立即停流，走与断连相同的兜底：partial + stopped 标记落库。
-    client = scripted_client(tool_completions=[
-        ToolCompletion(text="你好，世界！", requested_tools=[], model_id="mock-model"),
-    ])
+    # 用户显式"停止"仍是中止路径：runner 落 partial + stopped 标记，并发终结事件。
+    client = scripted_client(tool_completions=[])
+
+    async def slow_stream(messages, tools, on_text_delta=None, on_reasoning_delta=None, **kwargs):
+        for ch in "你好，世界！":
+            if on_text_delta is not None:
+                await on_text_delta(ch)
+            await asyncio.sleep(0.02)
+        return ToolCompletion(text="你好，世界！", requested_tools=[], model_id="mock-model")
+
+    client.astream_with_tools = slow_stream  # type: ignore[method-assign]
     runtime = _runtime(store, client, tmp_path)
     task = store.create_task("react")
 
@@ -150,14 +153,59 @@ def test_request_stop_persists_partial_and_stopped_row(store, scripted_client, t
 
     events = asyncio.run(consume_until_stop())
 
+    types = [e["type"] for e in events]
     deltas = [e for e in events if e["type"] == "delta"]
     assert deltas
-    assert not any(e["type"] == "done" for e in events)  # 提前终止，无 done
+    assert "done" not in types  # 提前终止，无 done
+    assert "stopped" in types  # 终结事件
     partial = "".join(e["text"] for e in deltas)
     assert len(partial) < len("你好，世界！")  # 确实被截断而非跑完
     rows = store.list_messages(task["id"])
     assert [r["kind"] for r in rows] == ["user", "assistant", "stopped"]
     assert rows[1]["content"] == partial
+
+
+def test_resume_stream_replays_events_after_the_last_seen_id(store, scripted_client, tmp_path) -> None:
+    # 重连续传：从 after=last_id+1 补发错过的 SSE 事件（含 done）。
+    client = scripted_client(tool_completions=[
+        ToolCompletion(text="完整回复", requested_tools=[], model_id="mock-model"),
+    ])
+    runtime = _runtime(store, client, tmp_path)
+    task = store.create_task("react")
+    store.update_task(task["id"], title="已有标题")
+
+    async def scenario() -> list[dict[str, Any]]:
+        gen = runtime.stream_reply(task["id"], "hi")
+        await gen.__anext__()  # user_stored（id 0）
+        delta = await gen.__anext__()  # 第一个 delta
+        last_id = delta["_id"]
+        await gen.aclose()  # 断连：只脱离
+        await _await_run_done(runtime, task["id"])
+        # 运行已结束但在 TTL 窗口内：从 last_id+1 补发剩余事件
+        return [event async for event in runtime.stream_reply(task["id"], None, after=last_id + 1)]
+
+    resumed = asyncio.run(scenario())
+
+    assert resumed
+    assert all(e["_id"] > 0 for e in resumed)
+    assert "done" in [e["type"] for e in resumed]
+
+
+def test_finished_run_is_swept_after_the_ttl(store, scripted_client, tmp_path) -> None:
+    client = scripted_client(tool_completions=[
+        ToolCompletion(text="好", requested_tools=[], model_id="mock-model"),
+    ])
+    runtime = _runtime(store, client, tmp_path, run_ttl_seconds=0)
+    task = store.create_task("react")
+    store.update_task(task["id"], title="已有标题")
+
+    async def scenario() -> list[dict[str, Any]]:
+        async for _ in runtime.stream_reply(task["id"], "hi"):
+            pass
+        # run_ttl_seconds=0：下一次访问即回收，续传拿不到任何事件。
+        return [event async for event in runtime.stream_reply(task["id"], None, after=0)]
+
+    assert asyncio.run(scenario()) == []
 
 
 def test_idle_stream_emits_keepalive_ping(store, scripted_client, tmp_path) -> None:
@@ -469,21 +517,27 @@ def test_followup_suggestions_bad_output_is_silent(store, scripted_client, tmp_p
 
 
 def test_followup_suggestions_absent_on_stop(store, scripted_client, tmp_path) -> None:
-    # 用户停止路径不产生推荐：stopped 提前 return，到不了 done 之后的推荐段。
-    client = scripted_client(
-        completions=[Completion(text='["不应出现"]', model_id="mock-model")],
-        tool_completions=[ToolCompletion(text="你好，世界！", requested_tools=[], model_id="mock-model")],
-    )
+    # 用户停止路径不产生推荐：stopped 提前收尾，到不了 done 之后的推荐段。
+    client = scripted_client(completions=[Completion(text='["不应出现"]', model_id="mock-model")])
+
+    async def slow_stream(messages, tools, on_text_delta=None, on_reasoning_delta=None, **kwargs):
+        for ch in "你好，世界！":
+            if on_text_delta is not None:
+                await on_text_delta(ch)
+            await asyncio.sleep(0.02)
+        return ToolCompletion(text="你好，世界！", requested_tools=[], model_id="mock-model")
+
+    client.astream_with_tools = slow_stream  # type: ignore[method-assign]
     runtime = _runtime(store, client, tmp_path)
     task = store.create_task("react")
-    store.update_task(task["id"], title="已有标题")  # 跳过首条消息才有的标题事件，不干扰事件序列断言
+    store.update_task(task["id"], title="已有标题")  # 跳过首条消息才有的标题事件
 
     async def consume_then_stop() -> list[dict[str, Any]]:
-        gen = runtime.stream_reply(task["id"], "hi")
-        events = [await gen.__anext__(), await gen.__anext__()]  # user_stored + 首个 delta
-        runtime.request_stop(task["id"])
-        async for event in gen:
+        events: list[dict[str, Any]] = []
+        async for event in runtime.stream_reply(task["id"], "hi"):
             events.append(event)
+            if event["type"] == "delta":
+                runtime.request_stop(task["id"])
         return events
 
     events = asyncio.run(consume_then_stop())
@@ -762,7 +816,7 @@ def test_stream_reply_generates_a_title_on_first_message(store, scripted_client,
     events = asyncio.run(_collect(runtime, task["id"], "今天是几号？"))
 
     # 两次 title 事件：user_stored 后立即发的截断兜底版，done 后再发一次模型概括版覆盖它。
-    title_events = [e for e in events if e["type"] == "title"]
+    title_events = [{k: v for k, v in e.items() if k != "_id"} for e in events if e["type"] == "title"]
     assert title_events == [
         {"type": "title", "title": "今天是几号？"},
         {"type": "title", "title": "查询今天日期"},
@@ -799,7 +853,7 @@ def test_stream_reply_title_generation_failure_keeps_truncated_fallback(store, s
     events = asyncio.run(_collect(runtime, task["id"], "一条很长很长的第一条消息"))
 
     # 只有 user_stored 后立即发的截断兜底版那一次 title 事件；模型调用失败，没有第二次覆盖。
-    title_events = [e for e in events if e["type"] == "title"]
+    title_events = [{k: v for k, v in e.items() if k != "_id"} for e in events if e["type"] == "title"]
     assert title_events == [{"type": "title", "title": "一条很长很长的第一条消息"}]
     assert store.get_task(task["id"])["title"] == "一条很长很长的第一条消息"  # 截断兜底未被覆盖
 

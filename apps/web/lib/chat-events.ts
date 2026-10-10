@@ -15,7 +15,9 @@ export type ChatEvent =
   // 副作用工具需要人工确认：SSE 下发（带工具名/参数），前端渲染确认卡片；
   // 用户决定经 POST /approvals/{id} 回传，结果由 approval_resolved 再回流。
   | { type: "approval_required"; approval_id: string; name: string; arguments: Record<string, unknown> }
-  | { type: "approval_resolved"; approval_id: string; approved: boolean };
+  | { type: "approval_resolved"; approval_id: string; approved: boolean }
+  // 服务端显式停止该轮（重连时才会收到；正在连接的客户端已 abort 不看）：终结流式并加提示行。
+  | { type: "stopped" };
 
 export type UiMessage =
   // completedAt（epoch ms）：assistant 回复定稿时刻（done/停止/error 定稿）或历史行 created_at；
@@ -62,10 +64,27 @@ export function nextUiId(prev: UiMessage[]): string {
   return `live-${maxLive + 1}`;
 }
 
-export function parseSseBlock(block: string): ChatEvent | null {
-  const line = block.trim();
-  if (!line.startsWith("data:")) return null;
-  return JSON.parse(line.slice(5).trim()) as ChatEvent;
+export interface SseFrame {
+  id?: number;
+  event: ChatEvent;
+}
+
+// 解析一个 SSE 帧：可能有 `id: <n>` 行（重连续传用）与 `data: <json>` 行。
+// 没有 data 行（如 `: keep-alive` comment 帧）返回 null。
+export function parseSseBlock(block: string): SseFrame | null {
+  let id: number | undefined;
+  let data: string | undefined;
+  for (const raw of block.split("\n")) {
+    const line = raw.trim();
+    if (line.startsWith("id:")) {
+      const parsed = Number(line.slice(3).trim());
+      if (Number.isInteger(parsed) && parsed >= 0) id = parsed;
+    } else if (line.startsWith("data:")) {
+      data = line.slice(5).trim();
+    }
+  }
+  if (data === undefined) return null;
+  return { id, event: JSON.parse(data) as ChatEvent };
 }
 
 // 把所有 streaming 助理泡定稿（内容保留、摘掉 streaming 标记、补 completedAt 时间戳），
@@ -258,5 +277,8 @@ export function reduceChatEvent(prev: UiMessage[], event: ChatEvent, now = Date.
         ...prev.slice(at + 1),
       ];
     }
+    case "stopped":
+      // 服务端显式停止：终结流式泡并加"已停止"提示行（重连场景才会经过这里）。
+      return appendStoppedNotice(finalizeStreaming(prev, now));
   }
 }

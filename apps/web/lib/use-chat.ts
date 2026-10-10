@@ -12,9 +12,10 @@ import {
   nextUiId,
   reduceChatEvent,
   turnUserMessage,
+  type ChatEvent,
   type UiMessage,
 } from "./chat-events";
-import { postSse } from "./sse";
+import { getSse, postSse, type SseHandler } from "./sse";
 import { emitTaskTitleUpdated } from "./task-events";
 
 function fromStored(row: StoredMessage): UiMessage {
@@ -31,6 +32,30 @@ function fromStored(row: StoredMessage): UiMessage {
     return { id: `row-${row.id}`, kind: row.kind, content: row.content, completedAt: Date.parse(row.created_at) };
   }
   return { id: `row-${row.id}`, kind: "error", content: `未知消息类型: ${row.kind}` };
+}
+
+// 断线续传：从 after+1 起补发错过的 SSE 事件并跟随到本轮结束，失败按指数退避重试若干次。
+// after 未知（连 user_stored 都没收到）时无从续传，直接返回 false。
+const RESUME_ATTEMPTS = 5;
+
+async function resumeStream(
+  taskId: string,
+  after: number | undefined,
+  onEvent: SseHandler,
+  signal: AbortSignal,
+): Promise<boolean> {
+  if (after === undefined) return false;
+  for (let attempt = 0; attempt < RESUME_ATTEMPTS; attempt++) {
+    if (signal.aborted) return false;
+    try {
+      await getSse(`${API_URL}/api/tasks/${taskId}/stream?after=${after + 1}`, onEvent, signal);
+      return true;
+    } catch {
+      if (signal.aborted) return false;
+      await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** attempt));
+    }
+  }
+  return false;
 }
 
 export function useChat(taskId: string) {
@@ -79,21 +104,19 @@ export function useChat(taskId: string) {
       const ctrl = new AbortController();
       abortRef.current = ctrl;
       setBusy(true);
+      let lastId: number | undefined;
+      const applyEvent = (event: ChatEvent, id?: number) => {
+        if (id !== undefined) lastId = id;
+        if (event.type === "done") doneRef.current = true;
+        // 标题事件不进本页消息列表，单独转发给侧栏（两者是独立组件/独立 state）。
+        if (event.type === "title") emitTaskTitleUpdated(taskId, event.title);
+        setMessages((prev) => reduceChatEvent(prev, event));
+      };
       try {
-        await postSse(
-          `${API_URL}/api/tasks/${taskId}/messages`,
-          { content },
-          (event) => {
-            if (event.type === "done") doneRef.current = true;
-            // 标题事件不进本页消息列表，单独转发给侧栏（两者是独立组件/独立 state）。
-            if (event.type === "title") emitTaskTitleUpdated(taskId, event.title);
-            setMessages((prev) => reduceChatEvent(prev, event));
-          },
-          ctrl.signal,
-        );
+        await postSse(`${API_URL}/api/tasks/${taskId}/messages`, { content }, applyEvent, ctrl.signal);
       } catch (error) {
         // 用户点停止 → fetch 抛 AbortError：定稿已流出的部分内容（保留在流中），
-        // 不追加错误泡；其余错误维持原有的错误泡行为。
+        // 不追加错误泡；其余错误尝试续传。
         if (error instanceof Error && error.name === "AbortError") {
           // done 已收到 = 回复已正常定稿，此刻点停止只掐推荐尾巴：不加"已停止"行
           if (!doneRef.current) {
@@ -101,7 +124,14 @@ export function useChat(taskId: string) {
             setMessages((prev) => appendStoppedNotice(denyPendingApprovals(finalizeStreaming(prev))));
           }
         } else {
-          setMessages((prev) => [...prev, { id: nextUiId(prev), kind: "error", content: String(error) }]);
+          // 网络抖动：续传补齐错过的事件；成功后以服务端历史为准刷新（拿回落库的 assistant/stopped 行）。
+          const recovered = await resumeStream(taskId, lastId, applyEvent, ctrl.signal);
+          if (recovered) {
+            const rows = await listMessages(taskId).catch(() => null);
+            if (rows) setMessages(rows.map(fromStored));
+          } else {
+            setMessages((prev) => [...prev, { id: nextUiId(prev), kind: "error", content: "连接中断，重连失败，请重试" }]);
+          }
         }
       } finally {
         if (abortRef.current === ctrl) abortRef.current = null;

@@ -6,8 +6,10 @@ sink 在每条消息开始时绑到该消息的队列（per-task 锁保证同一
 """
 import asyncio
 import json
+import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -94,6 +96,23 @@ def _mcp_tool_info_from_dict(data: dict) -> MCPToolInfo:
     return MCPToolInfo(name=data["name"], description=data["description"], input_schema=data["input_schema"])
 
 
+@dataclass
+class _LiveRun:
+    """一轮运行的可续传状态：producer/事件日志与连接生命周期解耦。
+
+    断连只让消费者不再跟随，运行本身照常跑到完成并落库；重连锁定同一份事件日志，
+    从 after 下标补发后继续跟随。运行结束后事件保留 run_ttl_seconds 供迟到重连。
+    """
+
+    task_id: str
+    events: list[dict[str, Any]] = field(default_factory=list)
+    condition: asyncio.Condition = field(default_factory=asyncio.Condition)
+    stop_event: asyncio.Event = field(default_factory=asyncio.Event)
+    done: bool = False
+    finished_at: float | None = None
+    runner: asyncio.Task[None] | None = None
+
+
 class ChatRuntime:
     def __init__(
         self,
@@ -110,6 +129,7 @@ class ChatRuntime:
         circuit_failure_threshold: int = 3,
         circuit_recovery_seconds: float = 300.0,
         approval_timeout_seconds: float = 300.0,
+        run_ttl_seconds: float = 300.0,
     ) -> None:
         self._store = store
         self._model_client = model_client  # None → 首次需要时按 env 构造
@@ -131,8 +151,9 @@ class ChatRuntime:
         self._agents: dict[str, Agent] = {}
         self._registries: dict[str, EventToolRegistry] = {}
         self._task_locks: dict[str, asyncio.Lock] = {}
-        # 活动流的停止信号：stream_reply 入流时登记、finally 清理，生命周期与流一致。
-        self._active_stops: dict[str, asyncio.Event] = {}
+        # 每 task 的活动运行：事件日志/停止信号与连接解耦（断连不中止、可续传）。
+        self._runs: dict[str, _LiveRun] = {}
+        self._run_ttl_seconds = run_ttl_seconds
         self._skill_tools: list[Any] = []
         self._skills_suffix: str | None = None
         self._skills_reachable: bool | None = None
@@ -348,11 +369,11 @@ class ChatRuntime:
         return agent
 
     def request_stop(self, task_id: str) -> None:
-        # 无活动流时幂等 no-op：事件只在流存活期间登记（流结束即随 finally 清理），
-        # 停止一个已结束/未开始的流没有意义。
-        event = self._active_stops.get(task_id)
-        if event is not None:
-            event.set()
+        # 置位停止信号：runner 的消费循环每轮首查，随后取消 producer、落 partial+stopped。
+        # 无活动运行/已结束时幂等 no-op。
+        run = self._runs.get(task_id)
+        if run is not None and not run.done:
+            run.stop_event.set()
 
     def evict(self, task_id: str) -> None:
         # 调用方须保证该任务当前没有进行中的流：pop 掉锁对象后，新流会 setdefault 造出
@@ -361,188 +382,244 @@ class ChatRuntime:
         self._registries.pop(task_id, None)
         self._task_locks.pop(task_id, None)
 
+    def _sweep_runs(self) -> None:
+        now = time.monotonic()
+        for task_id, run in list(self._runs.items()):
+            if run.done and run.finished_at is not None and now - run.finished_at > self._run_ttl_seconds:
+                self._runs.pop(task_id, None)
+
+    async def _append(self, run: _LiveRun, event: dict[str, Any]) -> None:
+        async with run.condition:
+            run.events.append(event)
+            run.condition.notify_all()
+
+    async def _finish(self, run: _LiveRun) -> None:
+        async with run.condition:
+            run.done = True
+            run.finished_at = time.monotonic()
+            run.condition.notify_all()
+
+    async def _start_run(
+        self,
+        task: dict[str, Any],
+        content: str,
+        skip_suggestions: bool,
+        cancellation: CancellationToken | None,
+    ) -> _LiveRun:
+        task_id = task["id"]
+        # 先取 agent：此时本轮 user 消息尚未落盘，重建重放的历史不含本轮，
+        # arespond 里 record_message 的 user 只出现一次（避免 transcript 重复）。
+        agent = await self._get_agent(task)
+        run = _LiveRun(task_id=task_id)
+        # 取舍：user 消息先落库，agent transcript 要到 arespond 末尾才补录。若在两步之间
+        # 中断，DB 多出这条 user 行而缓存 agent 的 transcript 缺失；下一轮缓存命中不重放，
+        # 上下文短暂缺这一句，直到 evict/重启后从 DB 重放恢复。接受此取舍。
+        is_first_message = task["title"] == ""
+        user_row = await asyncio.to_thread(self._store.append_message, task_id, "user", content)
+        truncated_title = _truncate_title(content)
+        await asyncio.to_thread(self._store.set_title_if_empty, task_id, truncated_title)
+        # 首事件回送落库行身份（前端据此把 live user 泡换成 row-N）；首条消息再推截断版兜底标题。
+        run.events.append({"type": "user_stored", "id": user_row["id"], "created_at": user_row["created_at"]})
+        if is_first_message:
+            run.events.append({"type": "title", "title": truncated_title})
+        self._runs[task_id] = run
+        run.runner = asyncio.create_task(
+            self._run_turn(run, task, agent, content, is_first_message, skip_suggestions, cancellation)
+        )
+        return run
+
+    async def _run_turn(
+        self,
+        run: _LiveRun,
+        task: dict[str, Any],
+        agent: Agent,
+        content: str,
+        is_first_message: bool,
+        skip_suggestions: bool,
+        cancellation: CancellationToken | None,
+    ) -> None:
+        """把一轮"生成到落库"的消费循环跑在独立 task 里，事件写入 run.events。
+
+        与旧 stream_reply 的差别：不再 yield，而是 append 到事件日志；因此连接断开不会
+        取消它，turn 会跑完并落完整 assistant。
+        """
+        task_id = task["id"]
+        queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+
+        async def emit(event: dict[str, Any]) -> None:
+            await queue.put(event)
+
+        registry = self._registries.get(task_id)
+        if registry is not None:
+            registry.sink = emit
+
+        error: str | None = None
+        reply: str | None = None
+
+        async def produce() -> None:
+            nonlocal error, reply
+            try:
+                reply = await agent.arespond_with_callbacks(
+                    content,
+                    on_text_delta=lambda chunk: emit({"type": "delta", "text": chunk}),
+                    on_reasoning_delta=lambda chunk: emit({"type": "reasoning", "text": chunk}),
+                    cancellation=cancellation,
+                )
+            except Exception as exc:  # noqa: BLE001 - 转成 error 事件交给前端
+                error = str(exc)
+            finally:
+                await queue.put(None)
+
+        producer = asyncio.create_task(produce())
+        # 推荐/标题并行预发（语义同旧实现）：与回复生成同时起跑，done 后通常已就绪。
+        suggest_task = (
+            asyncio.create_task(
+                suggest_followups(self._client(), await asyncio.to_thread(self._store.list_messages, task_id))
+            )
+            if not skip_suggestions
+            else None
+        )
+        title_task = (
+            asyncio.create_task(suggest_title(self._client(), content))
+            if is_first_message and not skip_suggestions
+            else None
+        )
+        pending_calls: list[dict[str, Any]] = []
+        parts: list[str] = []
+        try:
+            while True:
+                if run.stop_event.is_set():
+                    break
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=_STREAM_IDLE_S)
+                except TimeoutError:
+                    continue  # ping 由 _tail 合成，这里不发
+                if event is None:
+                    break
+                if event["type"] == "delta":
+                    parts.append(event["text"])
+                elif event["type"] == "tool_call":
+                    pending_calls.append(event)
+                elif event["type"] == "tool_result":
+                    call_id = event.get("call_id")
+                    match = next(
+                        (i for i, call in enumerate(pending_calls) if call.get("call_id") == call_id), None
+                    ) if call_id is not None else None
+                    arguments = pending_calls.pop(match)["arguments"] if match is not None else {}
+                    await asyncio.to_thread(
+                        self._store.append_message, task_id, "tool",
+                        json.dumps({
+                            "call_id": call_id, "name": event["name"], "arguments": arguments,
+                            "result": event["result"], "ok": event["ok"],
+                        }, ensure_ascii=False),
+                    )
+                await self._append(run, event)
+
+            if run.stop_event.is_set():
+                # 用户停止：落 partial + stopped 标记（与旧实现一致），并发终结事件。
+                if not parts and reply:
+                    parts.append(reply)
+                partial = "".join(parts)
+                if partial:
+                    await asyncio.to_thread(self._store.append_message, task_id, "assistant", partial)
+                await asyncio.to_thread(self._store.append_message, task_id, "stopped", "")
+                await self._append(run, {"type": "stopped"})
+            elif error is not None:
+                await self._append(run, {"type": "error", "message": error})
+            else:
+                if not parts and reply:
+                    parts.append(reply)  # 后端未流式时兜底，流式过则不重复追加
+                final_reply = "".join(parts)
+                await asyncio.to_thread(self._store.append_message, task_id, "assistant", final_reply)
+                await self._append(run, {"type": "done", "reply": final_reply})
+                if suggest_task is not None:
+                    suggestions = await suggest_task
+                    if suggestions:
+                        await self._append(run, {"type": "suggestions", "items": suggestions})
+                if title_task is not None:
+                    new_title = await title_task
+                    if new_title:
+                        await asyncio.to_thread(self._store.update_task, task_id, title=new_title)
+                        await self._append(run, {"type": "title", "title": new_title})
+                # 压缩是优化、失败不影响对话：assistant 已落库，此处触发折叠+快照落库，
+                # DB 顺序 user → tool → assistant → summary，重放时 summary 之后无重复行。
+                try:
+                    await agent.maybe_compress_history()
+                except Exception:  # noqa: BLE001 - 摘要失败静默跳过，下轮继续
+                    pass
+        except Exception as exc:  # noqa: BLE001 - 兜底：任何异常都转成 error 事件，保证 run 收敛
+            await self._append(run, {"type": "error", "message": str(exc)})
+        finally:
+            if registry is not None:
+                registry.sink = None
+            # 运行结束：未决审批一律按拒绝处理，避免 producer 悬挂到超时。
+            for approval_id, (pending_task, future) in list(self._pending_approvals.items()):
+                if pending_task == task_id and not future.done():
+                    future.set_result(False)
+            if not producer.done():
+                producer.cancel()
+            if suggest_task is not None and not suggest_task.done():
+                suggest_task.cancel()
+            if title_task is not None and not title_task.done():
+                title_task.cancel()
+            await self._finish(run)
+
+    async def _tail(self, run: _LiveRun, after: int) -> AsyncIterator[tuple[int, dict[str, Any]]]:
+        """从 after 下标补发事件日志，然后跟随新事件直到运行结束；空闲合成 ping。"""
+        idx = after
+        while True:
+            ping = False
+            async with run.condition:
+                if idx >= len(run.events) and not run.done:
+                    try:
+                        await asyncio.wait_for(run.condition.wait(), timeout=_STREAM_IDLE_S)
+                    except asyncio.TimeoutError:
+                        ping = True
+                batch = run.events[idx:]
+                done = run.done
+            if ping and not batch:
+                yield (-1, {"type": "ping"})
+                continue
+            for offset, event in enumerate(batch):
+                yield (idx + offset, event)
+            idx += len(batch)
+            if done and idx >= len(run.events):
+                return
+
     async def stream_reply(
         self,
         task_id: str,
-        content: str,
+        content: str | None = None,
         *,
+        after: int = 0,
         skip_suggestions: bool = False,
         cancellation: CancellationToken | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
+        """发起新的一轮（content 非空）或续传已有运行（content=None, after=N）。
+
+        每个事件带内部下标 `_id`（SSE 编码成 `id:`），重连按 after 续传。断连只停止跟随，
+        不影响运行；运行在后台独立跑完并落库。
+        """
         task = await asyncio.to_thread(self._store.get_task, task_id)
         if task is None:
             yield {"type": "error", "message": f"task not found: {task_id}"}
             return
-        lock = self._task_locks.setdefault(task_id, asyncio.Lock())
-        async with lock:
-            queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
-
-            async def emit(event: dict[str, Any]) -> None:
-                await queue.put(event)
-
-            # 先取 agent：此时本轮 user 消息尚未落盘，重建重放的历史不含本轮，
-            # arespond 里 record_message 的 user 只出现一次（避免 transcript 重复）。
-            agent = await self._get_agent(task)
-            # 取舍：user 消息先落库，agent transcript 要到 arespond 末尾才补录。若流在这两步
-            # 之间被取消，DB 会多出这条 user 行而缓存 agent 的 transcript 缺失；下一轮缓存命中
-            # 不重放，上下文会短暂缺这一句，直到 evict/重启后从 DB 重放恢复。接受此取舍。
-            # 只在任务当前还没有标题时才需要生成一个新的——标题只在第一条消息时确定一次。
-            is_first_message = task["title"] == ""
-            user_row = await asyncio.to_thread(self._store.append_message, task_id, "user", content)
-            truncated_title = _truncate_title(content)
-            await asyncio.to_thread(self._store.set_title_if_empty, task_id, truncated_title)
-            # 回送落库行的身份：前端据此把 live-N user 泡换成 row-N（删除轮次需要服务端 id），
-            # completedAt 也校准为服务端写入时间。事件发生在 producer 启动前，必为流内首事件。
-            yield {"type": "user_stored", "id": user_row["id"], "created_at": user_row["created_at"]}
-            if is_first_message:
-                # 截断版兜底标题立即推给侧栏——不等模型生成的概括版，避免侧栏在那之前（或
-                # 模型调用失败/超时时）一直显示"（未命名任务）"。概括版生成成功后会覆盖发第二次。
-                yield {"type": "title", "title": truncated_title}
-            pending_calls: list[dict[str, Any]] = []
-            parts: list[str] = []
-            error: str | None = None
-            reply: str | None = None
-
-            async def run_agent() -> None:
-                nonlocal error, reply
-                registry: EventToolRegistry | None = None
-                try:
-                    registry = self._registries.get(task["id"])
-                    if registry is not None:
-                        registry.sink = emit
-                    reply = await agent.arespond_with_callbacks(
-                        content,
-                        on_text_delta=lambda chunk: emit({"type": "delta", "text": chunk}),
-                        on_reasoning_delta=lambda chunk: emit({"type": "reasoning", "text": chunk}),
-                        cancellation=cancellation,
-                    )
-                except Exception as exc:  # noqa: BLE001 - 转成 error 事件交给前端
-                    error = str(exc)
-                finally:
-                    if registry is not None:
-                        registry.sink = None
-                    await queue.put(None)
-
-            producer = asyncio.create_task(run_agent())
-            # 跟进问题推荐并行预发：与回复生成同时起跑（此刻 history 含本轮提问、尚无
-            # 回复正文——推荐语义=从历史+提问延伸）。回复流完时推荐通常已就绪，done 后
-            # 不再串行空等第二次模型调用（实测串行耗时 ~4s：TTFT+思维链+输出）。
-            # 停止/error 路径不产生推荐：统一在 finally 里 cancel，任务不泄漏。
-            # skip_suggestions=True（评估场景）时干脆不起这个任务——省一次模型调用，
-            # 后面 await/cancel 处都判了 None，默认值保证真实聊天路径行为不变。
-            suggest_task = (
-                asyncio.create_task(
-                    suggest_followups(
-                        self._client(),
-                        await asyncio.to_thread(self._store.list_messages, task_id),
-                    )
-                )
-                if not skip_suggestions
-                else None
-            )
-            # 标题同理并行预发：截断版兜底标题已经同步落库过了（上面那行），这里只是
-            # 用一次模型调用去"升级"成概括性标题，失败/超时就保留兜底版，不覆盖。
-            # 复用 skip_suggestions：评估场景的任务立即归档、标题从不展示给用户，不值得
-            # 多打一次模型调用。
-            title_task = (
-                asyncio.create_task(suggest_title(self._client(), content))
-                if is_first_message and not skip_suggestions
-                else None
-            )
-            persisted = False
-            stopped_by_user = False
-            stop_event = self._active_stops[task_id] = asyncio.Event()
-            try:
-                while True:
-                    # 每轮先查停止信号：即使队列里还压着已产事件也立即止步——"停止"就是不再往后播。
-                    if stop_event.is_set():
-                        stopped_by_user = True
-                        break
-                    try:
-                        event = await asyncio.wait_for(queue.get(), timeout=_STREAM_IDLE_S)
-                    except TimeoutError:
-                        # 空闲心跳：ping 由编码层转成 SSE comment 帧，意义仅在于让断连尽早
-                        # 通过下次写失败暴露；不进 parts，也不落库。
-                        yield {"type": "ping"}
-                        continue
-                    if event is None:
-                        break
-                    if event["type"] == "delta":
-                        parts.append(event["text"])
-                    elif event["type"] == "tool_call":
-                        pending_calls.append(event)
-                    elif event["type"] == "tool_result":
-                        call_id = event.get("call_id")
-                        match = next(
-                            (i for i, call in enumerate(pending_calls) if call.get("call_id") == call_id),
-                            None,
-                        ) if call_id is not None else None
-                        arguments = pending_calls.pop(match)["arguments"] if match is not None else {}
-                        await asyncio.to_thread(
-                            self._store.append_message, task_id, "tool",
-                            json.dumps({
-                                "call_id": call_id, "name": event["name"], "arguments": arguments,
-                                "result": event["result"], "ok": event["ok"],
-                            }, ensure_ascii=False),
-                        )
-                    yield event
-                if stopped_by_user:
-                    # 跳到 finally 的统一兜底（partial + stopped 标记落库），不发 done/error
-                    return
-                if error is not None:
-                    yield {"type": "error", "message": error}
-                else:
-                    if not parts and reply:
-                        parts.append(reply)  # 后端未流式时兜底，流式过则不重复追加
-                    final_reply = "".join(parts)
-                    await asyncio.to_thread(self._store.append_message, task_id, "assistant", final_reply)
-                    persisted = True
-                    yield {"type": "done", "reply": final_reply}
-                    # 推荐已在 producer 旁并行预发——回复流式期间它跑完了大半，这里通常直接
-                    # 拿到结果；失败静默为空（suggest_followups 出口无异常）。
-                    if suggest_task is not None:
-                        suggestions = await suggest_task
-                        if suggestions:
-                            yield {"type": "suggestions", "items": suggestions}
-                    # 标题同理：通常已经跑完，拿到就覆盖落库的兜底标题；None（失败/超时）
-                    # 就保留已经同步写过的截断版，不发事件（前端侧栏标题不变）。
-                    if title_task is not None:
-                        new_title = await title_task
-                        if new_title:
-                            await asyncio.to_thread(self._store.update_task, task_id, title=new_title)
-                            yield {"type": "title", "title": new_title}
-                    # 压缩是优化、失败不影响对话：assistant 已落库，此处触发折叠+快照落库，
-                    # DB 顺序 user → tool → assistant → summary，重放时 summary 之后无重复行。
-                    try:
-                        await agent.maybe_compress_history()
-                    except Exception:  # noqa: BLE001 - 摘要失败静默跳过，下轮继续
-                        pass
-            finally:
-                self._active_stops.pop(task_id, None)
-                # 流结束（完成/停止/断连）：未决审批一律按拒绝处理，避免 producer 悬挂到超时。
-                for approval_id, (pending_task, future) in list(self._pending_approvals.items()):
-                    if pending_task == task_id and not future.done():
-                        future.set_result(False)
-                if not producer.done():
-                    # 不等收敛：断连时 starlette 用 anyio cancel scope 取消响应，scope 内任何
-                    # await（含 gather/to_thread）都会再抛 CancelledError（真机实测），
-                    # 连用 await 达成的落库都会半路夭折——所以下端落库必须同步调用；
-                    # producer 是独立 task，不在该 scope 内，自行收尾。
-                    producer.cancel()
-                if suggest_task is not None and not suggest_task.done():
-                    suggest_task.cancel()
-                if title_task is not None and not title_task.done():
-                    title_task.cancel()
-                # 客户端中途断开 / 用户停止（消费循环被 GeneratorExit/CancelledError 打断、
-                # 或 stopped_by_user 提前 return）：正常完成路径的 assistant 落库不可达。
-                # 这里兜底：①有已流出内容则落 assistant partial；②无条件落一行
-                # kind="stopped" 标记——否则立即停止（0 delta）刷新后这次提问像从未发生过。
-                # error 场景前端已有错误泡，保持既有的不落语义（test_agent_error_* 守护）。
-                # parts 在消费循环里随 yield 累积 = 恰好用户实际看到的部分。
-                if not persisted and error is None:
-                    if not parts and reply:
-                        parts.append(reply)
-                    partial = "".join(parts)
-                    if partial:
-                        self._store.append_message(task_id, "assistant", partial)
-                    self._store.append_message(task_id, "stopped", "")
+        self._sweep_runs()
+        run = self._runs.get(task_id)
+        # 运行中又来新消息：拒绝（前端 busy 已禁用输入，这里是防御）。
+        if run is not None and not run.done and content is not None:
+            yield {"type": "error", "message": "a turn is already running for this task"}
+            return
+        # 需要新起一轮：没有运行（且带 content），或上一轮已结束又来了新消息。
+        if run is None or (run.done and content is not None):
+            if content is None:
+                return  # 续传请求但已无运行：无事件可补（前端会刷新历史）
+            lock = self._task_locks.setdefault(task_id, asyncio.Lock())
+            async with lock:
+                run = self._runs.get(task_id)
+                if run is None or run.done:
+                    run = await self._start_run(task, content, skip_suggestions, cancellation)
+        # 其余情况：尾随已有运行（进行中或已结束但在 TTL 窗口内）。
+        assert run is not None
+        async for event_id, event in self._tail(run, after):
+            yield {**event, "_id": event_id}
