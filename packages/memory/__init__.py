@@ -4,8 +4,11 @@
 
 from .episodic import EpisodicMemory
 from .long_term import LongTermMemory
+from .short_term import ShortTermMemory, seed_messages
 
 __all__ = [
     "EpisodicMemory",
     "LongTermMemory",
+    "ShortTermMemory",
+    "seed_messages",
 ]

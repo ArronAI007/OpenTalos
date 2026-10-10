@@ -1,5 +1,7 @@
 from typing import Any
 
+from context import AssemblyConfig, ContextAssembler, MessageLike, Note, TokenBudget, TranscriptStore
+
 
 def seed_messages(system_prompt: str | None, history: list[Any], user_text: str) -> list[dict[str, Any]]:
     """把 system_prompt + 历史 + 本轮 user_text 组装成合法的、OpenAI 兼容的 messages 列表。
@@ -30,3 +32,42 @@ def seed_messages(system_prompt: str | None, history: list[Any], user_text: str)
             messages.append({"role": message.role, "content": message.content})
     messages.append({"role": "user", "content": user_text})
     return messages
+
+
+class ShortTermMemory:
+    """短期记忆：包一层 TranscriptStore（只追加的回合记录）+ ContextAssembler（按轮次截断），
+    对外暴露一个"把当前历史+本轮输入组装成合法 messages 列表"的 build_messages。
+    """
+
+    def __init__(
+        self,
+        min_retain_turns: int = 10,
+        message_type: type[MessageLike] = Note,
+        context_config: AssemblyConfig | None = None,
+        token_budget: TokenBudget | None = None,
+    ) -> None:
+        self._transcript = TranscriptStore(min_retain_turns=min_retain_turns, message_type=message_type)
+        self._config = context_config or AssemblyConfig()
+        self.assembler = ContextAssembler(self._config, token_budget)
+
+    def append(self, message: MessageLike) -> None:
+        self._transcript.append(message)
+
+    def messages(self) -> list[MessageLike]:
+        return self._transcript.messages()
+
+    def clear(self) -> None:
+        self._transcript.clear()
+
+    def compress(self, summary: str) -> bool:
+        return self._transcript.compress(summary)
+
+    def snapshot(self) -> dict:
+        return self._transcript.snapshot()
+
+    def restore(self, data: dict) -> None:
+        self._transcript.restore(data)
+
+    def build_messages(self, system_prompt: str | None, user_text: str) -> list[dict]:
+        selected = self.assembler.select_recent_turns(self.messages(), self._config.budget_tokens)
+        return seed_messages(system_prompt, selected, user_text)
