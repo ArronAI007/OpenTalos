@@ -1,5 +1,5 @@
 from .agent import Agent, AgentPhase, PhaseCallback, PhaseSignal, RuntimeSettings
-from .agent_loop import build_reply_message, execute_model_step, resolve_tool_call, run_tool_turn, seed_messages
+from .agent_loop import build_reply_message, execute_model_step, resolve_tool_call, run_tool_turn
 from .cancellation import CancellationToken
 from .errors import AgentRuntimeError, CoreError, ModelError, OperationCancelled, SettingsError
 from .model import ModelClient
@@ -27,6 +27,5 @@ __all__ = [
     "run_tool_turn",
     "execute_model_step",
     "resolve_tool_call",
-    "seed_messages",
     "build_reply_message",
 ]

@@ -19,36 +19,6 @@ from .model import ModelClient
 ToolInvocationHandler = Callable[[ToolInvocation], Awaitable[dict[str, str]]]
 
 
-def seed_messages(system_prompt: str | None, history: list[Any], user_text: str) -> list[dict[str, Any]]:
-    messages: list[dict[str, Any]] = []
-    if system_prompt:
-        messages.append({"role": "system", "content": system_prompt})
-    for message in history:
-        if message.role == "tool":
-            # 工具结果在 transcript 里只存了 role="tool" 一条，还原成协议要求的两条：
-            # 一条 assistant 的 tool_calls 前导（单 call）+ 一条 tool 结果。前导文本置空——
-            # record 时没保留"模型调工具前说的那句话"，那是次要信息。
-            meta = message.metadata or {}
-            call_id = meta.get("tool_call_id", "")
-            tool_name = meta.get("tool_name", "")
-            arguments = meta.get("arguments", "{}")
-            messages.append({
-                "role": "assistant",
-                "content": "",
-                "tool_calls": [
-                    {"id": call_id, "type": "function", "function": {"name": tool_name, "arguments": arguments}}
-                ],
-            })
-            messages.append({"role": "tool", "tool_call_id": call_id, "content": message.content})
-        elif message.role == "summary":
-            # summary 不是 OpenAI 兼容 role，派生成 system 消息并加前缀，让模型知道这是旧对话摘要。
-            messages.append({"role": "system", "content": f"## Archived Session Summary\n{message.content}"})
-        else:
-            messages.append({"role": message.role, "content": message.content})
-    messages.append({"role": "user", "content": user_text})
-    return messages
-
-
 def build_reply_message(text: str | None, requested_tools: list[ToolInvocation]) -> dict[str, Any]:
     return {
         "role": "assistant",
