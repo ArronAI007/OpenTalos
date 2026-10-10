@@ -117,3 +117,133 @@ async def test_plan_schema_without_roles_is_unchanged_plain_strings(scripted_cli
     answer = await agent.arespond("plan a trip")
 
     assert answer == "result"
+
+
+async def test_step_with_resolved_role_calls_role_dispatcher_instead_of_local_execution(scripted_client):
+    client = scripted_client(
+        tool_completions=[
+            ToolCompletion(
+                text=None,
+                requested_tools=[
+                    ToolInvocation(
+                        call_id="c1", tool_name="propose_steps",
+                        arguments_json='{"steps": [{"text": "look it up", "role": "researcher"}]}',
+                    )
+                ],
+                model_id="mock",
+            ),
+        ],
+    )
+    calls: list[tuple[str, str]] = []
+
+    async def fake_dispatcher(peer_url: str, text: str) -> str:
+        calls.append((peer_url, text))
+        return "dispatched result"
+
+    agent = PlanExecuteAgent(
+        name="bot", model_client=client,
+        roles=[RoleConfig(name="researcher", description="finds facts", peer_url="http://peer")],
+        role_dispatcher=fake_dispatcher,
+    )
+
+    answer = await agent.arespond("plan a trip")
+
+    assert answer == "dispatched result"
+    assert len(calls) == 1
+    assert calls[0][0] == "http://peer"
+    assert "look it up" in calls[0][1]  # context 文本里包含这一步的描述
+
+
+async def test_role_dispatch_failure_becomes_step_result_text_and_does_not_crash(scripted_client):
+    # 第一步分配了角色（走 failing_dispatcher，不碰模型），第二步没分配角色（走本地
+    # run_tool_turn，没有 tool_registry 时调的是 acomplete()，走 completions 队列）。
+    client = scripted_client(
+        completions=[Completion(text="final result", model_id="mock")],
+        tool_completions=[
+            ToolCompletion(
+                text=None,
+                requested_tools=[
+                    ToolInvocation(
+                        call_id="c1", tool_name="propose_steps",
+                        arguments_json=(
+                            '{"steps": [{"text": "look it up", "role": "researcher"}, '
+                            '{"text": "write it up"}]}'
+                        ),
+                    )
+                ],
+                model_id="mock",
+            ),
+        ],
+    )
+
+    async def failing_dispatcher(peer_url: str, text: str) -> str:
+        raise ConnectionError("peer unreachable")
+
+    agent = PlanExecuteAgent(
+        name="bot", model_client=client,
+        roles=[RoleConfig(name="researcher", description="finds facts", peer_url="http://peer")],
+        role_dispatcher=failing_dispatcher,
+    )
+
+    answer = await agent.arespond("plan a trip")
+
+    assert answer == "final result"  # 第二步正常继续，没有因为第一步失败而整体崩溃
+
+
+async def test_step_without_role_still_uses_local_execution_even_with_dispatcher_configured(scripted_client):
+    client = scripted_client(
+        tool_completions=[
+            ToolCompletion(
+                text=None,
+                requested_tools=[
+                    ToolInvocation(call_id="c1", tool_name="propose_steps", arguments_json='{"steps": ["step one"]}')
+                ],
+                model_id="mock",
+            ),
+        ],
+        completions=[Completion(text="local result", model_id="mock")],
+    )
+
+    async def unused_dispatcher(peer_url: str, text: str) -> str:
+        raise AssertionError("role_dispatcher must not be called for a step with no role")
+
+    agent = PlanExecuteAgent(
+        name="bot", model_client=client,
+        roles=[RoleConfig(name="researcher", description="finds facts", peer_url="http://peer")],
+        role_dispatcher=unused_dispatcher,
+    )
+
+    answer = await agent.arespond("plan a trip")
+
+    assert answer == "local result"
+
+
+async def test_unresolvable_role_name_falls_back_to_local_execution(scripted_client):
+    client = scripted_client(
+        tool_completions=[
+            ToolCompletion(
+                text=None,
+                requested_tools=[
+                    ToolInvocation(
+                        call_id="c1", tool_name="propose_steps",
+                        arguments_json='{"steps": [{"text": "step one", "role": "no-such-role"}]}',
+                    )
+                ],
+                model_id="mock",
+            ),
+        ],
+        completions=[Completion(text="local result", model_id="mock")],
+    )
+
+    async def unused_dispatcher(peer_url: str, text: str) -> str:
+        raise AssertionError("role_dispatcher must not be called for an unresolvable role name")
+
+    agent = PlanExecuteAgent(
+        name="bot", model_client=client,
+        roles=[RoleConfig(name="researcher", description="finds facts", peer_url="http://peer")],
+        role_dispatcher=unused_dispatcher,
+    )
+
+    answer = await agent.arespond("plan a trip")
+
+    assert answer == "local result"

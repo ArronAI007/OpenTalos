@@ -1,4 +1,5 @@
 import json
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from core.agent import Agent, AssemblyConfig, OutputTrimmer, RuntimeSettings
@@ -41,6 +42,9 @@ class RoleConfig:
 class PlanStep:
     text: str
     role: str | None = None
+
+
+RoleDispatcher = Callable[[str, str], Awaitable[str]]
 
 
 def _build_propose_steps_tool(roles: list[RoleConfig]) -> dict:
@@ -110,6 +114,7 @@ class PlanExecuteAgent(Agent):
         compaction_token_limit: int | None = None,
         output_trimmer: OutputTrimmer | None = None,
         roles: list[RoleConfig] | None = None,
+        role_dispatcher: RoleDispatcher | None = None,
     ) -> None:
         super().__init__(
             name,
@@ -126,6 +131,7 @@ class PlanExecuteAgent(Agent):
         self.max_tool_iterations = max_tool_iterations
         self.runner_system_prompt = runner_system_prompt or DEFAULT_RUNNER_PROMPT
         self.roles = roles or []
+        self.role_dispatcher = role_dispatcher
 
     async def arespond(self, input_text: str, **kwargs: object) -> str:
         steps = await self._plan(input_text, **kwargs)
@@ -188,21 +194,37 @@ class PlanExecuteAgent(Agent):
         answer = ""
         for index, step in enumerate(steps, start=1):
             context = _render_step(question, steps, history, step)
-            messages = [{"role": "system", "content": self.runner_system_prompt}, {"role": "user", "content": context}]
+            role = self._resolve_role(step.role)
             if self.recorder:
-                self.recorder.log_event("step_start", {"step_text": step.text}, step=index)
-            answer = await run_tool_turn(
-                self.model_client,
-                messages,
-                self.tool_registry,
-                self.max_tool_iterations,
-                self.recorder,
-                trimmer=self.output_trimmer,
-                on_tool_result=self.record_tool_result,
-                **kwargs,
-            )
+                self.recorder.log_event(
+                    "step_start", {"step_text": step.text, "role": role.name if role else None}, step=index
+                )
+            if role is not None and self.role_dispatcher is not None:
+                try:
+                    answer = await self.role_dispatcher(role.peer_url, context)
+                except Exception as exc:  # noqa: BLE001 - 单步委派失败不连累其他步骤
+                    answer = f"(role dispatch to '{role.name}' failed: {type(exc).__name__}: {exc})"
+            else:
+                messages = [
+                    {"role": "system", "content": self.runner_system_prompt}, {"role": "user", "content": context}
+                ]
+                answer = await run_tool_turn(
+                    self.model_client,
+                    messages,
+                    self.tool_registry,
+                    self.max_tool_iterations,
+                    self.recorder,
+                    trimmer=self.output_trimmer,
+                    on_tool_result=self.record_tool_result,
+                    **kwargs,
+                )
             history.append((step, answer))
         return answer
+
+    def _resolve_role(self, role_name: str | None) -> RoleConfig | None:
+        if not role_name:
+            return None
+        return next((r for r in self.roles if r.name == role_name), None)
 
 
 def _render_step(question: str, steps: list[PlanStep], history: list[tuple[PlanStep, str]], current: PlanStep) -> str:
