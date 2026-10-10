@@ -12,6 +12,7 @@ import {
   type DeepResearchTodo,
 } from "@/lib/deepresearch-api";
 import { TrashIcon } from "@/components/ui/icons";
+import { PageSkeleton } from "@/components/ui/PageSkeleton";
 
 function formatTimestamp(createdAt: string): string {
   return createdAt.replace("T", " ").slice(0, 19);
@@ -164,7 +165,7 @@ export default function DeepResearchPage() {
     setExpandedRunId((prev) => (prev === id ? null : prev));
   };
 
-  if (runs === null) return null;
+  if (runs === null) return <PageSkeleton />;
 
   return (
     <section className="p-6">

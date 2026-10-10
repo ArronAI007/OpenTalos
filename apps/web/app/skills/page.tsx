@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { listSkills, addMySkill, removeMySkill, type SkillsResponse } from "@/lib/api";
 import { filterSkills, filterSkillsByCategory } from "@/lib/skills-filter";
 import { SearchIcon } from "@/components/ui/icons";
+import { PageSkeleton } from "@/components/ui/PageSkeleton";
 import { CreateSkillMenu } from "@/components/skills/CreateSkillMenu";
 import { SkillCard } from "@/components/skills/SkillCard";
 import { MyAddedSkillsModal } from "@/components/skills/MyAddedSkillsModal";
@@ -26,7 +27,7 @@ export default function SkillsPage() {
     refresh();
   }, []);
 
-  if (payload === null) return null;
+  if (payload === null) return <PageSkeleton />;
 
   if (!payload.reachable) {
     return (

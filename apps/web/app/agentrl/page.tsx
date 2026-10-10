@@ -9,6 +9,7 @@ import {
   type AgentRLRun,
 } from "@/lib/agentrl-api";
 import { TrashIcon } from "@/components/ui/icons";
+import { PageSkeleton } from "@/components/ui/PageSkeleton";
 
 const DEFAULTS = { sft_samples: 10, sft_steps: 5, grpo_samples: 10, grpo_steps: 5 };
 const MAX_VALUE = 50;
@@ -138,7 +139,7 @@ export default function AgentRLPage() {
     setExpandedRunId((prev) => (prev === id ? null : prev));
   };
 
-  if (runs === null) return null;
+  if (runs === null) return <PageSkeleton />;
 
   return (
     <section className="p-6">

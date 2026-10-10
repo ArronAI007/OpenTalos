@@ -10,6 +10,7 @@ import {
   type MCPServer,
 } from "@/lib/mcp-api";
 import { TrashIcon } from "@/components/ui/icons";
+import { PageSkeleton } from "@/components/ui/PageSkeleton";
 
 function ConfirmDeleteServerDialog({
   open,
@@ -107,7 +108,7 @@ export default function MCPPage() {
     setServers((prev) => prev?.filter((s) => s.id !== id) ?? null);
   };
 
-  if (servers === null) return null;
+  if (servers === null) return <PageSkeleton />;
 
   return (
     <section className="p-6">

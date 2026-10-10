@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   listEvalCases,
   createEvalCase,
@@ -14,6 +14,8 @@ import {
   type EvalRun,
 } from "@/lib/api";
 import { TrashIcon } from "@/components/ui/icons";
+import { ErrorState } from "@/components/ui/ErrorState";
+import { PageSkeleton } from "@/components/ui/PageSkeleton";
 
 // 汇总：均分取三维度总均值，通过率＝均分 >=3.5 的用例占比
 // （沿用参考资料里"数据生成质量评估"章节对 Pass Rate 阈值的约定）。不再按 agent 类型分组——
@@ -185,6 +187,13 @@ export default function EvalPage() {
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const reloadRuns = useCallback(() => {
+    setHistoryError(null);
+    listEvalRuns()
+      .then(setRuns)
+      .catch(() => setHistoryError("历史记录加载失败，请重试"));
+  }, []);
+
   useEffect(() => {
     listEvalCases().then((loaded) => {
       setCases(loaded);
@@ -193,10 +202,11 @@ export default function EvalPage() {
     fetchConfig().then((config) => {
       setAgentTypes(config.agent_types);
     });
-    listEvalRuns().then(setRuns);
-  }, []);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 挂载时拉历史记录（含错误态），与既有页面同范式
+    reloadRuns();
+  }, [reloadRuns]);
 
-  if (cases === null) return null;
+  if (cases === null) return <PageSkeleton />;
 
   const handleAddCase = async () => {
     const trimmedInstruction = instruction.trim();
@@ -349,7 +359,7 @@ export default function EvalPage() {
 
       <div className="rounded-xl border border-border bg-white p-4">
         <h2 className="mb-3 text-sm font-medium">历史评估记录</h2>
-        {historyError && <p className="mb-3 text-xs text-red-500">{historyError}</p>}
+        {historyError && <ErrorState message={historyError} onRetry={reloadRuns} />}
         {!runs || runs.length === 0 ? (
           <p className="text-sm text-text-secondary">还没有评估记录，运行一次评估后会显示在这里。</p>
         ) : (
