@@ -9,7 +9,7 @@ from typing import Any
 from . import html_report
 from .stats import summarize
 
-_API_KEY_PATTERN = re.compile(r"sk-[a-zA-Z0-9]+")
+_API_KEY_PATTERN = re.compile(r"\bsk-[a-zA-Z0-9]+")
 _BEARER_TOKEN_PATTERN = re.compile(r"Bearer\s+[a-zA-Z0-9_\-]+")
 _HOME_DIR_PATTERN = re.compile(r"(/Users/|/home/|C:\\Users\\)[^/\\]+")
 
@@ -47,16 +47,19 @@ class RunRecorder:
         self,
         output_dir: str = "traces",
         redact_payloads: bool = True,
-        include_raw_html: bool = False,
+        max_sessions: int | None = 200,
     ) -> None:
         self.output_dir = Path(output_dir)
         self.redact_payloads = redact_payloads
-        self.include_raw_html = include_raw_html
 
         self.session_id = _new_session_id()
         self._events: list[dict[str, Any]] = []
 
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        # 先清掉最旧的 session，保证目录不会无限增长：保留 max_sessions-1 份旧 trace，
+        # 加上本次新建的正好 max_sessions 份。max_sessions=None 关闭清理。
+        if max_sessions is not None:
+            prune_sessions(self.output_dir, max(0, max_sessions - 1))
         self.jsonl_path = self.output_dir / f"{self.session_id}.jsonl"
         self.html_path = self.output_dir / f"{self.session_id}.html"
 
@@ -108,6 +111,25 @@ class RunRecorder:
             )
         self.finalize()
         return False
+
+
+def prune_sessions(output_dir: Path, keep: int) -> int:
+    """只保留最近 keep 个 session（每个 session = 一对同名 .jsonl/.html），返回删除的文件数。
+
+    按文件 mtime 排序；同 stem 的两个文件一起删，不会留下半个 session。
+    """
+    stems: dict[str, float] = {}
+    for path in output_dir.glob("run-*"):
+        if path.suffix in {".jsonl", ".html"}:
+            stems[path.stem] = max(stems.get(path.stem, 0.0), path.stat().st_mtime)
+    removed = 0
+    for stem, _ in sorted(stems.items(), key=lambda item: item[1], reverse=True)[keep:]:
+        for suffix in (".jsonl", ".html"):
+            path = output_dir / f"{stem}{suffix}"
+            if path.exists():
+                path.unlink()
+                removed += 1
+    return removed
 
 
 def _new_session_id() -> str:

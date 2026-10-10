@@ -82,6 +82,13 @@ def render_footer(stats: dict[str, Any]) -> str:
         for name, count in sorted(stats["tool_calls"].items(), key=lambda item: item[1], reverse=True)
     ) or '<tr><td colspan="2">No tool calls</td></tr>'
 
+    # 成本只有在供应商上报 usage.cost 时才有意义；拿不到就不展示假值 $0.0000。
+    cost_card = (
+        f'<div class="stat"><span class="label">Cost</span><span class="value">${stats["total_cost"]:.4f}</span></div>'
+        if stats["total_cost"] > 0
+        else ""
+    )
+
     error_section = ""
     if stats["errors"]:
         error_items = "".join(
@@ -98,7 +105,7 @@ def render_footer(stats: dict[str, Any]) -> str:
   <div class="stats-grid">
     <div class="stat"><span class="label">Steps</span><span class="value">{stats["total_steps"]}</span></div>
     <div class="stat"><span class="label">Tokens</span><span class="value">{stats["total_tokens"]:,}</span></div>
-    <div class="stat"><span class="label">Cost</span><span class="value">${stats["total_cost"]:.4f}</span></div>
+    {cost_card}
     <div class="stat"><span class="label">Duration</span><span class="value">{stats["duration_seconds"]:.1f}s</span></div>
     <div class="stat"><span class="label">Model calls</span><span class="value">{stats["model_calls"]}</span></div>
   </div>

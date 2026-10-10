@@ -961,3 +961,19 @@ def test_aclose_is_a_noop_when_no_model_client_was_constructed(store) -> None:
     runtime = ChatRuntime(store, model_client=None, skill_service_url="http://127.0.0.1:1")
 
     asyncio.run(runtime.aclose())  # 懒构造从未发生，不应抛异常
+
+
+def test_stream_reply_writes_a_complete_trace_with_task_id(store, scripted_client, tmp_path) -> None:
+    client = scripted_client(tool_completions=[ToolCompletion(text="你好", requested_tools=[], model_id="mock-model")])
+    runtime = _runtime(store, client, tmp_path)
+    task = store.create_task("react")
+
+    asyncio.run(_collect(runtime, task["id"], "hi"))
+
+    traces = list((tmp_path / "traces").glob("run-*.jsonl"))
+    assert len(traces) == 1
+    events = [json.loads(line) for line in traces[0].read_text(encoding="utf-8").splitlines()]
+    assert events[0]["event"] == "session_start"
+    assert events[0]["payload"]["task_id"] == task["id"]  # HTTP 请求 ↔ trace 关联
+    assert events[-1]["event"] == "session_end"
+    assert "Session Stats" in traces[0].with_suffix(".html").read_text(encoding="utf-8")

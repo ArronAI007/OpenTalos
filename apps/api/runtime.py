@@ -235,6 +235,7 @@ class ChatRuntime:
             tool_registry=self._build_registry(task["id"]),
             system_prompt_suffix=self._skills_suffix,
             trace_dir=str(self._trace_dir) if self._trace_dir else None,
+            trace_metadata={"task_id": task["id"]},
             compaction_token_limit=self._compaction_token_limit,
         )
 
@@ -339,7 +340,7 @@ class ChatRuntime:
                     registry = self._registries.get(task["id"])
                     if registry is not None:
                         registry.sink = emit
-                    reply = await agent.arespond(
+                    reply = await agent.arespond_with_callbacks(
                         content,
                         on_text_delta=lambda chunk: emit({"type": "delta", "text": chunk}),
                         on_reasoning_delta=lambda chunk: emit({"type": "reasoning", "text": chunk}),

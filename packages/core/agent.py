@@ -58,6 +58,7 @@ class Agent(ABC):
         context_config: AssemblyConfig | None = None,
         min_retain_turns: int = 10,
         trace_dir: str | None = None,
+        trace_metadata: dict[str, Any] | None = None,
         compaction_token_limit: int | None = None,
         output_trimmer: OutputTrimmer | None = None,
     ) -> None:
@@ -68,7 +69,12 @@ class Agent(ABC):
         self._short_term = ShortTermMemory(
             min_retain_turns=min_retain_turns, message_type=ChatMessage, context_config=context_config
         )
-        self.recorder: RunRecorder | None = RunRecorder(output_dir=trace_dir) if trace_dir else None
+        self.recorder: RunRecorder | None = None
+        # 一轮运行一份 trace：recorder 在 begin_trace()（arespond_with_callbacks 入口）创建、
+        # end_trace() finalize；轮与轮之间为 None。trace_metadata 会写进 session_start，
+        # 供按 HTTP 请求/task 关联 trace。
+        self._trace_dir = trace_dir
+        self._trace_metadata = trace_metadata or {}
         self.compaction_token_limit = compaction_token_limit
         # 不为空时，工具输出超限会被截断、完整内容落盘（OutputTrimmer 构造即建目录，所以默认不建）。
         self.output_trimmer = output_trimmer
@@ -80,6 +86,25 @@ class Agent(ABC):
     @abstractmethod
     async def arespond(self, input_text: str, **kwargs: object) -> str: ...
 
+    def begin_trace(self) -> None:
+        """一轮运行开始：新建一份 trace（JSONL+HTML）并记录 session_start。未配置 trace_dir 时 no-op。"""
+        if self._trace_dir is None:
+            return
+        self.recorder = RunRecorder(output_dir=self._trace_dir)
+        self.recorder.log_event(
+            "session_start",
+            {"agent_name": self.name, "agent_type": type(self).__name__, **self._trace_metadata},
+        )
+
+    def end_trace(self, *, status: str = "completed", error: str | None = None) -> dict[str, Any] | None:
+        """一轮运行结束：记 session_end、写 HTML 统计面板并关闭文件。幂等（无 recorder 时 no-op）。"""
+        if self.recorder is None:
+            return None
+        self.recorder.log_event("session_end", {"status": status, **({"error": error} if error else {})})
+        stats = self.recorder.finalize()
+        self.recorder = None
+        return stats
+
     async def arespond_with_callbacks(
         self,
         input_text: str,
@@ -88,14 +113,23 @@ class Agent(ABC):
         on_error: PhaseCallback = None,
         **kwargs: object,
     ) -> str:
-        await self._notify(AgentPhase.STARTED, on_start, input_text=input_text)
+        self.begin_trace()
+        status, error_text = "completed", None
         try:
-            result = await self.arespond(input_text, **kwargs)
-        except Exception as error:
-            await self._notify(AgentPhase.FAILED, on_error, error=str(error), error_type=type(error).__name__)
-            raise
-        await self._notify(AgentPhase.FINISHED, on_finish, result=result)
-        return result
+            await self._notify(AgentPhase.STARTED, on_start, input_text=input_text)
+            try:
+                result = await self.arespond(input_text, **kwargs)
+            except asyncio.CancelledError:
+                status = "cancelled"
+                raise
+            except Exception as error:
+                status, error_text = "failed", str(error)
+                await self._notify(AgentPhase.FAILED, on_error, error=error_text, error_type=type(error).__name__)
+                raise
+            await self._notify(AgentPhase.FINISHED, on_finish, result=result)
+            return result
+        finally:
+            self.end_trace(status=status, error=error_text)
 
     async def _notify(self, phase: AgentPhase, callback: PhaseCallback, **data: object) -> None:
         if callback is None:

@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 import pytest
 
@@ -135,11 +136,38 @@ def test_recorder_is_none_by_default(model_client):
     assert agent.recorder is None
 
 
-def test_recorder_is_created_when_trace_dir_is_given(model_client, tmp_path):
+def test_recorder_is_created_per_turn_and_finalized(model_client, tmp_path):
     agent = _EchoAgent(name="echo", model_client=model_client, trace_dir=str(tmp_path))
-    assert agent.recorder is not None
-    agent.recorder.finalize()
-    assert agent.recorder.jsonl_path.parent == tmp_path
+    assert agent.recorder is None  # 一轮一份：轮与轮之间不持有 recorder
+
+    asyncio.run(agent.arespond_with_callbacks("hi"))
+
+    assert agent.recorder is None  # 轮末已 finalize
+    jsonl_files = list(tmp_path.glob("run-*.jsonl"))
+    html_files = list(tmp_path.glob("run-*.html"))
+    assert len(jsonl_files) == 1 and len(html_files) == 1
+
+    events = [json.loads(line)["event"] for line in jsonl_files[0].read_text(encoding="utf-8").splitlines()]
+    assert events[0] == "session_start"
+    assert events[-1] == "session_end"
+    # 统计面板只在 finalize 时写；生产路径下以前永远不会出现
+    assert "Session Stats" in html_files[0].read_text(encoding="utf-8")
+
+
+def test_each_turn_produces_its_own_trace(model_client, tmp_path):
+    agent = _EchoAgent(name="echo", model_client=model_client, trace_dir=str(tmp_path))
+    asyncio.run(agent.arespond_with_callbacks("one"))
+    asyncio.run(agent.arespond_with_callbacks("two"))
+    assert len(list(tmp_path.glob("run-*.jsonl"))) == 2
+
+
+def test_trace_metadata_lands_in_session_start(model_client, tmp_path):
+    agent = _EchoAgent(
+        name="echo", model_client=model_client, trace_dir=str(tmp_path), trace_metadata={"task_id": "t-1"}
+    )
+    asyncio.run(agent.arespond_with_callbacks("hi"))
+    first = next(tmp_path.glob("run-*.jsonl")).read_text(encoding="utf-8").splitlines()[0]
+    assert json.loads(first)["payload"]["task_id"] == "t-1"
 
 
 async def test_maybe_compress_history_is_a_noop_when_compaction_is_disabled(model_client):

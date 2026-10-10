@@ -65,6 +65,18 @@ WEB_PORT="${PORT:-3010}"
 LOG_DIR=".data/logs"
 mkdir -p "$LOG_DIR" "$PID_DIR"
 
+# 单个日志文件上限：超过则在启动该服务前轮转一份（保留 .1），避免长期运行无限增长。
+MAX_LOG_BYTES=$((10 * 1024 * 1024))
+rotate_log() {
+  local f="$1"
+  [ -f "$f" ] || return 0
+  local size
+  size="$(wc -c <"$f" 2>/dev/null || echo 0)"
+  if [ "$size" -ge "$MAX_LOG_BYTES" ]; then
+    mv -f "$f" "$f.1"
+  fi
+}
+
 # CORS 白名单默认跟随 web 端口（API 端按 Origin 精确匹配）。注意：若复用已在跑的旧 API 进程，
 # CORS 以旧进程启动时的值为准。
 export CORS_ORIGINS="${CORS_ORIGINS:-http://localhost:${WEB_PORT}}"
@@ -77,6 +89,7 @@ ensure_service() {  # $1=名称 $2=端口 $3=日志文件 $4=健康检查 URL；
     echo "$name already running on :$port — reusing it (not managed by start.sh stop)"
     return 0
   fi
+  rotate_log "$log_file"
   echo "starting $name on :$port ... (log: $log_file)"
   "$@" >>"$log_file" 2>&1 &
   local pid=$!
@@ -116,6 +129,7 @@ if curl -sf "http://localhost:${WEB_PORT}" >/dev/null 2>&1; then
   echo "web already running on :$WEB_PORT — reusing it (not managed by start.sh stop)"
 else
   [ -d apps/web/node_modules ] || (cd apps/web && pnpm install)
+  rotate_log "$LOG_DIR/web.log"
   echo "starting web frontend on :$WEB_PORT ... (log: $LOG_DIR/web.log)"
   # -p 固定端口，被占即 fail-fast；子 shell 整体后台，日志入文件
   (cd apps/web && NEXT_PUBLIC_API_URL="$API_URL" NEXT_PUBLIC_AGENTRL_URL="$AGENTRL_URL" pnpm dev -p "$WEB_PORT") >>"$LOG_DIR/web.log" 2>&1 &

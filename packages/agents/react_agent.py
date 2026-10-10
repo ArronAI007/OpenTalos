@@ -46,6 +46,7 @@ class ReActAgent(Agent):
         context_config: AssemblyConfig | None = None,
         min_retain_turns: int = 10,
         trace_dir: str | None = None,
+        trace_metadata: dict[str, Any] | None = None,
         compaction_token_limit: int | None = None,
         output_trimmer: OutputTrimmer | None = None,
     ) -> None:
@@ -57,6 +58,7 @@ class ReActAgent(Agent):
             context_config,
             min_retain_turns,
             trace_dir,
+            trace_metadata,
             compaction_token_limit,
             output_trimmer,
         )
