@@ -194,6 +194,32 @@ export function turnUserMessage(
   return null;
 }
 
+// 虚拟列表用：哪些消息真正渲染成一行。被并入相邻块（非思考单元起始行、已并入回复块的思考单元）
+// 或被停止提示吸收的行会被排除，避免它们成为 0 高度 item 造成估算到实测的滚动抖动。
+export function visibleIndexes(messages: UiMessage[]): number[] {
+  const indexes: number[] = [];
+  for (let index = 0; index < messages.length; index++) {
+    const message = messages[index];
+    if (message.kind === "reasoning" || message.kind === "tool") {
+      const prev = index > 0 ? messages[index - 1] : undefined;
+      if (prev !== undefined && (prev.kind === "reasoning" || prev.kind === "tool")) continue; // 非单元起始行
+      let end = index;
+      while (end < messages.length && (messages[end].kind === "reasoning" || messages[end].kind === "tool")) end++;
+      if (end < messages.length && messages[end].kind === "assistant") continue; // 已并入回复块
+      indexes.push(index);
+      continue;
+    }
+    if (message.kind === "stopped") {
+      const prevKind = messages[index - 1]?.kind;
+      if (prevKind === "assistant" || prevKind === "reasoning" || prevKind === "tool") continue; // 已并入回复块
+      indexes.push(index);
+      continue;
+    }
+    indexes.push(index);
+  }
+  return indexes;
+}
+
 // now 仅用于 done/error 定稿时给 assistant 泡落 completedAt（默认 Date.now()，测试注入固定值）
 export function reduceChatEvent(prev: UiMessage[], event: ChatEvent, now = Date.now()): UiMessage[] {
   switch (event.type) {

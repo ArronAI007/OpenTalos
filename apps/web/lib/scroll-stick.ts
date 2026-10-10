@@ -12,7 +12,3 @@ interface ScrollMetrics {
 export function isNearBottom(el: ScrollMetrics, threshold: number = NEAR_BOTTOM_PX): boolean {
   return el.scrollHeight - el.scrollTop - el.clientHeight <= threshold;
 }
-
-export function scrollToBottom(el: ScrollMetrics): void {
-  el.scrollTop = el.scrollHeight;
-}

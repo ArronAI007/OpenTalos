@@ -11,6 +11,7 @@ import {
   reduceChatEvent,
   shouldShowThinkingHint,
   turnUserMessage,
+  visibleIndexes,
   type UiMessage,
 } from "./chat-events";
 
@@ -387,6 +388,43 @@ describe("steer_interrupt", () => {
       { id: "live-2", kind: "reasoning", content: "想", streaming: true },
     ];
     expect(reduceChatEvent(msgs, { type: "steer_interrupt" }).map((m) => m.id)).toEqual(["row-1", "row-2"]);
+  });
+});
+
+describe("visibleIndexes（虚拟化可见行）", () => {
+  it("merges a thinking run into the reply that follows it", () => {
+    const msgs: UiMessage[] = [
+      { id: "u1", kind: "user", content: "问" },
+      { id: "r1", kind: "reasoning", content: "想", streaming: false },
+      { id: "t1", kind: "tool", name: "echo", arguments: {} },
+      { id: "a1", kind: "assistant", content: "答" },
+    ];
+    expect(visibleIndexes(msgs)).toEqual([0, 3]);
+  });
+
+  it("keeps only the first row of a standalone thinking run", () => {
+    const msgs: UiMessage[] = [
+      { id: "u1", kind: "user", content: "问" },
+      { id: "r1", kind: "reasoning", content: "想", streaming: false },
+      { id: "t1", kind: "tool", name: "echo", arguments: {} },
+    ];
+    expect(visibleIndexes(msgs)).toEqual([0, 1]);
+  });
+
+  it("drops a stopped row merged into the previous reply but keeps an isolated one", () => {
+    expect(
+      visibleIndexes([
+        { id: "u1", kind: "user", content: "问" },
+        { id: "a1", kind: "assistant", content: "答" },
+        { id: "s1", kind: "stopped" },
+      ]),
+    ).toEqual([0, 1]);
+    expect(
+      visibleIndexes([
+        { id: "u1", kind: "user", content: "问" },
+        { id: "s1", kind: "stopped" },
+      ]),
+    ).toEqual([0, 1]);
   });
 });
 

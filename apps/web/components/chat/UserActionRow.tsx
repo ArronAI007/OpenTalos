@@ -92,7 +92,7 @@ export function UserActionRow({ content, completedAt, taskId, busy, onEdit, onDe
     if (!menuOpen) return;
     const trigger = menuRef.current;
     const panel = panelRef.current;
-    const list = trigger?.closest("ol"); // 最近滚动容器（MessageList 的消息列表）
+    const list = trigger?.closest("[data-message-scroll]"); // 最近滚动容器（MessageList 的消息列表）
     if (!trigger || !panel || !list) return;
     // 用触发器底沿 + 面板高度推算向下展开的落点，与面板当前摆放（flipUp 残留值）无关——
     // 若量面板自身 rect，上次残留的 flip 会让重开先渲染在上方、误判没越界、回落下方再被裁。
