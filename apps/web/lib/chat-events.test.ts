@@ -44,11 +44,11 @@ describe("reduceChatEvent", () => {
 
   it("pairs tool_result with the earliest unmatched tool_call of the same name", () => {
     let msgs: UiMessage[] = [];
-    msgs = reduceChatEvent(msgs, { type: "tool_call", name: "read_skill", arguments: { skill_name: "date" } });
-    msgs = reduceChatEvent(msgs, { type: "tool_call", name: "run_skill_script", arguments: { skill_name: "date" } });
-    msgs = reduceChatEvent(msgs, { type: "tool_result", name: "read_skill", result: "# date …", ok: true });
-    expect(msgs[0]).toMatchObject({ id: "live-1", kind: "tool", name: "read_skill", ok: true, result: "# date …" });
-    expect(msgs[1]).toMatchObject({ id: "live-2", kind: "tool", name: "run_skill_script", result: undefined });
+    msgs = reduceChatEvent(msgs, { type: "tool_call", name: "read", arguments: { path: "/skills/date/SKILL.md" } });
+    msgs = reduceChatEvent(msgs, { type: "tool_call", name: "bash", arguments: { path: "/skills/date/SKILL.md" } });
+    msgs = reduceChatEvent(msgs, { type: "tool_result", name: "read", result: "# date …", ok: true });
+    expect(msgs[0]).toMatchObject({ id: "live-1", kind: "tool", name: "read", ok: true, result: "# date …" });
+    expect(msgs[1]).toMatchObject({ id: "live-2", kind: "tool", name: "bash", result: undefined });
   });
 
   it("done finalizes the assistant message and stamps completedAt from the injected now", () => {
@@ -113,11 +113,11 @@ describe("finalizeStreaming", () => {
 
   it("leaves user and tool bubbles untouched, and the next reply starts fresh", () => {
     let msgs: UiMessage[] = [{ id: "row-1", kind: "user", content: "问" }];
-    msgs = reduceChatEvent(msgs, { type: "tool_call", name: "read_skill", arguments: {} });
+    msgs = reduceChatEvent(msgs, { type: "tool_call", name: "read", arguments: {} });
     msgs = reduceChatEvent(msgs, { type: "delta", text: "查" });
     msgs = finalizeStreaming(msgs, 1700000000003);
     expect(msgs[0]).toEqual({ id: "row-1", kind: "user", content: "问" });
-    expect(msgs[1]).toMatchObject({ kind: "tool", name: "read_skill", result: undefined });
+    expect(msgs[1]).toMatchObject({ kind: "tool", name: "read", result: undefined });
     expect(msgs[2]).toMatchObject({ kind: "assistant", streaming: false, completedAt: 1700000000003 });
     msgs = reduceChatEvent(msgs, { type: "delta", text: "新回复" });
     expect(msgs[3]).toEqual({ id: "live-3", kind: "assistant", content: "新回复", streaming: true });
@@ -483,16 +483,16 @@ describe("approval（副作用工具人工确认）", () => {
     const msgs = reduceChatEvent([], {
       type: "approval_required",
       approval_id: "a1",
-      name: "run_skill_script",
-      arguments: { skill_name: "date" },
+      name: "bash",
+      arguments: { path: "/skills/date/SKILL.md" },
     });
     expect(msgs).toEqual([
       {
         id: "live-1",
         kind: "approval",
         approvalId: "a1",
-        name: "run_skill_script",
-        arguments: { skill_name: "date" },
+        name: "bash",
+        arguments: { path: "/skills/date/SKILL.md" },
         status: "pending",
       },
     ]);

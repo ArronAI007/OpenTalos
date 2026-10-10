@@ -30,8 +30,8 @@ export function humanizeReasoning(raw: string): string {
 const TOOL_LABELS: Record<string, string> = {
   web_search: "网页搜索",
   web_extractor: "抓取网页",
-  read_skill: "读取技能",
-  run_skill_script: "运行脚本",
+  read: "读取文件",
+  bash: "执行命令",
   ask_peer_agent: "询问协作 Agent",
   dispatch_subagent: "派发子任务",
   finish: "整理答案",
@@ -41,13 +41,12 @@ const TOOL_LABELS: Record<string, string> = {
 const DETAIL_KEYS = [
   "query",
   "question",
-  "skill_name",
+  "command",
   "description",
   "prompt",
   "urls",
   "url",
   "path",
-  "input_text",
   "text",
   "name",
 ];

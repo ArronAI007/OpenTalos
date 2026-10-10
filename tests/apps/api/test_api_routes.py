@@ -25,7 +25,6 @@ def api(tmp_path, scripted_client):
     runtime = ChatRuntime(
         ChatStore(tmp_path / "chat.db"),
         model_client=client,
-        skill_service_url="http://127.0.0.1:1",
         trace_dir=tmp_path / "traces",
     )
     app = create_app(runtime, eval_cases_path=tmp_path / "eval_cases.json")
@@ -259,48 +258,86 @@ async def test_message_on_missing_task_404(api) -> None:
     assert resp.status_code == 404
 
 
-async def test_skills_proxy_degrades_when_unreachable(api) -> None:
+def _write_skill(root: Path, name: str, description: str) -> None:
+    skill_dir = root / name
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: {description}\n---\n# {name}\n\nBody.\n", encoding="utf-8"
+    )
+
+
+def _patch_skill_paths(monkeypatch, tmp_path: Path) -> Path:
+    """把进程内技能存储改到临时目录，避免污染仓库 .data/ 与真实 skills/。"""
+    import main as main_module
+
+    skills_root = tmp_path / "skills"
+    monkeypatch.setattr(main_module, "_SKILLS_ROOT", skills_root)
+    monkeypatch.setattr(main_module, "_MY_SKILLS_PATH", tmp_path / "my_skills.json")
+    monkeypatch.setattr(main_module, "_SKILL_TAGS_PATH", tmp_path / "skill_tags.json")
+    monkeypatch.setattr(main_module, "_SKILL_USAGE_PATH", tmp_path / "skill_usage.json")
+    return skills_root
+
+
+async def test_list_skills_reads_the_local_skills_directory(api, monkeypatch, tmp_path) -> None:
+    skills_root = _patch_skill_paths(monkeypatch, tmp_path)
+    _write_skill(skills_root, "date", "dates")
+
     resp = await api.get("/api/skills")
+
     assert resp.status_code == 200
     body = resp.json()
-    assert body["reachable"] is False
-    assert body["skills"] == []
+    assert body["reachable"] is True
+    assert [s["name"] for s in body["skills"]] == ["date"]
+    # 首次访问 my_skills 会把当前已有技能全部初始化成"已添加"。
+    assert body["skills"][0]["added"] is True
 
 
-async def test_github_scan_proxy_returns_502_when_skill_service_unreachable(api) -> None:
-    resp = await api.post("/api/skills/github/scan", json={"repo_url": "https://github.com/owner/repo"})
-    assert resp.status_code == 502
+async def test_add_and_remove_my_skill(api, monkeypatch, tmp_path) -> None:
+    skills_root = _patch_skill_paths(monkeypatch, tmp_path)
+    _write_skill(skills_root, "date", "dates")
+
+    assert (await api.delete("/api/my-skills/date")).json() == {"added": False}
+    assert (await api.post("/api/my-skills/date")).json() == {"added": True}
+    assert (await api.post("/api/my-skills/nope")).status_code == 404
 
 
-async def test_github_import_proxy_returns_502_when_skill_service_unreachable(api) -> None:
+async def test_skill_detail_is_read_locally(api, monkeypatch, tmp_path) -> None:
+    skills_root = _patch_skill_paths(monkeypatch, tmp_path)
+    _write_skill(skills_root, "date", "dates")
+
+    resp = await api.get("/api/skills/date")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["name"] == "date"
+    assert body["frontmatter_yaml"] == "name: date\ndescription: dates"
+    assert {f["path"] for f in body["files"]} == {"SKILL.md"}
+    assert (await api.get("/api/skills/nope")).status_code == 404
+
+
+async def test_github_scan_rejects_an_invalid_repo_url(api) -> None:
+    resp = await api.post("/api/skills/github/scan", json={"repo_url": "not-a-url"})
+    assert resp.status_code == 400
+
+
+async def test_github_import_rejects_an_invalid_repo_url(api) -> None:
     resp = await api.post(
         "/api/skills/github/import",
-        json={"repo_url": "https://github.com/owner/repo", "relative_paths": ["skills/alpha"]},
+        json={"repo_url": "not-a-url", "relative_paths": ["skills/alpha"]},
     )
-    assert resp.status_code == 502
+    assert resp.status_code == 400
 
 
-async def test_add_my_skill_proxy_returns_502_when_skill_service_unreachable(api) -> None:
-    resp = await api.post("/api/my-skills/date")
-    assert resp.status_code == 502
+async def test_skill_upload_rejects_a_bad_zip(api, monkeypatch, tmp_path) -> None:
+    _patch_skill_paths(monkeypatch, tmp_path)
 
-
-async def test_remove_my_skill_proxy_returns_502_when_skill_service_unreachable(api) -> None:
-    resp = await api.delete("/api/my-skills/date")
-    assert resp.status_code == 502
-
-
-async def test_skill_upload_proxy_returns_502_when_skill_service_unreachable(api) -> None:
     resp = await api.post(
         "/api/skill-upload",
         files={"file": ("my-skill.zip", b"fake zip bytes", "application/zip")},
     )
-    assert resp.status_code == 502
 
-
-async def test_skill_detail_proxy_returns_502_when_skill_service_unreachable(api) -> None:
-    resp = await api.get("/api/skills/date")
-    assert resp.status_code == 502
+    assert resp.status_code == 422
+    assert "zip" in resp.json()["detail"]
 
 
 async def test_cors_origins_configurable_via_env(api, monkeypatch, tmp_path, scripted_client) -> None:
@@ -321,7 +358,6 @@ async def test_cors_origins_configurable_via_env(api, monkeypatch, tmp_path, scr
     runtime = ChatRuntime(
         ChatStore(tmp_path / "chat.db"),
         model_client=client,
-        skill_service_url="http://127.0.0.1:1",
         trace_dir=tmp_path / "traces",
     )
     custom = httpx.AsyncClient(
@@ -405,7 +441,6 @@ async def test_delete_turn_evicts_cached_agent_so_next_reply_replays_trimmed_his
     runtime = ChatRuntime(
         ChatStore(tmp_path / "chat.db"),
         model_client=client,
-        skill_service_url="http://127.0.0.1:1",
         trace_dir=tmp_path / "traces",
     )
     local = httpx.AsyncClient(
@@ -442,7 +477,6 @@ async def test_skill_usage_examples_route_returns_generated_items(tmp_path, scri
     runtime = ChatRuntime(
         ChatStore(tmp_path / "chat.db"),
         model_client=client,
-        skill_service_url="http://127.0.0.1:1",
         trace_dir=tmp_path / "traces",
     )
     app = create_app(runtime)
@@ -493,7 +527,6 @@ async def test_eval_run_route_returns_scored_results(tmp_path, scripted_client) 
     runtime = ChatRuntime(
         ChatStore(tmp_path / "chat.db"),
         model_client=client,
-        skill_service_url="http://127.0.0.1:1",
         trace_dir=tmp_path / "traces",
     )
     app = create_app(runtime, eval_cases_path=tmp_path / "eval_cases.json")
@@ -541,7 +574,6 @@ async def test_delete_eval_run_route(tmp_path, scripted_client) -> None:
     runtime = ChatRuntime(
         ChatStore(tmp_path / "chat.db"),
         model_client=client,
-        skill_service_url="http://127.0.0.1:1",
         trace_dir=tmp_path / "traces",
     )
     app = create_app(runtime, eval_cases_path=tmp_path / "eval_cases.json")
@@ -574,7 +606,6 @@ def _deepresearch_app(tmp_path, scripted_client, *, with_tavily: bool = True):
     runtime = ChatRuntime(
         ChatStore(tmp_path / "chat.db"),
         model_client=client,
-        skill_service_url="http://127.0.0.1:1",
         trace_dir=tmp_path / "traces",
         tavily_api_key="tvly-test" if with_tavily else None,
     )
@@ -754,7 +785,6 @@ async def test_app_lifespan_closes_the_runtime_model_client(tmp_path) -> None:
     runtime = ChatRuntime(
         ChatStore(tmp_path / "chat.db"),
         model_client=client,
-        skill_service_url="http://127.0.0.1:1",
     )
     app = create_app(runtime)
 

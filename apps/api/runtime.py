@@ -21,9 +21,10 @@ from core.model import ModelClient
 from core.protocol import ChatMessage, ToolInvocation
 from memory import build_extraction_messages, parse_extraction, rank_memories
 from observability import metrics
-from skill.client import SkillClient, SkillServiceError
+from skill.discovery import discover_skills
+from skill.my_skills import load_my_skills
 from skill.prompt import format_skills_for_system_prompt
-from skill.tools import ReadSkillTool, RunSkillScriptTool
+from skill.tools import BashTool, ReadTool
 from tool.outcome import ToolOutcome
 from tool.registry import CircuitBreaker, ToolRegistry
 from tool.tool import Tool
@@ -37,6 +38,10 @@ from db import ChatStore
 from suggest import suggest_followups, suggest_skill_usage_examples, suggest_title
 
 EventSink = Callable[[dict[str, Any]], Awaitable[None]]
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_DEFAULT_SKILLS_ROOT = _REPO_ROOT / "skills"
+_DEFAULT_MY_SKILLS_PATH = _REPO_ROOT / ".data" / "my_skills.json"
 
 
 class EventToolRegistry(ToolRegistry):
@@ -131,7 +136,8 @@ class ChatRuntime:
         store: ChatStore,
         *,
         model_client: ModelClient | None = None,
-        skill_service_url: str = "http://localhost:8321",
+        skills_root: Path | None = None,
+        my_skills_path: Path | None = None,
         tavily_api_key: str | None = None,
         a2a_peer_url: str | None = None,
         trace_dir: Path | None = None,
@@ -147,7 +153,9 @@ class ChatRuntime:
     ) -> None:
         self._store = store
         self._model_client = model_client  # None → 首次需要时按 env 构造
-        self._skill_service_url = skill_service_url
+        # 技能是进程内的文件系统目录（pi 式方案），不再是独立服务。
+        self._skills_root = Path(skills_root) if skills_root is not None else _DEFAULT_SKILLS_ROOT
+        self._my_skills_path = Path(my_skills_path) if my_skills_path is not None else _DEFAULT_MY_SKILLS_PATH
         self._trace_dir = trace_dir
         self._tool_registry_factory = tool_registry_factory
         self._compaction_token_limit = compaction_token_limit
@@ -192,10 +200,6 @@ class ChatRuntime:
         return self._search_client
 
     @property
-    def skill_service_url(self) -> str:
-        return self._skill_service_url
-
-    @property
     def skills_reachable(self) -> bool | None:
         return self._skills_reachable
 
@@ -226,19 +230,15 @@ class ChatRuntime:
     async def _ensure_skills(self) -> None:
         # 不做"只算一次"的永久缓存——只有这样，我的技能里添加/移除才能在下一个新建的 task 里
         # 立刻生效，不用重启进程。_get_agent() 只在新建 agent 时才调用这里，不是每条消息都拉。
-        try:
-            client = SkillClient(self._skill_service_url)
-            skills = await client.list_skills()
-            self._skill_tools = [
-                ReadSkillTool(SkillClient(self._skill_service_url)),
-                RunSkillScriptTool(SkillClient(self._skill_service_url)),
-            ]
-            added_skills = [s for s in skills if s.added]
-            self._skills_suffix = format_skills_for_system_prompt(added_skills) or None
-            self._skills_reachable = True
-        except SkillServiceError:
-            self._skills_suffix = None
-            self._skills_reachable = False
+        # 技能是进程内的文件系统资源（pi 式方案）：直接扫目录拿到带 <location> 的清单，
+        # 并注册 read/bash 两个通用工具，不存在"技能服务不可达"的降级路径。
+        skills = discover_skills(self._skills_root)
+        all_names = [skill.name for skill in skills]
+        added = load_my_skills(self._my_skills_path, all_names)
+        added_skills = [skill for skill in skills if skill.name in added]
+        self._skills_suffix = format_skills_for_system_prompt(added_skills) or None
+        self._skills_reachable = bool(skills)
+        self._skill_tools = [ReadTool([self._skills_root]), BashTool([self._skills_root])]
 
     async def _ensure_mcp_tools(self) -> None:
         # 和 _ensure_skills 同样的取舍：不做"只算一次"的永久缓存，每次新建 agent 时都重新

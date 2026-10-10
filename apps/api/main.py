@@ -29,6 +29,25 @@ from evaluation import (  # noqa: E402
 )
 from runtime import ChatRuntime  # noqa: E402
 from observability import configure_logging, metrics  # noqa: E402
+from skill.discovery import discover_skills, list_skill_files  # noqa: E402
+from skill.frontmatter import extract_frontmatter_text, parse_frontmatter  # noqa: E402
+from skill.github_import import (  # noqa: E402
+    GithubImportError,
+    import_github_skills,
+    scan_github_repo,
+    validate_repo_url,
+)
+from skill.my_skills import add_my_skill, load_my_skills, remove_my_skill  # noqa: E402
+from skill.skill_tags import load_tags  # noqa: E402
+from skill.skill_upload import SkillUploadError, extract_uploaded_skill  # noqa: E402
+from skill.skill_usage import load_usage  # noqa: E402
+
+# 技能是仓库 skills/ 下的文件系统目录（pi 式方案，无独立服务）；
+# my_skills/tags/usage 这些可变状态落在 .data/ 下。测试按需 monkeypatch 这几个模块级常量。
+_SKILLS_ROOT = _REPO_ROOT / "skills"
+_MY_SKILLS_PATH = _REPO_ROOT / ".data" / "my_skills.json"
+_SKILL_TAGS_PATH = _REPO_ROOT / ".data" / "skill_tags.json"
+_SKILL_USAGE_PATH = _REPO_ROOT / ".data" / "skill_usage.json"
 
 # 进程启动即装好结构化日志（JSON 行到 stderr）；级别取 LOG_LEVEL（默认 INFO）。
 configure_logging()
@@ -121,7 +140,6 @@ def create_app(runtime: ChatRuntime | None = None, eval_cases_path: Path | None 
     if runtime is None:
         runtime = ChatRuntime(
             ChatStore(_REPO_ROOT / ".data" / "chat.db"),
-            skill_service_url=os.environ.get("SKILL_SERVICE_URL", "http://localhost:8321"),
             tavily_api_key=os.environ.get("TAVILY_API_KEY"),
             a2a_peer_url=os.environ.get("A2A_PEER_URL"),
             trace_dir=_REPO_ROOT / ".data" / "traces",
@@ -327,69 +345,101 @@ def create_app(runtime: ChatRuntime | None = None, eval_cases_path: Path | None 
 
     @app.get("/api/skills")
     async def list_skills() -> dict:
-        from skill.client import SkillClient, SkillServiceError
-        try:
-            skills = await SkillClient(runtime.skill_service_url).list_skills()
-            return {"reachable": True, "skills": [s.model_dump() for s in skills]}
-        except SkillServiceError as error:
-            return {"reachable": False, "skills": [], "error": str(error)}
+        skills = discover_skills(_SKILLS_ROOT)
+        all_names = [s.name for s in skills]
+        added = load_my_skills(_MY_SKILLS_PATH, all_names)
+        tags = load_tags(_SKILL_TAGS_PATH)
+        usage = load_usage(_SKILL_USAGE_PATH)
+        return {
+            "reachable": True,
+            "skills": [
+                {
+                    "name": s.name,
+                    "description": s.description,
+                    "added": s.name in added,
+                    "tags": tags.get(s.name, []),
+                    "usage_count": usage.get(s.name, 0),
+                }
+                for s in skills
+            ],
+        }
 
     @app.post("/api/skills/github/scan")
     async def scan_github_skills(request: GithubScanBody) -> dict:
-        from skill.client import SkillClient, SkillServiceError
         try:
-            candidates = await SkillClient(runtime.skill_service_url).scan_github(request.repo_url)
-            return {"candidates": [c.model_dump() for c in candidates]}
-        except SkillServiceError as error:
+            validate_repo_url(request.repo_url)
+        except GithubImportError as error:
+            raise HTTPException(400, str(error))
+        try:
+            candidates = await scan_github_repo(request.repo_url)
+        except GithubImportError as error:
             raise HTTPException(502, str(error))
+        return {"candidates": [c.model_dump() for c in candidates]}
 
     @app.post("/api/skills/github/import")
     async def import_github_skills_route(request: GithubImportBody) -> dict:
-        from skill.client import SkillClient, SkillServiceError
         try:
-            result = await SkillClient(runtime.skill_service_url).import_github(
-                request.repo_url, request.relative_paths
+            validate_repo_url(request.repo_url)
+        except GithubImportError as error:
+            raise HTTPException(400, str(error))
+        try:
+            imported, skipped = await import_github_skills(
+                request.repo_url, request.relative_paths, _SKILLS_ROOT
             )
-            return result.model_dump()
-        except SkillServiceError as error:
+        except GithubImportError as error:
             raise HTTPException(502, str(error))
+        return {"imported": imported, "skipped": [s.model_dump() for s in skipped]}
 
     @app.post("/api/my-skills/{name}")
     async def add_my_skill_route(name: str) -> dict:
-        from skill.client import SkillClient, SkillServiceError
-        try:
-            added = await SkillClient(runtime.skill_service_url).add_my_skill(name)
-            return {"added": added}
-        except SkillServiceError as error:
-            raise HTTPException(502, str(error))
+        all_names = [s.name for s in discover_skills(_SKILLS_ROOT)]
+        if not add_my_skill(_MY_SKILLS_PATH, all_names, name):
+            raise HTTPException(404, f'Unknown skill "{name}".')
+        return {"added": True}
 
     @app.delete("/api/my-skills/{name}")
     async def remove_my_skill_route(name: str) -> dict:
-        from skill.client import SkillClient, SkillServiceError
-        try:
-            added = await SkillClient(runtime.skill_service_url).remove_my_skill(name)
-            return {"added": added}
-        except SkillServiceError as error:
-            raise HTTPException(502, str(error))
+        all_names = [s.name for s in discover_skills(_SKILLS_ROOT)]
+        remove_my_skill(_MY_SKILLS_PATH, all_names, name)
+        return {"added": False}
 
     @app.post("/api/skill-upload")
     async def upload_skill_route(file: UploadFile) -> dict:
-        from skill.client import SkillClient, SkillServiceError
         content = await file.read()
         try:
-            name = await SkillClient(runtime.skill_service_url).upload_skill(content, file.filename or "skill.zip")
-            return {"name": name}
-        except SkillServiceError as error:
-            raise HTTPException(502, str(error))
+            name = extract_uploaded_skill(content, _SKILLS_ROOT)
+        except SkillUploadError as error:
+            raise HTTPException(422, str(error))
+        return {"name": name}
 
     @app.get("/api/skills/{name}")
     async def get_skill_detail_route(name: str) -> dict:
-        from skill.client import SkillClient, SkillServiceError
-        try:
-            detail = await SkillClient(runtime.skill_service_url).preview_skill(name)
-            return detail.model_dump()
-        except SkillServiceError as error:
-            raise HTTPException(502, str(error))
+        skill = next((s for s in discover_skills(_SKILLS_ROOT) if s.name == name), None)
+        if skill is None:
+            raise HTTPException(404, f'Unknown skill "{name}".')
+        all_names = [s.name for s in discover_skills(_SKILLS_ROOT)]
+        added = load_my_skills(_MY_SKILLS_PATH, all_names)
+        tags = load_tags(_SKILL_TAGS_PATH)
+        usage = load_usage(_SKILL_USAGE_PATH)
+        # SKILL.md 的正文预览剥掉 frontmatter（裸 YAML 喂 Markdown 渲染器会很难看），
+        # 原始 YAML 文本单独留一份给"技能详情"展示。
+        files = []
+        for relative_path, raw_content in list_skill_files(skill.dir):
+            if relative_path == "SKILL.md":
+                _, body = parse_frontmatter(skill.content)
+                files.append({"path": relative_path, "content": body})
+            else:
+                files.append({"path": relative_path, "content": raw_content})
+        return {
+            "name": skill.name,
+            "description": skill.description,
+            "frontmatter_yaml": extract_frontmatter_text(skill.content),
+            "tags": tags.get(skill.name, []),
+            "usage_count": usage.get(skill.name, 0),
+            "added": skill.name in added,
+            "updated_at": skill.updated_at,
+            "files": files,
+        }
 
     @app.post("/api/skills/{name}/usage-examples")
     async def suggest_skill_usage_route(name: str, request: SkillUsageExamplesBody) -> dict:

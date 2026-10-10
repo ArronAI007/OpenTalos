@@ -104,7 +104,7 @@ constructed with `trace_dir`; `skill`'s agent-facing tools implement the `tool.T
 | Package | Responsibility |
 |---|---|
 | `packages/core` | `Agent` (abstract base: history, context assembly, tracing, phase callbacks), `ModelClient` (async, provider-agnostic: Anthropic / OpenAI-compatible / mock), `ChatMessage`, `Completion`/`ToolCompletion` types. |
-| `packages/skill` | FastAPI service exposing the `skills/` directory over HTTP (`GET /skills`, `GET /skills/{name}`, `POST /skills/{name}/run-script`), running scripts as local subprocesses with path-traversal-safe script resolution (a proper sandbox will be reintroduced separately). Plus the agent-facing side: `SkillClient` (async HTTP client), `read_skill`/`run_skill_script` tools for any `ToolRegistry`, and `format_skills_for_system_prompt` (pi-style `<available_skills>` prompt section). |
+| `packages/skill` | pi-style skills: skills are plain filesystem directories (`skills/*/SKILL.md`), discovered in-process and advertised to the model by name + description + absolute `<location>`. The agent gets generic `read` (open the SKILL.md) and `bash` (run the skill's bundled scripts, approval-gated, cwd restricted to the skill tree) tools. Plus `discover_skills` / `list_skill_files` / frontmatter parsing, and the `my_skills`/tags/usage stores backing the marketplace. No separate service. |
 
 `packages/agents` sits on top, depending only on `core` and `tool`:
 
@@ -136,7 +136,7 @@ opentalos/
 ├── packages/         # core, tool, context, observability, skill, agents
 ├── apps/             # api (FastAPI), web (Next.js)
 ├── agentrl/          # independent SFT→GRPO training service, own pyproject.toml/venv
-├── skills/           # skill content served by packages/skill (SKILL.md + scripts)
+├── skills/           # skill content as filesystem directories (SKILL.md + scripts), read in-process
 ├── tests/            # pytest, mirrors packages/ and apps/ (agentrl has its own tests/)
 └── scripts/          # start.sh
 ```
@@ -153,9 +153,10 @@ cp .env.example .env   # fill in MODEL_PROVIDER/MODEL_API_KEY/MODEL_NAME, or lea
 
 uv run pytest tests/
 
-./scripts/start.sh   # skill service (:8321) + chat API (:8400) + web frontend (:3010)
-                     # all three spawn in the background, logs go to .data/logs/,
+./scripts/start.sh   # chat API (:8400) + web frontend (:3010)
+                     # both spawn in the background, logs go to .data/logs/,
                      # and the terminal is handed back once everything is healthy
+                     # (skills are read from ./skills in-process — no skill service)
 ```
 
 AgentRL needs its own one-time setup first (separate project, heavy ML dependencies not
@@ -168,8 +169,7 @@ cd agentrl && uv sync && cd ..
 Then open http://localhost:3010. A service already answering `{"status":"ok"}` on its port
 (or, for the web frontend, already serving its homepage) is reused rather than restarted —
 and isn't touched by `stop`/`restart` either. Nothing needs `--env-file` —
-`packages/core/model.py` loads `.env` itself, see next section. To debug the skill service in
-isolation: `env PYTHONPATH=packages uv run uvicorn skill.main:app --port 8321`.
+`packages/core/model.py` loads `.env` itself, see next section.
 
 ```bash
 ./scripts/start.sh stop      # stop everything this script started (reused external
@@ -196,7 +196,6 @@ Read by the chat API (`apps/api/main.py`) and the web frontend (`apps/web`) dire
 
 | Variable | Default | Notes |
 |---|---|---|
-| `SKILL_SERVICE_URL` | `http://localhost:8321` | Where the chat API reaches the skill service. |
 | `TAVILY_API_KEY` | *(none)* | Powers the chat agents' `web_search`/`web_extractor` tools and is a hard requirement for DeepResearch — without it, `/api/deepresearch/runs` returns 503. |
 | `A2A_PEER_URL` | *(none)* | Points chat agents at the `a2apeer` service's A2A endpoint (e.g. `http://localhost:8430/`) so they get an `ask_peer_agent` tool. Leave empty to disable. |
 | `NEXT_PUBLIC_API_URL` | `http://localhost:8400` | Chat API address the web frontend calls; `start.sh` injects it automatically, set it yourself only when running web standalone. |

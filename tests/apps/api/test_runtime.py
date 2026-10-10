@@ -24,7 +24,6 @@ def _runtime(store: ChatStore, client, tmp_path: Path, **kwargs: Any) -> ChatRun
     return ChatRuntime(
         store,
         model_client=client,
-        skill_service_url="http://127.0.0.1:1",  # 不可达端口 → 技能自动降级
         trace_dir=tmp_path / "traces",
         **kwargs,
     )
@@ -710,21 +709,20 @@ def test_websearch_tools_registered_with_an_api_key(store, scripted_client, echo
     assert "web_extractor" in tool_names
 
 
-def test_ensure_skills_only_advertises_added_skills(store, scripted_client, tmp_path, monkeypatch) -> None:
-    import runtime as runtime_module
-    from skill.models import SkillSummary
+def _write_skill(root: Path, name: str, description: str) -> None:
+    skill_dir = root / name
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        f"---\nname: {name}\ndescription: {description}\n---\n# {name}\n", encoding="utf-8"
+    )
 
-    class _FakeSkillClient:
-        def __init__(self, url: str) -> None:
-            pass
 
-        async def list_skills(self):
-            return [
-                SkillSummary(name="date", description="dates", added=True, tags=[], usage_count=0),
-                SkillSummary(name="csv-to-json", description="csv", added=False, tags=[], usage_count=0),
-            ]
-
-    monkeypatch.setattr(runtime_module, "SkillClient", _FakeSkillClient)
+def test_ensure_skills_only_advertises_added_skills(store, scripted_client, tmp_path) -> None:
+    skills_root = tmp_path / "skills"
+    _write_skill(skills_root, "date", "dates")
+    _write_skill(skills_root, "csv-to-json", "csv")
+    my_skills_path = tmp_path / "my_skills.json"
+    my_skills_path.write_text('["date"]', encoding="utf-8")
 
     seen_messages: list[list[dict]] = []
     client = scripted_client(tool_completions=[])
@@ -738,7 +736,7 @@ def test_ensure_skills_only_advertises_added_skills(store, scripted_client, tmp_
         return completion
 
     client.astream_with_tools = spy_astream_with_tools  # type: ignore[method-assign]
-    runtime = _runtime(store, client, tmp_path)
+    runtime = _runtime(store, client, tmp_path, skills_root=skills_root, my_skills_path=my_skills_path)
     task = store.create_task("toolcall")
 
     asyncio.run(_collect(runtime, task["id"], "hello"))
@@ -748,37 +746,39 @@ def test_ensure_skills_only_advertises_added_skills(store, scripted_client, tmp_
     )
     assert "<name>date</name>" in system_text
     assert "<name>csv-to-json</name>" not in system_text
+    # pi 式方案：提示词里给出 SKILL.md 的绝对路径，供 read 工具直接打开。
+    assert str(skills_root / "date" / "SKILL.md") in system_text
 
 
 def test_ensure_skills_refetches_for_each_new_task(store, scripted_client, tmp_path, monkeypatch) -> None:
     import runtime as runtime_module
-    from skill.models import SkillSummary
 
-    call_count = 0
+    skills_root = tmp_path / "skills"
+    _write_skill(skills_root, "date", "dates")
+    my_skills_path = tmp_path / "my_skills.json"
+    my_skills_path.write_text('["date"]', encoding="utf-8")
 
-    class _FakeSkillClient:
-        def __init__(self, url: str) -> None:
-            pass
+    calls = {"n": 0}
+    real_discover = runtime_module.discover_skills
 
-        async def list_skills(self):
-            nonlocal call_count
-            call_count += 1
-            return [SkillSummary(name="date", description="dates", added=True, tags=[], usage_count=0)]
+    def counting_discover(root):
+        calls["n"] += 1
+        return real_discover(root)
 
-    monkeypatch.setattr(runtime_module, "SkillClient", _FakeSkillClient)
+    monkeypatch.setattr(runtime_module, "discover_skills", counting_discover)
 
     client = scripted_client(tool_completions=[
         ToolCompletion(text="ok", requested_tools=[], model_id="mock-model"),
         ToolCompletion(text="ok", requested_tools=[], model_id="mock-model"),
     ])
-    runtime = _runtime(store, client, tmp_path)
+    runtime = _runtime(store, client, tmp_path, skills_root=skills_root, my_skills_path=my_skills_path)
     task_a = store.create_task("toolcall")
     task_b = store.create_task("toolcall")
 
     asyncio.run(_collect(runtime, task_a["id"], "hi"))
     asyncio.run(_collect(runtime, task_b["id"], "hi"))
 
-    assert call_count == 2
+    assert calls["n"] == 2
 
 
 def test_stream_reply_skips_suggestions_when_requested(store, scripted_client, tmp_path) -> None:
@@ -913,7 +913,7 @@ def test_search_client_is_none_without_a_tavily_api_key(store, scripted_client, 
 def test_search_client_exposes_the_configured_tavily_client(store, scripted_client, tmp_path) -> None:
     client = scripted_client(tool_completions=[])
     runtime = ChatRuntime(
-        store, model_client=client, skill_service_url="http://127.0.0.1:1",
+        store, model_client=client,
         trace_dir=tmp_path / "traces", tavily_api_key="tvly-test",
     )
     assert runtime.search_client is not None
@@ -954,7 +954,7 @@ async def test_disabled_mcp_server_tool_absent_from_registry(store, scripted_cli
 async def test_a2a_peer_tool_absent_without_url(store, scripted_client, tmp_path) -> None:
     client = scripted_client(tool_completions=[])
     runtime = ChatRuntime(
-        store, model_client=client, skill_service_url="http://127.0.0.1:1", trace_dir=tmp_path / "traces",
+        store, model_client=client, trace_dir=tmp_path / "traces",
     )
     task = store.create_task("react")
     await runtime._get_agent(task)
@@ -965,7 +965,7 @@ async def test_a2a_peer_tool_absent_without_url(store, scripted_client, tmp_path
 async def test_a2a_peer_tool_present_with_url(store, scripted_client, tmp_path) -> None:
     client = scripted_client(tool_completions=[])
     runtime = ChatRuntime(
-        store, model_client=client, skill_service_url="http://127.0.0.1:1",
+        store, model_client=client,
         trace_dir=tmp_path / "traces", a2a_peer_url="http://127.0.0.1:8430/",
     )
     task = store.create_task("react")
@@ -1015,7 +1015,7 @@ def test_aclose_closes_the_model_client(store, tmp_path) -> None:
 
 
 def test_aclose_is_a_noop_when_no_model_client_was_constructed(store) -> None:
-    runtime = ChatRuntime(store, model_client=None, skill_service_url="http://127.0.0.1:1")
+    runtime = ChatRuntime(store, model_client=None)
 
     asyncio.run(runtime.aclose())  # 懒构造从未发生，不应抛异常
 
@@ -1102,7 +1102,7 @@ async def test_completed_turn_extracts_and_saves_a_memory(store, scripted_client
 
 
 def test_steer_without_active_run_returns_false(store) -> None:
-    runtime = ChatRuntime(store, model_client=ModelClient(provider="mock"), skill_service_url="http://127.0.0.1:1")
+    runtime = ChatRuntime(store, model_client=ModelClient(provider="mock"))
 
     assert asyncio.run(runtime.steer("t1", "改用中文")) is False
 
@@ -1208,7 +1208,6 @@ def test_registry_enforces_a_tool_timeout(store) -> None:
     runtime = ChatRuntime(
         store,
         model_client=ModelClient(provider="mock"),
-        skill_service_url="http://127.0.0.1:1",
         tool_timeout_seconds=0.01,
     )
     registry = runtime._build_registry("t1")
@@ -1223,7 +1222,6 @@ def test_registry_trips_the_shared_circuit_breaker_across_tasks(store) -> None:
     runtime = ChatRuntime(
         store,
         model_client=ModelClient(provider="mock"),
-        skill_service_url="http://127.0.0.1:1",
         circuit_failure_threshold=2,
     )
     registry = runtime._build_registry("t1")
@@ -1240,7 +1238,7 @@ def test_registry_trips_the_shared_circuit_breaker_across_tasks(store) -> None:
 
 
 async def test_request_approval_roundtrip_emits_and_resolves(store) -> None:
-    runtime = ChatRuntime(store, model_client=ModelClient(provider="mock"), skill_service_url="http://127.0.0.1:1")
+    runtime = ChatRuntime(store, model_client=ModelClient(provider="mock"))
     registry = runtime._build_registry("t1")
     events: list[dict[str, Any]] = []
 
@@ -1268,7 +1266,6 @@ async def test_request_approval_times_out_as_denied(store) -> None:
     runtime = ChatRuntime(
         store,
         model_client=ModelClient(provider="mock"),
-        skill_service_url="http://127.0.0.1:1",
         approval_timeout_seconds=0.01,
     )
     registry = runtime._build_registry("t1")
@@ -1283,7 +1280,7 @@ async def test_request_approval_times_out_as_denied(store) -> None:
 
 
 async def test_request_approval_is_denied_without_an_active_stream(store) -> None:
-    runtime = ChatRuntime(store, model_client=ModelClient(provider="mock"), skill_service_url="http://127.0.0.1:1")
+    runtime = ChatRuntime(store, model_client=ModelClient(provider="mock"))
     runtime._build_registry("t1")  # sink 默认 None
     invocation = ToolInvocation(call_id="c1", tool_name="danger", arguments_json="{}")
 
@@ -1291,7 +1288,7 @@ async def test_request_approval_is_denied_without_an_active_stream(store) -> Non
 
 
 def test_resolve_approval_rejects_unknown_id_or_wrong_task(store) -> None:
-    runtime = ChatRuntime(store, model_client=ModelClient(provider="mock"), skill_service_url="http://127.0.0.1:1")
+    runtime = ChatRuntime(store, model_client=ModelClient(provider="mock"))
 
     assert runtime.resolve_approval("t1", "nope", True) is False
 

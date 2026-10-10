@@ -18,7 +18,7 @@ def store(tmp_path: Path) -> ChatStore:
 
 def _runtime(store: ChatStore, client, tmp_path: Path) -> ChatRuntime:
     return ChatRuntime(
-        store, model_client=client, skill_service_url="http://127.0.0.1:1", trace_dir=tmp_path / "traces",
+        store, model_client=client, trace_dir=tmp_path / "traces",
     )
 
 
@@ -174,7 +174,7 @@ class TestRunCase:
             completions=[Completion(text='{"correctness": 5, "completeness": 5, "clarity": 5, "comment": "x"}', model_id="mock-model")],
         )
         runtime = ChatRuntime(
-            store, model_client=client, skill_service_url="http://127.0.0.1:1",
+            store, model_client=client,
             trace_dir=tmp_path / "traces", tool_registry_factory=lambda: echo_tool_registry,
         )
         case = EvalCase(id="c1", name="用例", instruction="echo hi", expected_answer=None)

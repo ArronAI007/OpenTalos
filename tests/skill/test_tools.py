@@ -1,99 +1,94 @@
-import httpx
+import sys
+from pathlib import Path
 
-from skill.client import SkillClient
-from skill.tools import ReadSkillTool, RunSkillScriptTool
+import pytest
+
+from skill.tools import BashTool, ReadTool
 from tool.outcome import OutcomeStatus
 
 
-def _build_client(handler) -> SkillClient:
-    return SkillClient("http://skill.test", client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+@pytest.fixture
+def skills_root(tmp_path: Path) -> Path:
+    skill_dir = tmp_path / "skills" / "date"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("# date\n\nusage...\n", encoding="utf-8")
+    scripts = skill_dir / "scripts"
+    scripts.mkdir()
+    (scripts / "main.py").write_text("print('2026-09-22')\n", encoding="utf-8")
+    return tmp_path / "skills"
 
 
-def _ok_skill_handler(request: httpx.Request) -> httpx.Response:
-    if request.url.path == "/skills/date":
-        return httpx.Response(200, json={"name": "date", "content": "# date\n\nusage..."})
-    if request.url.path == "/skills/date/run-script":
-        return httpx.Response(200, json={"stdout": "2026-09-22\n", "stderr": "", "exit_code": 0, "timed_out": False})
-    return httpx.Response(404, json={"detail": "Unknown skill."})
+async def test_read_returns_the_file_contents(skills_root: Path) -> None:
+    tool = ReadTool([skills_root])
 
-
-async def test_read_skill_returns_the_documentation():
-    tool = ReadSkillTool(_build_client(_ok_skill_handler))
-
-    outcome = await tool.acall({"skill_name": "date"})
+    outcome = await tool.acall({"path": str(skills_root / "date" / "SKILL.md")})
 
     assert outcome.status is OutcomeStatus.OK
-    assert outcome.output == "# date\n\nusage..."
+    assert outcome.output == "# date\n\nusage...\n"
 
 
-async def test_read_skill_turns_a_service_error_into_an_error_outcome():
-    tool = ReadSkillTool(_build_client(_ok_skill_handler))
+async def test_read_rejects_paths_outside_the_skill_roots(skills_root: Path) -> None:
+    tool = ReadTool([skills_root])
 
-    outcome = await tool.acall({"skill_name": "nope"})
+    outcome = await tool.acall({"path": "/etc/hosts"})
 
     assert outcome.status is OutcomeStatus.ERROR
-    assert "Unknown skill" in outcome.output
+    assert "outside" in outcome.output
 
 
-async def test_run_skill_script_returns_stdout_on_success():
-    tool = RunSkillScriptTool(_build_client(_ok_skill_handler))
+async def test_read_rejects_relative_paths(skills_root: Path) -> None:
+    tool = ReadTool([skills_root])
 
-    outcome = await tool.acall({"skill_name": "date", "script_relative_path": "scripts/main.py"})
+    outcome = await tool.acall({"path": "date/SKILL.md"})
+
+    assert outcome.status is OutcomeStatus.ERROR
+    assert "absolute" in outcome.output
+
+
+async def test_read_reports_non_utf8_files(skills_root: Path) -> None:
+    binary = skills_root / "date" / "image.png"
+    binary.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF")
+    tool = ReadTool([skills_root])
+
+    outcome = await tool.acall({"path": str(binary)})
+
+    assert outcome.status is OutcomeStatus.ERROR
+    assert "UTF-8" in outcome.output
+
+
+async def test_bash_runs_a_script_in_the_skill_directory(skills_root: Path) -> None:
+    tool = BashTool([skills_root])
+
+    outcome = await tool.acall(
+        {"command": f'"{sys.executable}" scripts/main.py', "cwd": str(skills_root / "date")}
+    )
 
     assert outcome.status is OutcomeStatus.OK
-    assert outcome.output == "2026-09-22\n"
+    assert "2026-09-22" in outcome.output
 
 
-async def test_run_skill_script_reports_exit_code_and_stderr_on_failure():
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"stdout": "", "stderr": "boom", "exit_code": 1, "timed_out": False})
+async def test_bash_requires_human_approval() -> None:
+    tool = BashTool([Path("/tmp")])
 
-    tool = RunSkillScriptTool(_build_client(handler))
+    assert tool.requires_approval is True
 
-    outcome = await tool.acall({"skill_name": "date", "script_relative_path": "scripts/main.py"})
+
+async def test_bash_rejects_cwd_outside_the_skill_roots(skills_root: Path) -> None:
+    tool = BashTool([skills_root])
+
+    outcome = await tool.acall({"command": "echo hi", "cwd": "/etc"})
+
+    assert outcome.status is OutcomeStatus.ERROR
+    assert "outside" in outcome.output
+
+
+async def test_bash_reports_exit_code_and_stderr_on_failure(skills_root: Path) -> None:
+    tool = BashTool([skills_root])
+
+    outcome = await tool.acall(
+        {"command": "echo boom >&2; exit 3", "cwd": str(skills_root / "date")}
+    )
 
     assert outcome.status is OutcomeStatus.OK
-    assert "code 1" in outcome.output
+    assert "code 3" in outcome.output
     assert "boom" in outcome.output
-
-
-async def test_run_skill_script_reports_timeouts():
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"stdout": "", "stderr": "", "exit_code": -1, "timed_out": True})
-
-    tool = RunSkillScriptTool(_build_client(handler))
-
-    outcome = await tool.acall({"skill_name": "date", "script_relative_path": "scripts/main.py"})
-
-    assert outcome.status is OutcomeStatus.OK
-    assert "timed out" in outcome.output
-
-
-async def test_run_skill_script_turns_a_service_error_into_an_error_outcome():
-    def handler(request: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError("connection refused", request=request)
-
-    tool = RunSkillScriptTool(_build_client(handler))
-
-    outcome = await tool.acall({"skill_name": "date", "script_relative_path": "scripts/main.py"})
-
-    assert outcome.status is OutcomeStatus.ERROR
-    assert "unreachable" in outcome.output
-
-
-def test_run_skill_script_schema_types_args_as_a_string_array():
-    schema = RunSkillScriptTool(_build_client(_ok_skill_handler)).to_function_schema()
-
-    args = schema["function"]["parameters"]["properties"]["args"]
-    assert args["type"] == "array"
-    assert args["items"] == {"type": "string"}
-    required = schema["function"]["parameters"]["required"]
-    assert "skill_name" in required
-    assert "script_relative_path" in required
-    assert "args" not in required
-
-
-def test_script_output_is_untrusted_but_skill_docs_stay_trusted():
-    # 脚本 stdout 是不可信外部数据；而 SKILL.md 本就是给模型看的指令，不能当成注入内容隔离。
-    assert RunSkillScriptTool(_build_client(_ok_skill_handler)).untrusted_output is True
-    assert ReadSkillTool(_build_client(_ok_skill_handler)).untrusted_output is False
