@@ -8,20 +8,34 @@ import asyncio
 import inspect
 import json
 import os
+import random
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any, AsyncIterator, Iterator
+from typing import Any, AsyncIterator, Iterator, TypeVar
 
-from anthropic import AsyncAnthropic
+from anthropic import APIConnectionError as AnthropicConnectionError, AsyncAnthropic
 from dotenv import load_dotenv
-from openai import AsyncOpenAI
+from openai import APIConnectionError as OpenAIConnectionError, AsyncOpenAI
 
 from .errors import ModelError, SettingsError
 from .protocol import Completion, StreamSummary, ToolCompletion, ToolInvocation
 
 DEFAULT_TIMEOUT_SECONDS = 60
+
+T = TypeVar("T")
+
+# 可重试的瞬时错误：两家 SDK 的连接/超时错误（APITimeoutError 是 APIConnectionError 的子类），
+# 以及任何带 status_code 且为 429 / 5xx 的错误。4xx（除 429）是请求本身有问题，重试无意义。
+_RETRYABLE_EXCEPTIONS = (OpenAIConnectionError, AnthropicConnectionError, asyncio.TimeoutError)
+
+
+def _is_retryable(error: BaseException) -> bool:
+    if isinstance(error, _RETRYABLE_EXCEPTIONS):
+        return True
+    status = getattr(error, "status_code", None)
+    return isinstance(status, int) and (status == 429 or status >= 500)
 
 # 任何构造 ModelClient 的脚本都经过这个模块，所以在这里统一加载一次 .env 里的模型配置，而不是
 # 指望每个脚本自己记得 --env-file/load_dotenv。已存在于进程环境里的变量优先级更高（override
@@ -483,6 +497,9 @@ class ModelClient:
         temperature: float | None = None,
         max_tokens: int | None = None,
         reasoning_effort: str | None = None,
+        max_retries: int | None = None,
+        retry_base_seconds: float | None = None,
+        retry_max_seconds: float | None = None,
     ) -> None:
         self.provider = provider or os.getenv("MODEL_PROVIDER")
         if not self.provider:
@@ -513,6 +530,16 @@ class ModelClient:
         # 推理强度（kimi-k3 等 always-on thinking 模型用它控制思维链长度）：未配置就不发这个字段，
         # 让服务端用自己的默认档——跟 temperature 同一取舍，框架不替用户挑值。
         self.reasoning_effort = reasoning_effort or os.getenv("MODEL_REASONING_EFFORT") or None
+
+        # 瞬态错误重试：默认最多 3 次重试，指数退避（base 0.5s，上限 8s）+ full jitter，
+        # 优先遵循 Retry-After。设 max_retries=0 关闭重试。
+        self.max_retries = max_retries if max_retries is not None else int(os.getenv("MODEL_MAX_RETRIES") or 3)
+        self.retry_base_seconds = (
+            retry_base_seconds if retry_base_seconds is not None else float(os.getenv("MODEL_RETRY_BASE_SECONDS") or 0.5)
+        )
+        self.retry_max_seconds = (
+            retry_max_seconds if retry_max_seconds is not None else float(os.getenv("MODEL_RETRY_MAX_SECONDS") or 8.0)
+        )
 
         self._backend: ModelBackend = create_model_backend(
             self.provider, api_key=self.api_key, base_url=self.base_url, timeout=self.timeout, model_name=self.model_name
@@ -553,13 +580,70 @@ class ModelClient:
         call_kwargs.update(kwargs)
         return call_kwargs
 
+    @staticmethod
+    def _retry_after_seconds(error: BaseException) -> float | None:
+        response = getattr(error, "response", None)
+        headers = getattr(response, "headers", None)
+        if headers is None:
+            return None
+        value = headers.get("retry-after")
+        if value is None:
+            return None
+        try:
+            return max(0.0, float(value))
+        except (TypeError, ValueError):
+            return None
+
+    def _backoff_seconds(self, attempt: int, error: BaseException) -> float:
+        """第 attempt 次重试（0 起）前的等待：优先 Retry-After，否则指数退避 + full jitter。"""
+        retry_after = self._retry_after_seconds(error)
+        if retry_after is not None:
+            return min(retry_after, self.retry_max_seconds)
+        ceiling = min(self.retry_base_seconds * (2**attempt), self.retry_max_seconds)
+        return random.uniform(0.0, ceiling)
+
+    async def _run_with_retry(self, operation: Callable[[], Awaitable[T]]) -> T:
+        attempt = 0
+        while True:
+            try:
+                return await operation()
+            except Exception as error:
+                if attempt >= self.max_retries or not _is_retryable(error):
+                    raise
+                await asyncio.sleep(self._backoff_seconds(attempt, error))
+                attempt += 1
+
     async def acomplete(self, messages: list[dict], **kwargs: Any) -> Completion:
         self._ensure_open()
-        return await self._backend.acomplete(messages, **self._build_call_kwargs(kwargs))
+        call_kwargs = self._build_call_kwargs(kwargs)
+        return await self._run_with_retry(lambda: self._backend.acomplete(messages, **call_kwargs))
 
     async def astream(self, messages: list[dict], **kwargs: Any) -> AsyncIterator[str]:
         self._ensure_open()
-        async for chunk in self._backend.astream(messages, **self._build_call_kwargs(kwargs)):
+        call_kwargs = self._build_call_kwargs(kwargs)
+        # 流式只重试“还没吐出第一块”之前的失败（连接建立/建流阶段）。一旦有增量送到调用方，
+        # 再重试会造成重复/错乱，因此不再重试。
+        attempt = 0
+        while True:
+            iterator = self._backend.astream(messages, **call_kwargs).__aiter__()
+            try:
+                first = await iterator.__anext__()
+            except StopAsyncIteration:
+                self.last_stream_summary = self._backend.last_stream_summary
+                return
+            except Exception as error:
+                try:
+                    await iterator.aclose()
+                except Exception:  # noqa: BLE001 - 关闭尽力而为
+                    pass
+                if attempt >= self.max_retries or not _is_retryable(error):
+                    raise
+                await asyncio.sleep(self._backoff_seconds(attempt, error))
+                attempt += 1
+                continue
+            break
+        yield first
+        async for chunk in iterator:
             yield chunk
         self.last_stream_summary = self._backend.last_stream_summary
 
@@ -569,7 +653,7 @@ class ModelClient:
         self._ensure_open()
         call_kwargs = self._build_call_kwargs(kwargs)
         call_kwargs["tool_choice"] = tool_choice
-        return await self._backend.acomplete_with_tools(messages, tools, **call_kwargs)
+        return await self._run_with_retry(lambda: self._backend.acomplete_with_tools(messages, tools, **call_kwargs))
 
     async def astream_with_tools(
         self,
@@ -583,9 +667,39 @@ class ModelClient:
         self._ensure_open()
         call_kwargs = self._build_call_kwargs(kwargs)
         call_kwargs["tool_choice"] = tool_choice
-        return await self._backend.astream_with_tools(
-            messages, tools, on_text_delta=on_text_delta, on_reasoning_delta=on_reasoning_delta, **call_kwargs
-        )
+        emitted = False
+
+        async def track_text(chunk: str) -> None:
+            nonlocal emitted
+            emitted = True
+            if on_text_delta is not None:
+                await on_text_delta(chunk)
+
+        async def track_reasoning(chunk: str) -> None:
+            nonlocal emitted
+            emitted = True
+            if on_reasoning_delta is not None:
+                await on_reasoning_delta(chunk)
+
+        async def run() -> ToolCompletion:
+            return await self._backend.astream_with_tools(
+                messages,
+                tools,
+                on_text_delta=track_text if on_text_delta is not None else None,
+                on_reasoning_delta=track_reasoning if on_reasoning_delta is not None else None,
+                **call_kwargs,
+            )
+
+        attempt = 0
+        while True:
+            try:
+                return await run()
+            except Exception as error:
+                # 已经吐过增量就不重试——重试会让调用方看到重复/错乱的内容。
+                if emitted or attempt >= self.max_retries or not _is_retryable(error):
+                    raise
+                await asyncio.sleep(self._backoff_seconds(attempt, error))
+                attempt += 1
 
     def complete(self, messages: list[dict], **kwargs: Any) -> Completion:
         return asyncio.run(self.acomplete(messages, **kwargs))

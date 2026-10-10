@@ -1,16 +1,18 @@
+import asyncio
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from core.protocol import Completion
+from core.protocol import Completion, ToolCompletion
 from core.errors import ModelError, SettingsError
 from core.model import (
     ClaudeBackend,
     FakeModelBackend,
     ModelClient,
     OpenAICompatibleBackend,
+    _is_retryable,
     create_model_backend,
 )
 
@@ -611,3 +613,170 @@ async def test_model_client_works_as_an_async_context_manager():
         assert entered is client
 
     assert closed["count"] == 1
+
+
+# ==================== 瞬态错误重试 / 退避 ====================
+
+
+class _RetryableError(Exception):
+    def __init__(self, status_code: int, retry_after: str | None = None) -> None:
+        super().__init__(f"status {status_code}")
+        self.status_code = status_code
+        if retry_after is not None:
+            self.response = SimpleNamespace(headers={"retry-after": retry_after})
+
+
+def test_is_retryable_classifies_transient_errors():
+    assert _is_retryable(_RetryableError(429))
+    assert _is_retryable(_RetryableError(500))
+    assert _is_retryable(_RetryableError(503))
+    assert _is_retryable(asyncio.TimeoutError())
+    assert not _is_retryable(_RetryableError(400))
+    assert not _is_retryable(_RetryableError(401))
+    assert not _is_retryable(ValueError("nope"))
+
+
+async def test_acomplete_retries_a_transient_error_then_succeeds():
+    client = ModelClient(provider="mock", max_retries=3, retry_base_seconds=0)
+    calls = {"n": 0}
+
+    async def flaky(messages, **kwargs):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise _RetryableError(429)
+        return Completion(text="ok", model_id="mock")
+
+    client._backend.acomplete = flaky  # type: ignore[method-assign]
+    result = await client.acomplete([{"role": "user", "content": "hi"}])
+
+    assert result.text == "ok"
+    assert calls["n"] == 3
+
+
+async def test_acomplete_does_not_retry_a_client_error():
+    client = ModelClient(provider="mock", max_retries=3, retry_base_seconds=0)
+    calls = {"n": 0}
+
+    async def bad(messages, **kwargs):
+        calls["n"] += 1
+        raise _RetryableError(400)
+
+    client._backend.acomplete = bad  # type: ignore[method-assign]
+    with pytest.raises(_RetryableError):
+        await client.acomplete([{"role": "user", "content": "hi"}])
+
+    assert calls["n"] == 1
+
+
+async def test_acomplete_reraises_after_exhausting_retries():
+    client = ModelClient(provider="mock", max_retries=2, retry_base_seconds=0)
+    calls = {"n": 0}
+
+    async def always(messages, **kwargs):
+        calls["n"] += 1
+        raise _RetryableError(503)
+
+    client._backend.acomplete = always  # type: ignore[method-assign]
+    with pytest.raises(_RetryableError):
+        await client.acomplete([{"role": "user", "content": "hi"}])
+
+    assert calls["n"] == 3  # 首次 + 2 次重试
+
+
+async def test_backoff_honours_the_retry_after_header(monkeypatch):
+    client = ModelClient(provider="mock", max_retries=1, retry_base_seconds=5, retry_max_seconds=8)
+    delays: list[float] = []
+
+    async def fake_sleep(seconds):
+        delays.append(seconds)
+
+    monkeypatch.setattr("core.model.asyncio.sleep", fake_sleep)
+    calls = {"n": 0}
+
+    async def flaky(messages, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise _RetryableError(429, retry_after="2")
+        return Completion(text="ok", model_id="mock")
+
+    client._backend.acomplete = flaky  # type: ignore[method-assign]
+    await client.acomplete([{"role": "user", "content": "hi"}])
+
+    assert delays == [2.0]
+
+
+async def test_astream_retries_before_the_first_chunk():
+    client = ModelClient(provider="mock", max_retries=2, retry_base_seconds=0)
+    calls = {"n": 0}
+
+    async def flaky(messages, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise _RetryableError(503)
+        yield "a"
+        yield "b"
+
+    client._backend.astream = flaky  # type: ignore[method-assign]
+    chunks = [chunk async for chunk in client.astream([{"role": "user", "content": "hi"}])]
+
+    assert chunks == ["a", "b"]
+    assert calls["n"] == 2
+
+
+async def test_astream_does_not_retry_after_the_first_chunk():
+    client = ModelClient(provider="mock", max_retries=3, retry_base_seconds=0)
+    calls = {"n": 0}
+
+    async def flaky(messages, **kwargs):
+        calls["n"] += 1
+        yield "a"
+        raise _RetryableError(500)
+
+    client._backend.astream = flaky  # type: ignore[method-assign]
+    seen: list[str] = []
+    with pytest.raises(_RetryableError):
+        async for chunk in client.astream([{"role": "user", "content": "hi"}]):
+            seen.append(chunk)
+
+    assert seen == ["a"]
+    assert calls["n"] == 1
+
+
+async def test_astream_with_tools_retries_when_nothing_was_emitted():
+    client = ModelClient(provider="mock", max_retries=2, retry_base_seconds=0)
+    calls = {"n": 0}
+
+    async def flaky(messages, tools, *, on_text_delta=None, on_reasoning_delta=None, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise _RetryableError(503)
+        return ToolCompletion(text="done", requested_tools=[], model_id="mock")
+
+    client._backend.astream_with_tools = flaky  # type: ignore[method-assign]
+    result = await client.astream_with_tools([{"role": "user", "content": "hi"}], [])
+
+    assert result.text == "done"
+    assert calls["n"] == 2
+
+
+async def test_astream_with_tools_does_not_retry_after_a_delta_was_emitted():
+    client = ModelClient(provider="mock", max_retries=3, retry_base_seconds=0)
+    calls = {"n": 0}
+
+    async def flaky(messages, tools, *, on_text_delta=None, on_reasoning_delta=None, **kwargs):
+        calls["n"] += 1
+        if on_text_delta is not None:
+            await on_text_delta("partial")
+        raise _RetryableError(500)
+
+    client._backend.astream_with_tools = flaky  # type: ignore[method-assign]
+    seen: list[str] = []
+
+    async def collect(chunk: str) -> None:
+        seen.append(chunk)
+
+    with pytest.raises(_RetryableError):
+        await client.astream_with_tools([{"role": "user", "content": "hi"}], [], on_text_delta=collect)
+
+    assert seen == ["partial"]
+    assert calls["n"] == 1
