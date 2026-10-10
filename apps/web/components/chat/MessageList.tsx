@@ -10,6 +10,7 @@ import { isNearBottom, scrollToBottom } from "@/lib/scroll-stick";
 import { LogoMark } from "@/components/sidebar/Logo";
 import { CirclePauseIcon } from "@/components/ui/icons";
 import { formatDateTimeCN } from "@/lib/format-time";
+import { formatUsage } from "@/lib/usage";
 import { CopyReplyButton } from "./CopyReplyButton";
 import { ThinkingBubble, type ThinkingItem } from "./ThinkingBubble";
 import { UserActionRow } from "./UserActionRow";
@@ -161,6 +162,9 @@ export function MessageList({
                       <time className="text-xs leading-6 text-text-secondary invisible opacity-0 transition-opacity group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100">
                         {formatDateTimeCN(message.completedAt)}
                       </time>
+                    )}
+                    {formatUsage(message.usage) && (
+                      <span className="text-xs leading-6 text-text-secondary">{formatUsage(message.usage)}</span>
                     )}
                   </div>
                 )}

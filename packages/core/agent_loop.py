@@ -14,6 +14,7 @@ from tool.registry import ToolRegistry
 
 from .cancellation import CancellationToken
 from .errors import AgentRuntimeError, EmptyModelResponse, OutputLimitError
+from .pricing import estimate_cost
 from .protocol import Completion, ToolCompletion, ToolInvocation
 from .model import ModelClient
 
@@ -239,6 +240,7 @@ async def execute_model_step(
     handle_invocation: ToolInvocationHandler,
     on_tool_result: Callable[[str, str, str, str], None] | None = None,
     interrupt: asyncio.Event | None = None,
+    on_usage: Callable[[dict[str, Any]], None] | None = None,
     **kwargs: Any,
 ) -> ToolCompletion:
     """带工具 schema 的单步：调一次模型 -> 有工具请求就并行执行并把结果追加回 messages。
@@ -269,10 +271,17 @@ async def execute_model_step(
         kwargs=kwargs,
     )
     _record_usage(cancellation, completion.token_usage)
+    # 成本：从 token 用量 × 价目表估算；未知模型/无价目时不填（不展示假值）。
+    usage: dict[str, Any] = dict(completion.token_usage)
+    cost = estimate_cost(completion.model_id, usage)
+    if cost is not None:
+        usage["cost"] = cost
+    if on_usage is not None:
+        on_usage(usage)
     if recorder:
         recorder.log_event(
             "model_output",
-            {"content": completion.text, "tool_calls": len(completion.requested_tools), "usage": completion.token_usage},
+            {"content": completion.text, "tool_calls": len(completion.requested_tools), "usage": usage},
             step=step,
         )
     if stopped_by_limit(completion.finish_reason):
@@ -318,6 +327,7 @@ async def run_tool_turn(
     trimmer: OutputTrimmer | None = None,
     on_tool_result: Callable[[str, str, str, str], None] | None = None,
     approve: ApprovalGate | None = None,
+    on_usage: Callable[[dict[str, Any]], None] | None = None,
     **kwargs: Any,
 ) -> str:
     """调用 LLM -> 按需执行工具 -> 把结果喂回去，直到模型不再请求工具或用光 max_iterations。
@@ -355,6 +365,7 @@ async def run_tool_turn(
             cancellation=cancellation,
             handle_invocation=handle_invocation,
             on_tool_result=on_tool_result,
+            on_usage=on_usage,
             **kwargs,
         )
         if not completion.requested_tools:

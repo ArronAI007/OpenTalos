@@ -127,6 +127,7 @@ def create_app(runtime: ChatRuntime | None = None, eval_cases_path: Path | None 
             circuit_recovery_seconds=float(os.environ.get("TOOL_CIRCUIT_RECOVERY_SECONDS") or 300),
             approval_timeout_seconds=float(os.environ.get("APPROVAL_TIMEOUT_SECONDS") or 300),
             memory_enabled=os.environ.get("MEMORY_ENABLED", "0") == "1",
+            budget_tokens=int(os.environ["TASK_TOKEN_BUDGET"]) if os.environ.get("TASK_TOKEN_BUDGET") else None,
         )
     if eval_cases_path is None:
         eval_cases_path = _REPO_ROOT / ".data" / "eval_cases.json"

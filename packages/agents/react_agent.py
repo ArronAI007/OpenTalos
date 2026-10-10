@@ -82,6 +82,7 @@ class ReActAgent(Agent):
         steer_event: asyncio.Event | None = kwargs.pop("steer_event", None)
         on_steer_interrupt = kwargs.pop("on_steer_interrupt", None)
         recalled: list[str] | None = kwargs.pop("recalled", None)
+        on_usage = kwargs.pop("on_usage", None)
         messages = self.build_messages(input_text)
         # 召回的相关长期记忆作为一条 system 注入（在系统提示之后、历史之前）。
         if recalled:
@@ -123,6 +124,7 @@ class ReActAgent(Agent):
                         handle_invocation=handle_invocation,
                         on_tool_result=self.record_tool_result,
                         interrupt=steer_event,
+                        on_usage=on_usage,
                         **kwargs,
                     )
                 except ModelInterrupted:

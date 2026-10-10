@@ -62,6 +62,12 @@ describe("reduceChatEvent", () => {
     });
   });
 
+  it("done attaches the turn usage when present", () => {
+    let msgs = reduceChatEvent([], { type: "delta", text: "完" });
+    msgs = reduceChatEvent(msgs, { type: "done", reply: "完", usage: { total_tokens: 15, cost: 0.001 } }, 1700000000011);
+    expect(msgs[0]).toMatchObject({ kind: "assistant", usage: { total_tokens: 15, cost: 0.001 } });
+  });
+
   it("error becomes an error bubble", () => {
     const msgs = reduceChatEvent([], { type: "error", message: "boom" });
     expect(msgs[0]).toEqual({ id: "live-1", kind: "error", content: "boom" });

@@ -692,3 +692,35 @@ async def test_resolve_tool_call_spotlights_trimmed_untrusted_output(tmp_path):
     assert "<<<UNTRUSTED>>>" in message["content"]
     assert "output truncated" in message["content"]
     assert "line 40" not in message["content"]
+
+
+async def test_execute_model_step_records_cost_from_the_price_table(monkeypatch, tmp_path):
+    from observability.run_recorder import RunRecorder
+
+    monkeypatch.setenv("MODEL_PRICES", '{"mock": {"input": 2.0, "output": 10.0}}')
+    client = ModelClient(provider="mock")
+
+    async def fake(messages, tools, tool_choice="auto", **kwargs):
+        return ToolCompletion(
+            text="hi",
+            requested_tools=[],
+            model_id="mock",
+            token_usage={"prompt_tokens": 1_000_000, "completion_tokens": 500_000, "total_tokens": 1_500_000},
+        )
+
+    client.acomplete_with_tools = fake  # type: ignore[method-assign]
+    recorder = RunRecorder(output_dir=str(tmp_path))
+    seen: list[dict] = []
+
+    async def handle_invocation(invocation):
+        raise AssertionError("should not be called")
+
+    await execute_model_step(
+        client, [{"role": "user", "content": "hi"}], [], recorder=recorder, step=1,
+        handle_invocation=handle_invocation, on_usage=seen.append,
+    )
+    recorder.finalize()
+
+    model_output = next(e for e in recorder.events() if e["event"] == "model_output")
+    assert model_output["payload"]["usage"]["cost"] == 7.0
+    assert seen[0]["cost"] == 7.0

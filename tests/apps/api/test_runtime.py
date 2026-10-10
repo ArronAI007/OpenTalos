@@ -1020,6 +1020,46 @@ def test_aclose_is_a_noop_when_no_model_client_was_constructed(store) -> None:
     asyncio.run(runtime.aclose())  # 懒构造从未发生，不应抛异常
 
 
+async def test_token_budget_aborts_the_turn(store, scripted_client, tmp_path) -> None:
+    # 预算超限：模型调用已用 100 token > 50 上限，循环在下一次检查点中止。
+    client = scripted_client(tool_completions=[
+        ToolCompletion(
+            text=None,
+            requested_tools=[ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text":"hi"}')],
+            model_id="mock-model",
+            token_usage={"total_tokens": 100},
+        ),
+    ])
+    runtime = _runtime(store, client, tmp_path, budget_tokens=50)
+    task = store.create_task("react")
+    store.update_task(task["id"], title="已有标题")
+
+    events = await _collect(runtime, task["id"], "hi")
+
+    assert any(e["type"] == "error" and "token budget" in e["message"] for e in events)
+
+
+async def test_done_event_carries_turn_usage_and_cost(store, scripted_client, tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("MODEL_PRICES", '{"mock-model": {"input": 1.0, "output": 1.0}}')
+    client = scripted_client(tool_completions=[
+        ToolCompletion(
+            text="ok",
+            requested_tools=[],
+            model_id="mock-model",
+            token_usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        ),
+    ])
+    runtime = _runtime(store, client, tmp_path)
+    task = store.create_task("react")
+    store.update_task(task["id"], title="已有标题")
+
+    events = await _collect(runtime, task["id"], "hi")
+
+    done = next(e for e in events if e["type"] == "done")
+    assert done["usage"]["total_tokens"] == 15
+    assert done["usage"]["cost"] == pytest.approx(15 / 1_000_000)
+
+
 async def test_recall_injects_relevant_memories_into_the_prompt(store, scripted_client, tmp_path) -> None:
     store.remember_memory("用户在做一个数据看板项目")
     store.remember_memory("用户喜欢用中文")

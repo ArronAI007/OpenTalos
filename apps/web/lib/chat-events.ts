@@ -1,9 +1,11 @@
+import type { UsageInfo } from "./usage";
+
 export type ChatEvent =
   | { type: "delta"; text: string }
   | { type: "reasoning"; text: string }
   | { type: "tool_call"; name: string; arguments: Record<string, unknown> }
   | { type: "tool_result"; name: string; result: string; ok: boolean }
-  | { type: "done"; reply: string }
+  | { type: "done"; reply: string; usage?: UsageInfo }
   | { type: "error"; message: string }
   // user 行落库后服务端回送：把 live-N user 泡换成 row-N 身份（删除轮次需要服务端 id）。
   | { type: "user_stored"; id: number; created_at: string }
@@ -30,6 +32,7 @@ export type UiMessage =
       content: string;
       streaming?: boolean;
       completedAt?: number;
+      usage?: UsageInfo;
     }
   | { kind: "tool"; id: string; name: string; arguments: Record<string, unknown>; result?: string; ok?: boolean }
   | { kind: "error"; id: string; content: string }
@@ -249,9 +252,15 @@ export function reduceChatEvent(prev: UiMessage[], event: ChatEvent, now = Date.
       );
       const rest = calmed.filter((m) => m !== current);
       if (current) {
-        return [...rest, { ...current, content: event.reply, streaming: false, completedAt: now }];
+        return [
+          ...rest,
+          { ...current, content: event.reply, streaming: false, completedAt: now, usage: event.usage },
+        ];
       }
-      return [...rest, { id: nextUiId(rest), kind: "assistant", content: event.reply, streaming: false, completedAt: now }];
+      return [
+        ...rest,
+        { id: nextUiId(rest), kind: "assistant", content: event.reply, streaming: false, completedAt: now, usage: event.usage },
+      ];
     }
     case "error": {
       // 终结所有 streaming 泡：error 与 done 互斥，不终结的话残留泡会把下一轮回复合流进去。

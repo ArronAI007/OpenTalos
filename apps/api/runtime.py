@@ -142,6 +142,7 @@ class ChatRuntime:
         approval_timeout_seconds: float = 300.0,
         run_ttl_seconds: float = 300.0,
         memory_enabled: bool = False,
+        budget_tokens: int | None = None,
     ) -> None:
         self._store = store
         self._model_client = model_client  # None → 首次需要时按 env 构造
@@ -168,6 +169,8 @@ class ChatRuntime:
         self._run_ttl_seconds = run_ttl_seconds
         # 长期记忆（跨会话）：默认关闭，避免给所有会话平添一次提取模型调用。
         self._memory_enabled = memory_enabled
+        # 每轮 token 预算：超过即中止该轮（默认无限制）。
+        self._budget_tokens = budget_tokens
         self._skill_tools: list[Any] = []
         self._skills_suffix: str | None = None
         self._skills_reachable: bool | None = None
@@ -467,8 +470,12 @@ class ChatRuntime:
         if is_first_message:
             run.events.append({"type": "title", "title": truncated_title})
         self._runs[task_id] = run
+        # 预算：调用方没给 cancellation 时，按配置的 token 上限建一个（超限时循环内自然中止）。
+        effective_cancellation = cancellation
+        if effective_cancellation is None and self._budget_tokens is not None:
+            effective_cancellation = CancellationToken(token_budget=self._budget_tokens)
         run.runner = asyncio.create_task(
-            self._run_turn(run, task, agent, content, is_first_message, skip_suggestions, cancellation)
+            self._run_turn(run, task, agent, content, is_first_message, skip_suggestions, effective_cancellation)
         )
         return run
 
@@ -499,6 +506,14 @@ class ChatRuntime:
 
         error: str | None = None
         reply: str | None = None
+        # 本轮累计用量/成本（多步模型调用相加）；无价目时不带 cost 字段。
+        turn_usage: dict[str, Any] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+
+        def record_usage(usage: dict[str, Any]) -> None:
+            for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+                turn_usage[key] += usage.get(key, 0)
+            if "cost" in usage:
+                turn_usage["cost"] = turn_usage.get("cost", 0.0) + usage["cost"]
 
         async def produce() -> None:
             nonlocal error, reply
@@ -513,6 +528,7 @@ class ChatRuntime:
                     steer_event=run.steer_event,
                     on_steer_interrupt=lambda: emit({"type": "steer_interrupt"}),
                     recalled=recalled,
+                    on_usage=record_usage,
                 )
             except Exception as exc:  # noqa: BLE001 - 转成 error 事件交给前端
                 error = str(exc)
@@ -582,7 +598,10 @@ class ChatRuntime:
                     parts.append(reply)  # 后端未流式时兜底，流式过则不重复追加
                 final_reply = "".join(parts)
                 await asyncio.to_thread(self._store.append_message, task_id, "assistant", final_reply)
-                await self._append(run, {"type": "done", "reply": final_reply})
+                done_payload: dict[str, Any] = {"type": "done", "reply": final_reply}
+                if turn_usage["total_tokens"] or "cost" in turn_usage:
+                    done_payload["usage"] = dict(turn_usage)
+                await self._append(run, done_payload)
                 if suggest_task is not None:
                     suggestions = await suggest_task
                     if suggestions:
