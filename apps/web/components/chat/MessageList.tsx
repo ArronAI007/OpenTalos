@@ -55,6 +55,7 @@ export function MessageList({
   onDeleteTurn,
   onPickSuggestion,
   onApproval,
+  onRegenerate,
 }: {
   messages: UiMessage[];
   taskId: string;
@@ -63,6 +64,7 @@ export function MessageList({
   onDeleteTurn: (messageId: string) => void;
   onPickSuggestion: (text: string) => void;
   onApproval: (approvalId: string, approved: boolean) => void;
+  onRegenerate: (messageId: string) => void;
 }) {
   const listRef = useRef<HTMLOListElement>(null);
   // 跟随滚动开关：初始 true（进入任务/历史加载后落在最新消息）；用户上翻超过阈值即停跟，回到底部恢复。
@@ -147,6 +149,14 @@ export function MessageList({
                 {!message.streaming && (
                   <div className="mt-1.5 flex items-center gap-2">
                     <CopyReplyButton content={message.content} />
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => onRegenerate(message.id)}
+                      className="rounded px-1.5 py-1 text-xs text-text-secondary transition-colors hover:bg-sidebar hover:text-text disabled:opacity-40"
+                    >
+                      重新生成
+                    </button>
                     {message.completedAt !== undefined && (
                       <time className="text-xs leading-6 text-text-secondary invisible opacity-0 transition-opacity group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100">
                         {formatDateTimeCN(message.completedAt)}

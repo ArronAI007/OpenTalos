@@ -143,6 +143,23 @@ export function dropTurn(prev: UiMessage[], messageId: string): UiMessage[] {
   return [...prev.slice(0, start), ...prev.slice(end)];
 }
 
+// 定位"目标消息所属那一轮"的起始 user 消息（从目标向前数到最近的 user）——重新生成据此找到
+// 要重放的提问。目标不存在、或其前没有任何 user 时返回 null。
+export function turnUserMessage(
+  messages: UiMessage[],
+  messageId: string,
+): { id: string; kind: "user"; content: string } | null {
+  const idx = messages.findIndex((m) => m.id === messageId);
+  if (idx === -1) return null;
+  for (let i = idx; i >= 0; i--) {
+    const message = messages[i];
+    if (message.kind === "user") {
+      return { id: message.id, kind: "user", content: message.content };
+    }
+  }
+  return null;
+}
+
 // now 仅用于 done/error 定稿时给 assistant 泡落 completedAt（默认 Date.now()，测试注入固定值）
 export function reduceChatEvent(prev: UiMessage[], event: ChatEvent, now = Date.now()): UiMessage[] {
   switch (event.type) {

@@ -9,6 +9,7 @@ import {
   parseSseBlock,
   reduceChatEvent,
   shouldShowThinkingHint,
+  turnUserMessage,
   type UiMessage,
 } from "./chat-events";
 
@@ -353,6 +354,30 @@ describe("title", () => {
     const prev: UiMessage[] = [{ id: "row-1", kind: "user", content: "问" }];
     const next = reduceChatEvent(prev, { type: "title", title: "新标题" });
     expect(next).toBe(prev); // 同引用：no-op，不触发多余渲染
+  });
+});
+
+describe("turnUserMessage（重新生成定位提问）", () => {
+  const msgs: UiMessage[] = [
+    { id: "u1", kind: "user", content: "一" },
+    { id: "a1", kind: "assistant", content: "答一" },
+    { id: "u2", kind: "user", content: "二" },
+    { id: "t2", kind: "tool", name: "echo", arguments: {} },
+    { id: "a2", kind: "assistant", content: "答二" },
+  ];
+
+  it("finds the user that starts the turn containing the target", () => {
+    expect(turnUserMessage(msgs, "a2")?.id).toBe("u2");
+    expect(turnUserMessage(msgs, "t2")?.id).toBe("u2");
+  });
+
+  it("returns the target itself when it is already a user message", () => {
+    expect(turnUserMessage(msgs, "u2")?.id).toBe("u2");
+  });
+
+  it("returns null for an unknown id or when no user precedes", () => {
+    expect(turnUserMessage(msgs, "nope")).toBeNull();
+    expect(turnUserMessage([{ id: "a1", kind: "assistant", content: "x" }], "a1")).toBeNull();
   });
 });
 

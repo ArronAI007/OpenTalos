@@ -11,6 +11,7 @@ import {
   finalizeStreaming,
   nextUiId,
   reduceChatEvent,
+  turnUserMessage,
   type UiMessage,
 } from "./chat-events";
 import { postSse } from "./sse";
@@ -139,5 +140,25 @@ export function useChat(taskId: string) {
     [taskId],
   );
 
-  return { messages, busy, send, stop, deleteTurn, respondToApproval };
+  // 重新生成：定位该回复所属轮的提问 → 删整轮（服务端 + 本地）→ 原样重发。
+  // 未落库的 live user（几乎不可能：重生成入口只在定稿回复上）无法重放，防御性早退。
+  const regenerate = useCallback(
+    async (assistantId: string) => {
+      const user = turnUserMessage(messages, assistantId);
+      const rowId = user ? /^row-(\d+)$/.exec(user.id)?.[1] : undefined;
+      if (!user || !rowId) return;
+      const content = user.content;
+      try {
+        await deleteTurnApi(taskId, Number(rowId));
+      } catch {
+        setMessages((prev) => [...prev, { id: nextUiId(prev), kind: "error", content: "重新生成失败，请重试" }]);
+        return;
+      }
+      setMessages((prev) => dropTurn(prev, user.id));
+      await send(content);
+    },
+    [messages, send, taskId],
+  );
+
+  return { messages, busy, send, stop, deleteTurn, respondToApproval, regenerate };
 }
