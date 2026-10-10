@@ -69,5 +69,12 @@ class ShortTermMemory:
         self._transcript.restore(data)
 
     def build_messages(self, system_prompt: str | None, user_text: str) -> list[dict]:
-        selected = self.assembler.select_recent_turns(self.messages(), self._config.budget_tokens)
+        # 检索式选轮：最近若干轮保证保留，更早的轮次按与 user_text 的相关性择优补入预算。
+        selected = self.assembler.select_relevant_turns(
+            self.messages(),
+            user_text,
+            self._config.budget_tokens,
+            max_recent_turns=self._config.retrieval_recent_turns,
+            min_relevance=self._config.retrieval_min_relevance,
+        )
         return seed_messages(system_prompt, selected, user_text)

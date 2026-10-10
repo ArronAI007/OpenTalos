@@ -205,3 +205,37 @@ def test_select_recent_turns_treats_a_leading_non_user_message_as_its_own_turn()
     selected = assembler.select_recent_turns(messages, budget)
 
     assert selected == messages
+
+
+def test_select_relevant_turns_equals_recent_when_within_budget():
+    assembler = ContextAssembler()
+    turns = [_turn(f"question {i}", f"answer {i}") for i in range(3)]
+    messages = [m for turn in turns for m in turn]
+    budget = assembler._tokens.estimate_messages(messages) * 2  # 远超全部
+
+    assert assembler.select_relevant_turns(messages, "anything", budget) == messages
+
+
+def test_select_relevant_turns_retrieves_a_relevant_older_turn():
+    assembler = ContextAssembler()
+    turns = [_turn("python 数据分析怎么做", "用 pandas")]
+    turns += [_turn(f"无关闲聊 {i}", f"嗯 {i}") for i in range(1, 8)]
+    messages = [m for turn in turns for m in turn]
+    budget = assembler._tokens.estimate_messages(turns[-1]) * 3  # 大概够 3 轮
+
+    selected = assembler.select_relevant_turns(messages, "python 数据分析", budget, max_recent_turns=2)
+
+    contents = [m.content for m in selected]
+    assert contents[0] == "python 数据分析怎么做"  # 相关旧轮被召回且在最前（保持时间序）
+    assert "无关闲聊 1" not in contents  # 无关的较早轮次被丢弃
+
+
+def test_select_relevant_turns_keeps_only_recent_when_nothing_older_matches():
+    assembler = ContextAssembler()
+    turns = [_turn(f"无关闲聊 {i}", f"嗯 {i}") for i in range(8)]
+    messages = [m for turn in turns for m in turn]
+    budget = assembler._tokens.estimate_messages(turns[-1]) * 3
+
+    selected = assembler.select_relevant_turns(messages, "python 数据分析", budget, max_recent_turns=2)
+
+    assert selected == turns[-2] + turns[-1]
