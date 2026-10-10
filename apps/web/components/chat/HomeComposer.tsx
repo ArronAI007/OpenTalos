@@ -4,7 +4,6 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Composer } from "./Composer";
 import { createTask } from "@/lib/api";
-import { readAgentType } from "@/lib/agent-type";
 import { stashPendingMessage, takeHomeDraft } from "@/lib/pending-message";
 
 export function HomeComposer() {
@@ -28,7 +27,7 @@ export function HomeComposer() {
     setBusy(true);
     setError(null);
     try {
-      const task = await createTask(readAgentType());
+      const task = await createTask();
       stashPendingMessage(task.id, text);
       setDraft(""); // 仅成功才清空草稿，失败保留输入框内容
       router.push(`/t/${task.id}`);

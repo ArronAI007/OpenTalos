@@ -4,12 +4,11 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { createProject, createTask, deleteTask, listProjects, listTasks, updateTask, type Project, type Task, type TaskPatch } from "@/lib/api";
-import { readAgentType } from "@/lib/agent-type";
 import { copyText } from "@/lib/clipboard";
 import { sortTasks } from "@/lib/task-sort";
 import { partitionTasks, visibleUngrouped } from "@/lib/task-projects";
 import { TASK_TITLE_UPDATED_EVENT, type TaskTitleUpdatedDetail } from "@/lib/task-events";
-import { BeakerIcon, ChartBarIcon, ClockIcon, PencilSquareIcon, PinIcon, PlugIcon, PuzzleIcon, SearchIcon, SparklesIcon, StarIcon, TelescopeIcon, UsersIcon } from "@/components/ui/icons";
+import { BeakerIcon, ChartBarIcon, ClockIcon, PencilSquareIcon, PinIcon, PlugIcon, PuzzleIcon, SearchIcon, SparklesIcon, StarIcon, TelescopeIcon } from "@/components/ui/icons";
 import { LogoMark } from "./Logo";
 import { TaskListMenu } from "./TaskListMenu";
 import { ArchivedSection } from "./ArchivedSection";
@@ -27,7 +26,7 @@ export function useCreateTask() {
     setBusy(true);
     setError(null);
     try {
-      const task = await createTask(readAgentType());
+      const task = await createTask();
       router.push(`/t/${task.id}`);
       return true;
     } catch {

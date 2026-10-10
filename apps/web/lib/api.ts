@@ -49,10 +49,10 @@ export function tasksUrl(options?: { archived?: boolean }): string {
 export async function listTasks(options?: { archived?: boolean }): Promise<Task[]> {
   return fetchJson<{ tasks: RawTask[] }>(tasksUrl(options), { cache: "no-store" }).then((d) => d.tasks.map(toTask));
 }
-export async function createTask(agentType: string): Promise<Task> {
+export async function createTask(): Promise<Task> {
   return fetchJson<RawTask>(`${API_URL}/api/tasks`, {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ agent_type: agentType }),
+    body: JSON.stringify({}),
   }).then(toTask);
 }
 export async function updateTask(id: string, patch: TaskPatch): Promise<Task> {
