@@ -15,20 +15,16 @@ import {
 } from "@/lib/api";
 import { TrashIcon } from "@/components/ui/icons";
 
-// 按 agent 类型汇总：均分取三维度总均值，通过率＝均分 >=3.5 的用例占比
-// （沿用参考资料里"数据生成质量评估"章节对 Pass Rate 阈值的约定）。
-function summarizeResults(results: EvalResult[], agentTypesOrder: string[]) {
-  const present = new Set(results.map((r) => r.agent_type));
-  return agentTypesOrder
-    .filter((t) => present.has(t))
-    .map((agentType) => {
-      const scored = results
-        .filter((r) => r.agent_type === agentType && r.score)
-        .map((r) => (r.score!.correctness + r.score!.completeness + r.score!.clarity) / 3);
-      const avg = scored.length ? scored.reduce((a, b) => a + b, 0) / scored.length : null;
-      const passRate = scored.length ? scored.filter((s) => s >= 3.5).length / scored.length : null;
-      return { agentType, avg, passRate };
-    });
+// 汇总：均分取三维度总均值，通过率＝均分 >=3.5 的用例占比
+// （沿用参考资料里"数据生成质量评估"章节对 Pass Rate 阈值的约定）。不再按 agent 类型分组——
+// 当前只有单一 ReActAgent，按类型对比无意义。
+function summarizeResults(results: EvalResult[]) {
+  const scored = results
+    .filter((r) => r.score)
+    .map((r) => (r.score!.correctness + r.score!.completeness + r.score!.clarity) / 3);
+  const avg = scored.length ? scored.reduce((a, b) => a + b, 0) / scored.length : null;
+  const passRate = scored.length ? scored.filter((s) => s >= 3.5).length / scored.length : null;
+  return { avg, passRate, scored: scored.length, total: results.length };
 }
 
 function formatTimestamp(createdAt: string): string {
@@ -37,6 +33,19 @@ function formatTimestamp(createdAt: string): string {
 
 function formatLatency(latencyMs: number): string {
   return `${(latencyMs / 1000).toFixed(1)}s`;
+}
+
+// 工具列：列出用到的工具（去重），有失败次数时附注；未用工具显示“—”。
+function formatTools(r: EvalResult): string {
+  const tools = r.tools_used ?? [];
+  if (tools.length === 0) return "—";
+  const failures = r.tool_failures ? `（${r.tool_failures} 失败）` : "";
+  return `${tools.join(", ")}${failures}`;
+}
+
+// Token 单元：真实用量 + （有价目时）成本。
+function formatTokens(r: EvalResult): string {
+  return r.cost ? `${r.tokens_used} · $${r.cost.toFixed(4)}` : `${r.tokens_used}`;
 }
 
 // 删除确认弹窗，沿用 DeleteTurnDialog 的模态范式（fixed 遮罩点关 + Esc 带 IME guard，
@@ -103,27 +112,20 @@ function ConfirmDeleteRunDialog({
   );
 }
 
-function ReportView({ results, agentTypesOrder }: { results: EvalResult[]; agentTypesOrder: string[] }) {
-  const summaries = summarizeResults(results, agentTypesOrder);
+function ReportView({ results }: { results: EvalResult[] }) {
+  const summary = summarizeResults(results);
   return (
     <div>
-      <ul className="mb-4 flex flex-wrap gap-4">
-        {summaries.map((s) => (
-          <li key={s.agentType} className="rounded-lg bg-gray-50 px-3 py-2 text-sm">
-            <p className="font-medium">{s.agentType}</p>
-            <p className="text-text-secondary">
-              {s.avg === null
-                ? "无有效评分"
-                : `均分 ${s.avg.toFixed(1)} · 通过率 ${Math.round((s.passRate ?? 0) * 100)}%`}
-            </p>
-          </li>
-        ))}
-      </ul>
+      <p className="mb-4 rounded-lg bg-gray-50 px-3 py-2 text-sm">
+        {summary.avg === null
+          ? "无有效评分"
+          : `均分 ${summary.avg.toFixed(1)} · 通过率 ${Math.round((summary.passRate ?? 0) * 100)}%（${summary.scored}/${summary.total} 条有评分）`}
+      </p>
       <table className="w-full text-left text-sm">
         <thead>
           <tr className="border-b border-border text-text-secondary">
             <th className="py-1.5 pr-2">用例</th>
-            <th className="py-1.5 pr-2">Agent</th>
+            <th className="py-1.5 pr-2">工具</th>
             <th className="py-1.5 pr-2">正确性</th>
             <th className="py-1.5 pr-2">完整性</th>
             <th className="py-1.5 pr-2">清晰度</th>
@@ -136,7 +138,7 @@ function ReportView({ results, agentTypesOrder }: { results: EvalResult[]; agent
           {results.map((r) => (
             <tr key={`${r.case_id}-${r.agent_type}`} className="border-b border-border align-top">
               <td className="py-1.5 pr-2">{r.case_name}</td>
-              <td className="py-1.5 pr-2">{r.agent_type}</td>
+              <td className="py-1.5 pr-2 text-text-secondary">{formatTools(r)}</td>
               {r.error ? (
                 <td colSpan={4} className="py-1.5 pr-2 text-red-500">
                   {r.error}
@@ -154,7 +156,7 @@ function ReportView({ results, agentTypesOrder }: { results: EvalResult[]; agent
                 </td>
               )}
               <td className="py-1.5 pr-2">{formatLatency(r.latency_ms)}</td>
-              <td className="py-1.5 pr-2">{r.tokens_used}</td>
+              <td className="py-1.5 pr-2">{formatTokens(r)}</td>
             </tr>
           ))}
         </tbody>
@@ -166,7 +168,6 @@ function ReportView({ results, agentTypesOrder }: { results: EvalResult[]; agent
 export default function EvalPage() {
   const [cases, setCases] = useState<EvalCase[] | null>(null);
   const [agentTypes, setAgentTypes] = useState<string[]>([]);
-  const [selectedTypes, setSelectedTypes] = useState<Set<string>>(new Set());
   const [selectedCaseIds, setSelectedCaseIds] = useState<Set<string>>(new Set());
   const [name, setName] = useState("");
   const [instruction, setInstruction] = useState("");
@@ -186,7 +187,6 @@ export default function EvalPage() {
     });
     fetchConfig().then((config) => {
       setAgentTypes(config.agent_types);
-      setSelectedTypes(new Set(config.agent_types));
     });
     listEvalRuns().then(setRuns);
   }, []);
@@ -227,15 +227,6 @@ export default function EvalPage() {
     });
   };
 
-  const toggleType = (type: string) => {
-    setSelectedTypes((prev) => {
-      const next = new Set(prev);
-      if (next.has(type)) next.delete(type);
-      else next.add(type);
-      return next;
-    });
-  };
-
   const handleDeleteRun = async (id: string) => {
     // deletingRunId 卡住按钮防止双击重复发请求：第二次点击此时已被 disabled 拦下，
     // 不会对同一条已删记录再发一次 DELETE 而 404。
@@ -254,11 +245,11 @@ export default function EvalPage() {
   };
 
   const handleRun = async () => {
-    if (selectedCaseIds.size === 0 || selectedTypes.size === 0) return;
+    if (selectedCaseIds.size === 0 || agentTypes.length === 0) return;
     setRunning(true);
     setError(null);
     try {
-      const run = await runEval([...selectedCaseIds], [...selectedTypes]);
+      const run = await runEval([...selectedCaseIds], agentTypes);
       setRuns((prev) => [run, ...(prev ?? [])]);
       setExpandedRunId(run.id);
     } catch (err) {
@@ -339,23 +330,15 @@ export default function EvalPage() {
       </div>
 
       <div className="mb-6 rounded-xl border border-border bg-white p-4">
-        <h2 className="mb-3 text-sm font-medium">Agent 类型</h2>
-        <div className="mb-3 flex flex-wrap gap-3">
-          {agentTypes.map((type) => (
-            <label key={type} className="flex items-center gap-1.5 text-sm">
-              <input type="checkbox" checked={selectedTypes.has(type)} onChange={() => toggleType(type)} />
-              {type}
-            </label>
-          ))}
-        </div>
         <button
           type="button"
           onClick={() => void handleRun()}
-          disabled={running || selectedCaseIds.size === 0 || selectedTypes.size === 0}
+          disabled={running || selectedCaseIds.size === 0 || agentTypes.length === 0}
           className="rounded-lg bg-text px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
         >
           {running ? "评估中…" : "开始评估"}
         </button>
+        <span className="ml-3 text-xs text-text-secondary">对选中的用例各跑一轮真实对话，再由 LLM 裁判打分</span>
         {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
       </div>
 
@@ -368,7 +351,6 @@ export default function EvalPage() {
           <ul className="space-y-2">
             {runs.map((run) => {
               const expanded = expandedRunId === run.id;
-              const presentTypes = [...new Set(run.results.map((r) => r.agent_type))];
               return (
                 <li key={run.id} className="rounded-lg border border-border">
                   <div className="flex items-center gap-2 px-3 py-2 text-sm">
@@ -379,9 +361,7 @@ export default function EvalPage() {
                     >
                       <span>
                         <span className="font-medium">{formatTimestamp(run.created_at)}</span>
-                        <span className="ml-2 text-text-secondary">
-                          {presentTypes.join("、")} · 共 {run.results.length} 条结果
-                        </span>
+                        <span className="ml-2 text-text-secondary">共 {run.results.length} 条结果</span>
                       </span>
                       <span className="text-text-secondary">{expanded ? "收起" : "展开"}</span>
                     </button>
@@ -397,7 +377,7 @@ export default function EvalPage() {
                   </div>
                   {expanded && (
                     <div className="border-t border-border p-3">
-                      <ReportView results={run.results} agentTypesOrder={agentTypes} />
+                      <ReportView results={run.results} />
                     </div>
                   )}
                 </li>

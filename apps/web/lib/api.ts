@@ -213,6 +213,10 @@ export interface EvalResult {
   error: string | null;
   latency_ms: number;
   tokens_used: number;
+  cost?: number | null;
+  tool_calls?: number;
+  tool_failures?: number;
+  tools_used?: string[];
 }
 export interface EvalRun {
   id: string;

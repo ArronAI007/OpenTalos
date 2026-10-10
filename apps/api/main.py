@@ -416,8 +416,15 @@ def create_app(runtime: ChatRuntime | None = None, eval_cases_path: Path | None 
                 raise HTTPException(422, f"unknown agent_type: {agent_type}")
         all_cases = {c.id: c for c in load_eval_cases(eval_cases_path)}
         cases = [all_cases[cid] for cid in request.case_ids if cid in all_cases]
+        # 并发上限：避免 case × agent_type 组合一次性打满上游模型（429/超时）。单条失败不传染。
+        semaphore = asyncio.Semaphore(4)
+
+        async def run_one(agent_type: str, case) -> object:
+            async with semaphore:
+                return await run_case(runtime, agent_type, case)
+
         results = await asyncio.gather(*[
-            run_case(runtime, agent_type, case)
+            run_one(agent_type, case)
             for case in cases
             for agent_type in request.agent_types
         ])

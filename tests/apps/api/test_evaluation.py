@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from core.protocol import Completion, ToolCompletion
+from core.protocol import Completion, ToolCompletion, ToolInvocation
 from db import ChatStore
 from evaluation import add_eval_case, judge_reply, load_eval_cases, remove_eval_case, run_case, save_eval_cases
 from evaluation import EvalCase, EvalScore
@@ -70,6 +70,13 @@ class TestJudgeReply:
         ])
         score = asyncio.run(judge_reply(client, "1+1等于几", "2", "2"))
         assert score == EvalScore(correctness=5, completeness=4, clarity=3, comment="还行")
+
+    def test_clamps_out_of_range_scores_to_1_5(self, scripted_client) -> None:
+        client = scripted_client(completions=[
+            Completion(text='{"correctness": 9, "completeness": 0, "clarity": 3, "comment": "x"}', model_id="mock-model"),
+        ])
+        score = asyncio.run(judge_reply(client, "i", None, "r"))
+        assert score == EvalScore(correctness=5, completeness=1, clarity=3, comment="x")
 
     def test_parses_json_wrapped_in_prose(self, scripted_client) -> None:
         client = scripted_client(completions=[
@@ -146,4 +153,37 @@ class TestRunCase:
         asyncio.run(run_case(runtime, "react", case))
 
         assert store.list_tasks() == []  # 评估任务立即标 archived，不出现在默认任务列表
+
+    def test_records_real_cost_and_the_tool_trajectory(self, store, scripted_client, echo_tool_registry, tmp_path, monkeypatch) -> None:
+        monkeypatch.setenv("MODEL_PRICES", '{"mock-model": {"input": 1.0, "output": 1.0}}')
+        client = scripted_client(
+            tool_completions=[
+                ToolCompletion(
+                    text=None,
+                    requested_tools=[ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text":"hi"}')],
+                    model_id="mock-model",
+                    token_usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+                ),
+                ToolCompletion(
+                    text="done",
+                    requested_tools=[],
+                    model_id="mock-model",
+                    token_usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+                ),
+            ],
+            completions=[Completion(text='{"correctness": 5, "completeness": 5, "clarity": 5, "comment": "x"}', model_id="mock-model")],
+        )
+        runtime = ChatRuntime(
+            store, model_client=client, skill_service_url="http://127.0.0.1:1",
+            trace_dir=tmp_path / "traces", tool_registry_factory=lambda: echo_tool_registry,
+        )
+        case = EvalCase(id="c1", name="用例", instruction="echo hi", expected_answer=None)
+
+        result = asyncio.run(run_case(runtime, "react", case))
+
+        assert result.tools_used == ["echo"]
+        assert result.tool_calls == 1
+        assert result.tool_failures == 0
+        assert result.tokens_used == 30  # 两轮各 15
+        assert result.cost == pytest.approx(30 / 1_000_000)
 

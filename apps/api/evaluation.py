@@ -17,9 +17,9 @@ if TYPE_CHECKING:
 
 _ENCODING = "utf-8"
 
-# /eval 页面的类型对比标签——纯展示/校验用的字符串列表，不再驱动任何实际的 agent 构造
-# （collapse 成单一 ReActAgent 之后，这几个字符串跑起来行为完全一样）。
-EVAL_AGENT_TYPES = ["toolcall", "react", "reflection", "plan_execute"]
+# 评估对比的 agent 类型。当前只有单一 ReActAgent（历史遗留的 4 个标签跑的是同一个 agent，
+# 对比无意义且会 4 倍浪费模型调用），故收敛为一种。
+EVAL_AGENT_TYPES = ["react"]
 
 
 class EvalCase(BaseModel):
@@ -45,6 +45,11 @@ class EvalResult(BaseModel):
     error: str | None
     latency_ms: int
     tokens_used: int
+    # 新增：真实成本（有价目时）与工具轨迹，供报告展示与问题定位。
+    cost: float | None = None
+    tool_calls: int = 0
+    tool_failures: int = 0
+    tools_used: list[str] = []
 
 
 def load_eval_cases(store_path: Path) -> list[EvalCase]:
@@ -95,18 +100,27 @@ def _extract_json_object(text: str) -> str:
     return text
 
 
+def _to_score(value: object) -> int:
+    """分数规范化：非整数抛错（由 judge_reply 统一兜底为 None），超范围的夹到 1-5。"""
+    return max(1, min(5, int(value)))  # type: ignore[arg-type]
+
+
 async def judge_reply(
     client: ModelClient,
     instruction: str,
     expected_answer: str | None,
     reply: str,
     *,
+    tools: list[str] | None = None,
     timeout: float = _JUDGE_TIMEOUT_S,
 ) -> EvalScore | None:
-    """LLM 裁判打分——和 suggest.py 一样的哲学：失败不抛异常，返回 None 让调用方展示"评分失败"。"""
+    """LLM 裁判打分——和 suggest.py 一样的哲学：失败不抛异常，返回 None 让调用方展示"评分失败"。
+    带上本轮调用的工具，让裁判在了解 agent 做了什么的前提下打分。"""
     prompt = f"任务指令：{instruction}\n"
     if expected_answer:
         prompt += f"参考答案：{expected_answer}\n"
+    if tools:
+        prompt += f"本轮 agent 调用的工具：{', '.join(tools)}\n"
     prompt += f"待评估回复：{reply}"
     try:
         completion = await asyncio.wait_for(
@@ -118,9 +132,9 @@ async def judge_reply(
         )
         data = json.loads(_extract_json_object(completion.text))
         return EvalScore(
-            correctness=int(data["correctness"]),
-            completeness=int(data["completeness"]),
-            clarity=int(data["clarity"]),
+            correctness=_to_score(data["correctness"]),
+            completeness=_to_score(data["completeness"]),
+            clarity=_to_score(data["clarity"]),
             comment=str(data.get("comment", "")),
         )
     except Exception:  # noqa: BLE001 - 裁判失败不影响其他用例，调用方看到 None 展示"评分失败"
@@ -133,6 +147,10 @@ async def run_case(runtime: "ChatRuntime", agent_type: str, case: EvalCase) -> E
     向外抛未捕获异常，外层可以放心用 asyncio.gather（不需要 return_exceptions=True）。"""
     start = time.monotonic()
     cancellation = CancellationToken()
+    usage: dict[str, object] = {}
+    tools_used: list[str] = []
+    tool_calls = 0
+    tool_failures = 0
     try:
         task = runtime.store.create_task(agent_type)
         runtime.store.update_task(task["id"], archived=1)
@@ -141,12 +159,21 @@ async def run_case(runtime: "ChatRuntime", agent_type: str, case: EvalCase) -> E
         async for event in runtime.stream_reply(
             task["id"], case.instruction, skip_suggestions=True, cancellation=cancellation
         ):
-            if event["type"] == "done":
+            kind = event["type"]
+            if kind == "done":
                 reply = event["reply"]
-            elif event["type"] == "error":
+                usage = event.get("usage") or {}
+            elif kind == "error":
                 error = event["message"]
+            elif kind == "tool_call":
+                tool_calls += 1
+                name = event.get("name")
+                if name and name not in tools_used:
+                    tools_used.append(name)
+            elif kind == "tool_result" and event.get("ok") is False:
+                tool_failures += 1
         score = (
-            await judge_reply(runtime.model_client, case.instruction, case.expected_answer, reply)
+            await judge_reply(runtime.model_client, case.instruction, case.expected_answer, reply, tools=tools_used)
             if reply
             else None
         )
@@ -155,18 +182,26 @@ async def run_case(runtime: "ChatRuntime", agent_type: str, case: EvalCase) -> E
             case_id=case.id, case_name=case.name, agent_type=agent_type,
             reply=None, score=None, error=str(exc),
             latency_ms=int((time.monotonic() - start) * 1000),
-            tokens_used=_estimate_tokens(None, cancellation.tokens_used),
+            tokens_used=_resolve_tokens({}, None, cancellation.tokens_used),
         )
     return EvalResult(
         case_id=case.id, case_name=case.name, agent_type=agent_type,
         reply=reply, score=score, error=error,
         latency_ms=int((time.monotonic() - start) * 1000),
-        tokens_used=_estimate_tokens(reply, cancellation.tokens_used),
+        tokens_used=_resolve_tokens(usage, reply, cancellation.tokens_used),
+        cost=usage.get("cost") if isinstance(usage.get("cost"), float) else None,
+        tool_calls=tool_calls,
+        tool_failures=tool_failures,
+        tools_used=tools_used,
     )
 
 
-def _estimate_tokens(reply: str | None, recorded: int) -> int:
-    """真实用量优先；流式调用不报 usage（packages/core/model.py 的 astream_with_tools 对
-    openai-compatible 后端留空，避免依赖并非所有供应商都支持的 stream_options include_usage）
-    时，recorded 恒为 0——退化为按回复字符数 / 4 做粗略估计，聊胜于无地给出一个量级。"""
-    return recorded or (len(reply) // 4 if reply else 0)
+def _resolve_tokens(usage: dict[str, object], reply: str | None, recorded: int) -> int:
+    """真实用量优先：本轮 done 事件的 usage.total_tokens → CancellationToken 累计值 → 按回复字符
+    数 / 4 的粗略估计（仅在供应商完全不报 usage 时才会走到这一步）。"""
+    total = usage.get("total_tokens")
+    if isinstance(total, int) and total > 0:
+        return total
+    if recorded > 0:
+        return recorded
+    return len(reply) // 4 if reply else 0
