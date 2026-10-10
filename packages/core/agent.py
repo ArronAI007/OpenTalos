@@ -6,13 +6,14 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from context import AssemblyConfig, ContextAssembler, ContextSlice, OutputTrimmer, TokenBudget, TranscriptStore
+from context import AssemblyConfig, ContextSlice, OutputTrimmer, TokenBudget
 from observability import RunRecorder
 from pydantic import BaseModel
 
 from .compaction import summarize_history
 from .model import ModelClient
 from .protocol import ChatMessage
+from memory import ShortTermMemory
 
 
 class RuntimeSettings(BaseModel):
@@ -64,8 +65,9 @@ class Agent(ABC):
         self.model_client = model_client
         self.system_prompt = system_prompt
         self.settings = settings or RuntimeSettings()
-        self._transcript = TranscriptStore(min_retain_turns=min_retain_turns, message_type=ChatMessage)
-        self._context_assembler = ContextAssembler(context_config)
+        self._short_term = ShortTermMemory(
+            min_retain_turns=min_retain_turns, message_type=ChatMessage, context_config=context_config
+        )
         self.recorder: RunRecorder | None = RunRecorder(output_dir=trace_dir) if trace_dir else None
         self.compaction_token_limit = compaction_token_limit
         # 不为空时，工具输出超限会被截断、完整内容落盘（OutputTrimmer 构造即建目录，所以默认不建）。
@@ -106,13 +108,13 @@ class Agent(ABC):
             pass
 
     def record_message(self, message: ChatMessage) -> None:
-        self._transcript.append(message)
+        self._short_term.append(message)
 
     def record_tool_result(self, call_id: str, tool_name: str, arguments_json: str, result: str) -> None:
-        """把一次工具调用记录进 transcript，供跨轮/跨重启时由 seed_messages 还原成合法的
+        """把一次工具调用记录进 transcript，供跨轮/跨重启时由 build_messages 还原成合法的
         assistant(tool_calls) + tool(tool_call_id) 结构。arguments_json 保持原始 JSON 字符串，
         因为还原时 tool_calls 的 function.arguments 就是 JSON 字符串。"""
-        self._transcript.append(
+        self._short_term.append(
             ChatMessage(
                 role="tool",
                 content=result,
@@ -121,14 +123,14 @@ class Agent(ABC):
         )
 
     def history_snapshot(self) -> list[ChatMessage]:
-        return self._transcript.messages()
+        return self._short_term.messages()
 
     def reset_history(self) -> None:
-        self._transcript.clear()
+        self._short_term.clear()
 
     def compress_history(self, summary: str) -> bool:
         """把 min_retain_turns 之前的历史折叠成一条 summary 消息，回合数不足时是 no-op。"""
-        return self._transcript.compress(summary)
+        return self._short_term.compress(summary)
 
     async def maybe_compress_history(self) -> bool:
         """历史消息的预估 token 数达到 compaction_token_limit 时，用 LLM 生成结构化摘要并折叠旧历史。
@@ -150,17 +152,23 @@ class Agent(ABC):
 
     def snapshot_history(self) -> dict[str, Any]:
         """当前 Surface（transcript）的完整序列化，供压缩落库 / 重启恢复。"""
-        return self._transcript.snapshot()
+        return self._short_term.snapshot()
 
     def restore_history(self, data: dict[str, Any]) -> None:
         """用一份快照覆盖当前 transcript，用于重启后从 summary 检查点恢复而非全量重放。"""
-        self._transcript.restore(data)
+        self._short_term.restore(data)
 
     def build_context(self, user_query: str, extra_slices: list[ContextSlice] | None = None) -> str:
         """跑一遍 GSSC 流水线，把 system_prompt + 历史 + user_query 组装成结构化上下文。"""
-        return self._context_assembler.assemble(
+        return self._short_term.assembler.assemble(
             user_query,
             transcript=self.history_snapshot(),
             system_instructions=self.system_prompt,
             extra_slices=extra_slices,
         )
+
+    def build_messages(self, user_text: str) -> list[dict[str, Any]]:
+        """把 system_prompt + 历史（按轮次截断到 token 预算内）+ 本轮输入组装成合法的、
+        OpenAI 兼容的 messages 列表——真实的、生产代码会调用的 prompt 拼装入口。
+        """
+        return self._short_term.build_messages(self.system_prompt, user_text)
