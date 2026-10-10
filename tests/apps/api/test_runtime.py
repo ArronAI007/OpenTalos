@@ -914,3 +914,28 @@ async def test_a2a_peer_tool_present_with_url(store, scripted_client, tmp_path) 
     await runtime._get_agent(task)
     registry = runtime._registries[task["id"]]
     assert registry.get("ask_peer_agent") is not None
+
+
+async def test_dispatch_subagent_is_always_registered(store, scripted_client, tmp_path) -> None:
+    runtime = _runtime(store, scripted_client(tool_completions=[]), tmp_path)
+    task = store.create_task("react")
+
+    await runtime._get_agent(task)
+
+    registry = runtime._registries[task["id"]]
+    assert registry.get("dispatch_subagent") is not None
+
+
+async def test_subagent_tool_registry_includes_the_other_configured_tools(store, scripted_client, tmp_path) -> None:
+    runtime = _runtime(
+        store, scripted_client(tool_completions=[]), tmp_path, a2a_peer_url="http://127.0.0.1:8430/",
+    )
+    task = store.create_task("react")
+
+    await runtime._get_agent(task)
+
+    registry = runtime._registries[task["id"]]
+    dispatch_tool = registry.get("dispatch_subagent")
+    subagent_schema_names = {s["function"]["name"] for s in dispatch_tool._subagent_tools.function_schemas()}
+    assert "ask_peer_agent" in subagent_schema_names
+    assert "dispatch_subagent" not in subagent_schema_names

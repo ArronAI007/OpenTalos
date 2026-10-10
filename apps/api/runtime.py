@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from agents.builder import build_agent
+from agents.subagent_tool import DispatchSubagentTool
 from core.agent import Agent
 from core.cancellation import CancellationToken
 from core.model import ModelClient
@@ -191,19 +192,27 @@ class ChatRuntime:
             for tool in server["cached_tools"]
         ]
 
-    def _build_registry(self, task_id: str) -> ToolRegistry | None:
-        inner = self._tool_registry_factory() if self._tool_registry_factory else ToolRegistry()
+    def _collect_base_tools(self, registry: ToolRegistry) -> None:
         for tool in self._skill_tools:
-            inner.register(tool)
+            registry.register(tool)
         for tool in self._websearch_tools:
-            inner.register(tool)
+            registry.register(tool)
         for tool in self._mcp_tools:
-            inner.register(tool)
+            registry.register(tool)
         for tool in self._a2a_tools:
-            inner.register(tool)
-        if not inner.function_schemas():
-            return None
-        wrapper = EventToolRegistry(inner)
+            registry.register(tool)
+
+    def _build_registry(self, task_id: str) -> ToolRegistry:
+        # subagent_tools 必须是和 main_tools 物理上不同的 ToolRegistry 实例——dispatch_subagent
+        # 只注册进 main_tools，否则子 agent 会连带看到它自己，能够递归再分派。
+        subagent_tools = self._tool_registry_factory() if self._tool_registry_factory else ToolRegistry()
+        self._collect_base_tools(subagent_tools)
+
+        main_tools = self._tool_registry_factory() if self._tool_registry_factory else ToolRegistry()
+        self._collect_base_tools(main_tools)
+        main_tools.register(DispatchSubagentTool(self._client(), subagent_tools))
+
+        wrapper = EventToolRegistry(main_tools)
         self._registries[task_id] = wrapper
         return wrapper
 
