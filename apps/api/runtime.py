@@ -25,9 +25,7 @@ from websearch.client import TavilyClient
 from websearch.tools import WebExtractorTool, WebSearchTool
 from mcpclient.client import MCPServerConfig, MCPToolInfo
 from mcpclient.tools import MCPTool
-from a2apeer.client import send_message
 from a2apeer.tools import A2ATool
-from agents.plan_execute_agent import RoleConfig
 
 from db import ChatStore
 from suggest import suggest_followups, suggest_skill_usage_examples, suggest_title
@@ -193,17 +191,6 @@ class ChatRuntime:
             for tool in server["cached_tools"]
         ]
 
-    async def _ensure_agent_roles(self) -> list[RoleConfig]:
-        # 和 _ensure_mcp_tools 同样的取舍：不做"只算一次"的永久缓存，每次新建 plan_execute
-        # agent 时都重新查一遍 agent_roles 表——这样 /roles 页面上的增删改/启禁用才能在下一个
-        # 新建的 task 里立刻生效，不用重启进程。
-        rows = await asyncio.to_thread(self._store.list_agent_roles)
-        return [
-            RoleConfig(name=row["name"], description=row["description"], peer_url=row["peer_url"])
-            for row in rows
-            if row["enabled"]
-        ]
-
     def _build_registry(self, task_id: str) -> ToolRegistry | None:
         inner = self._tool_registry_factory() if self._tool_registry_factory else ToolRegistry()
         for tool in self._skill_tools:
@@ -227,9 +214,6 @@ class ChatRuntime:
         await self._ensure_skills()
         await self._ensure_mcp_tools()
         extra_kwargs: dict[str, Any] = {}
-        if task["agent_type"] == "plan_execute":
-            extra_kwargs["roles"] = await self._ensure_agent_roles()
-            extra_kwargs["role_dispatcher"] = send_message
         agent = build_agent(
             task["agent_type"], f"task-{task['id'][:8]}", self._client(),
             tool_registry=self._build_registry(task["id"]),
