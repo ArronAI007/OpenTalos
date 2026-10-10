@@ -54,6 +54,14 @@ CREATE TABLE IF NOT EXISTS mcp_servers (
   cached_tools TEXT NOT NULL,    -- JSON 数组：[{name, description, input_schema}]
   last_error TEXT                -- 最近一次探测/刷新失败的错误信息；成功为 NULL
 );
+CREATE TABLE IF NOT EXISTS agent_roles (
+  id TEXT PRIMARY KEY,
+  created_at TEXT NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL,
+  peer_url TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1
+);
 """
 
 
@@ -386,4 +394,50 @@ class ChatStore:
     def delete_mcp_server(self, server_id: str) -> bool:
         with self._connect() as conn:
             cursor = conn.execute("DELETE FROM mcp_servers WHERE id = ?", (server_id,))
+            return cursor.rowcount > 0
+
+    def create_agent_role(self, *, name: str, description: str, peer_url: str) -> dict:
+        role_id = uuid.uuid4().hex
+        now = _now()
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO agent_roles (id, created_at, name, description, peer_url, enabled)"
+                " VALUES (?, ?, ?, ?, ?, 1)",
+                (role_id, now, name, description, peer_url),
+            )
+        return self.get_agent_role(role_id)
+
+    @staticmethod
+    def _agent_role_row_to_dict(row: sqlite3.Row) -> dict:
+        return {
+            "id": row["id"],
+            "created_at": row["created_at"],
+            "name": row["name"],
+            "description": row["description"],
+            "peer_url": row["peer_url"],
+            "enabled": bool(row["enabled"]),
+        }
+
+    def get_agent_role(self, role_id: str) -> dict | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM agent_roles WHERE id = ?", (role_id,)).fetchone()
+        return self._agent_role_row_to_dict(row) if row else None
+
+    def list_agent_roles(self) -> list[dict]:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT * FROM agent_roles ORDER BY created_at DESC, rowid DESC").fetchall()
+        return [self._agent_role_row_to_dict(row) for row in rows]
+
+    def set_agent_role_enabled(self, role_id: str, enabled: bool) -> dict | None:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "UPDATE agent_roles SET enabled = ? WHERE id = ?", (1 if enabled else 0, role_id)
+            )
+            if cursor.rowcount == 0:
+                return None
+        return self.get_agent_role(role_id)
+
+    def delete_agent_role(self, role_id: str) -> bool:
+        with self._connect() as conn:
+            cursor = conn.execute("DELETE FROM agent_roles WHERE id = ?", (role_id,))
             return cursor.rowcount > 0
