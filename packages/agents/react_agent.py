@@ -3,7 +3,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from core.agent import Agent, AssemblyConfig, OutputTrimmer, RuntimeSettings
-from core.agent_loop import execute_model_step, resolve_tool_call, seed_messages
+from core.agent_loop import execute_model_step, resolve_tool_call
 from core.cancellation import CancellationToken
 from core.protocol import ChatMessage, ToolInvocation
 from core.model import ModelClient
@@ -70,7 +70,7 @@ class ReActAgent(Agent):
     async def arespond(self, input_text: str, **kwargs: object) -> str:
         cancellation: CancellationToken | None = kwargs.pop("cancellation", None)
         on_text_delta: Callable[[str], Awaitable[None]] | None = kwargs.pop("on_text_delta", None)
-        messages = seed_messages(self.system_prompt, self.history_snapshot(), input_text)
+        messages = self.build_messages(input_text)
         tools = self._tool_schemas()
         answer: str | None = None
 
