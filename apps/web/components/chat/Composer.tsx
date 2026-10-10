@@ -100,6 +100,7 @@ export function Composer({
         <button
           type="submit"
           disabled={!value.trim() || (disabled && !steering)}
+          aria-label={steering ? "发送纠偏" : "发送"}
           className="rounded-full bg-user-bubble px-3 py-1.5 text-sm text-white disabled:opacity-30"
         >
           ➤
