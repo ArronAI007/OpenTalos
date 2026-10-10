@@ -213,14 +213,12 @@ class ChatRuntime:
             return agent
         await self._ensure_skills()
         await self._ensure_mcp_tools()
-        extra_kwargs: dict[str, Any] = {}
         agent = build_agent(
-            task["agent_type"], f"task-{task['id'][:8]}", self._client(),
+            f"task-{task['id'][:8]}", self._client(),
             tool_registry=self._build_registry(task["id"]),
             system_prompt_suffix=self._skills_suffix,
             trace_dir=str(self._trace_dir) if self._trace_dir else None,
             compaction_token_limit=self._compaction_token_limit,
-            **extra_kwargs,
         )
 
         # 压缩成功后落一份 Surface 快照（summary + 保留近期）到 DB：重启据此恢复、不重新压。

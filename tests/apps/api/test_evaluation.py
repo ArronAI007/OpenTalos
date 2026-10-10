@@ -147,13 +147,3 @@ class TestRunCase:
 
         assert store.list_tasks() == []  # 评估任务立即标 archived，不出现在默认任务列表
 
-    def test_captures_an_error_without_raising(self, store, scripted_client, tmp_path) -> None:
-        client = scripted_client(tool_completions=[])
-        runtime = _runtime(store, client, tmp_path)
-        case = EvalCase(id="c1", name="坏用例", instruction="hi", expected_answer=None)
-
-        result = asyncio.run(run_case(runtime, "not-a-real-agent-type", case))
-
-        assert result.reply is None
-        assert result.score is None
-        assert result.error is not None
