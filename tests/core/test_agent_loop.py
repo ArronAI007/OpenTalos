@@ -724,3 +724,38 @@ async def test_execute_model_step_records_cost_from_the_price_table(monkeypatch,
     model_output = next(e for e in recorder.events() if e["event"] == "model_output")
     assert model_output["payload"]["usage"]["cost"] == 7.0
     assert seen[0]["cost"] == 7.0
+
+
+async def test_execute_model_step_records_model_metrics():
+    from observability import metrics
+
+    metrics.reset()
+    client = ModelClient(provider="mock")
+
+    async def fake(messages, tools, tool_choice="auto", **kwargs):
+        return ToolCompletion(
+            text="hi", requested_tools=[], model_id="mock", duration_ms=500, token_usage={"total_tokens": 42}
+        )
+
+    client.acomplete_with_tools = fake  # type: ignore[method-assign]
+
+    async def handle_invocation(invocation):
+        raise AssertionError("should not be called")
+
+    await execute_model_step(client, [{"role": "user", "content": "hi"}], [], handle_invocation=handle_invocation)
+
+    snapshot = metrics.snapshot()
+    assert snapshot["counters"].get('opentalos_model_calls_total{model="mock"}') == 1
+    assert snapshot["observations"].get("opentalos_model_call_duration_seconds") == (1, 0.5)
+    assert snapshot["counters"].get("opentalos_model_tokens_total") == 42
+
+
+async def test_resolve_tool_call_records_tool_metrics(echo_tool_registry):
+    from observability import metrics
+
+    metrics.reset()
+    invocation = ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text": "hi"}')
+
+    await resolve_tool_call(echo_tool_registry, invocation)
+
+    assert metrics.snapshot()["counters"].get('opentalos_tool_calls_total{status="ok",tool="echo"}') == 1

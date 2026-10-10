@@ -20,6 +20,7 @@ from core.cancellation import CancellationToken
 from core.model import ModelClient
 from core.protocol import ChatMessage, ToolInvocation
 from memory import build_extraction_messages, parse_extraction, rank_memories
+from observability import metrics
 from skill.client import SkillClient, SkillServiceError
 from skill.prompt import format_skills_for_system_prompt
 from skill.tools import ReadSkillTool, RunSkillScriptTool
@@ -551,6 +552,8 @@ class ChatRuntime:
         )
         pending_calls: list[dict[str, Any]] = []
         parts: list[str] = []
+        turn_started = time.monotonic()
+        status = "error"
         try:
             while True:
                 if run.stop_event.is_set():
@@ -583,6 +586,7 @@ class ChatRuntime:
                 await self._append(run, event)
 
             if run.stop_event.is_set():
+                status = "stopped"
                 # 用户停止：落 partial + stopped 标记（与旧实现一致），并发终结事件。
                 if not parts and reply:
                     parts.append(reply)
@@ -594,6 +598,7 @@ class ChatRuntime:
             elif error is not None:
                 await self._append(run, {"type": "error", "message": error})
             else:
+                status = "completed"
                 if not parts and reply:
                     parts.append(reply)  # 后端未流式时兜底，流式过则不重复追加
                 final_reply = "".join(parts)
@@ -635,6 +640,8 @@ class ChatRuntime:
                 suggest_task.cancel()
             if title_task is not None and not title_task.done():
                 title_task.cancel()
+            metrics.inc("opentalos_turns_total", labels={"status": status})
+            metrics.observe("opentalos_turn_duration_seconds", time.monotonic() - turn_started)
             await self._finish(run)
 
     async def _tail(self, run: _LiveRun, after: int) -> AsyncIterator[tuple[int, dict[str, Any]]]:

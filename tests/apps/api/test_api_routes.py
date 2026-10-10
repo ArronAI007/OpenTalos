@@ -774,3 +774,16 @@ async def test_steer_without_active_turn_returns_409(api) -> None:
     task = (await api.post("/api/tasks", json={"agent_type": "react"})).json()
     resp = await api.post(f"/api/tasks/{task['id']}/steer", json={"content": "改用中文"})
     assert resp.status_code == 409
+
+
+async def test_metrics_endpoint_exposes_prometheus_text(api) -> None:
+    from observability import metrics
+
+    metrics.reset()
+    await api.get("/health")
+
+    resp = await api.get("/metrics")
+
+    assert resp.status_code == 200
+    assert "text/plain" in resp.headers["content-type"]
+    assert "opentalos_http_requests_total" in resp.text

@@ -26,6 +26,9 @@ from skill.models import (
     SkillPreview,
     SkillSummary,
 )
+from observability import configure_logging
+
+configure_logging()
 
 DEFAULT_MAX_CONCURRENCY = 4
 # packages/skill/main.py -> packages/skill -> packages -> 仓库根目录

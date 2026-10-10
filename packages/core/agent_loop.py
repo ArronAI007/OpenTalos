@@ -9,7 +9,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from context import OutputTrimmer
-from observability import RunRecorder
+from observability import RunRecorder, metrics
 from tool.registry import ToolRegistry
 
 from .cancellation import CancellationToken
@@ -137,6 +137,7 @@ async def resolve_tool_call(
         # 无审批通道（approve=None）时按拒绝处理：副作用工具 fail-closed，绝不默默放行。
         allowed = approve is not None and await approve(invocation)
         if not allowed:
+            metrics.inc("opentalos_tool_denied_total", labels={"tool": invocation.tool_name})
             if recorder:
                 recorder.log_event(
                     "tool_denied", {"tool_name": invocation.tool_name, "arguments": invocation.arguments_json}, step=step
@@ -146,6 +147,13 @@ async def resolve_tool_call(
             return {"role": "tool", "tool_call_id": invocation.call_id, "content": _DENIED_MESSAGE}
 
     outcome = await tool_registry.acall(invocation.tool_name, arguments, call_id=invocation.call_id)
+    metrics.inc(
+        "opentalos_tool_calls_total",
+        labels={"tool": invocation.tool_name, "status": "ok" if outcome.succeeded else "error"},
+    )
+    metrics.observe(
+        "opentalos_tool_call_duration_seconds", outcome.duration_ms / 1000, labels={"tool": invocation.tool_name}
+    )
     content = _trim_output(trimmer, invocation.tool_name, outcome.output)
     # 不可信外部内容（网页/MCP/脚本 stdout/协作 Agent）：包成隔离块再进模型上下文。
     if tool is not None and tool.untrusted_output:
@@ -276,6 +284,12 @@ async def execute_model_step(
     cost = estimate_cost(completion.model_id, usage)
     if cost is not None:
         usage["cost"] = cost
+    metrics.inc("opentalos_model_calls_total", labels={"model": completion.model_id})
+    metrics.observe("opentalos_model_call_duration_seconds", completion.duration_ms / 1000)
+    if usage.get("total_tokens"):
+        metrics.inc("opentalos_model_tokens_total", value=usage["total_tokens"])
+    if cost is not None:
+        metrics.inc("opentalos_model_cost_usd_total", value=cost)
     if on_usage is not None:
         on_usage(usage)
     if recorder:

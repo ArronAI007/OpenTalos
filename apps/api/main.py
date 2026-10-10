@@ -3,12 +3,13 @@ import asyncio
 import json
 import os
 import sys
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -27,6 +28,10 @@ from evaluation import (  # noqa: E402
     run_case,
 )
 from runtime import ChatRuntime  # noqa: E402
+from observability import configure_logging, metrics  # noqa: E402
+
+# 进程启动即装好结构化日志（JSON 行到 stderr）；级别取 LOG_LEVEL（默认 INFO）。
+configure_logging()
 
 
 class CreateTaskRequest(BaseModel):
@@ -142,6 +147,23 @@ def create_app(runtime: ChatRuntime | None = None, eval_cases_path: Path | None 
 
     app = FastAPI(title="OpenTalos Chat API", lifespan=_lifespan)
     app.state.runtime = runtime
+
+    @app.middleware("http")
+    async def _record_http_metrics(request, call_next):
+        started = time.perf_counter()
+        response = await call_next(request)
+        route = request.scope.get("route")
+        path = getattr(route, "path", request.url.path)
+        metrics.inc(
+            "opentalos_http_requests_total",
+            labels={"method": request.method, "path": path, "status": str(response.status_code)},
+        )
+        metrics.observe(
+            "opentalos_http_request_duration_seconds",
+            time.perf_counter() - started,
+            labels={"method": request.method, "path": path},
+        )
+        return response
     cors_origins = [
         origin.strip()
         for origin in os.environ.get("CORS_ORIGINS", "http://localhost:3000").split(",")
@@ -156,6 +178,11 @@ def create_app(runtime: ChatRuntime | None = None, eval_cases_path: Path | None 
     @app.get("/health")
     async def health() -> dict:
         return {"status": "ok"}
+
+    @app.get("/metrics")
+    async def metrics_route() -> PlainTextResponse:
+        # Prometheus 文本导出（无第三方依赖）。
+        return PlainTextResponse(metrics.render(), media_type="text/plain; version=0.0.4")
 
     @app.get("/api/config")
     async def config() -> dict:
