@@ -44,7 +44,6 @@ export function Sidebar({ collapsed, onToggleCollapse }: SidebarProps) {
           <Link href="/agentrl" className="rounded-lg px-3 py-2 text-sm hover:bg-white">🧪 AgentRL</Link>
           <Link href="/deepresearch" className="rounded-lg px-3 py-2 text-sm hover:bg-white">🔭 DeepResearch</Link>
           <Link href="/mcp" className="rounded-lg px-3 py-2 text-sm hover:bg-white">🔌 MCP</Link>
-          <Link href="/roles" className="rounded-lg px-3 py-2 text-sm hover:bg-white">🎭 角色</Link>
           <hr className="my-3 border-border" />
           <TaskList />
         </nav>

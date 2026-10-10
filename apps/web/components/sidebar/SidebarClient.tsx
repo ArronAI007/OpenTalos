@@ -107,9 +107,6 @@ export function SidebarRail({ busy, onCreate, onExpand, onOpenSearch }: SidebarR
       <Link href="/mcp" aria-label="MCP" title="MCP" className={iconBtn}>
         <PlugIcon />
       </Link>
-      <Link href="/roles" aria-label="角色" title="角色" className={iconBtn}>
-        <UsersIcon />
-      </Link>
       <button type="button" aria-label="任务历史" title="任务历史" onClick={onExpand} className={iconBtn}>
         <ClockIcon />
       </button>
