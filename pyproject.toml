@@ -26,6 +26,10 @@ dev = [
 
 [tool.uv]
 package = false
+# cryptography >=49 起不再发布 macOS x86_64 / universal2 wheel（只剩 arm64）。在 Intel mac 上
+# 会退化为源码编译（需要 Rust），uv 会自动联网装 Rust，导致 `uv sync` 长时间卡住/失败。
+# 约束到仍提供 universal2（含 x86_64）预编译 wheel 的版本，各平台都走二进制安装。
+override-dependencies = ["cryptography<49"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
