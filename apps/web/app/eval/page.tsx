@@ -114,6 +114,9 @@ function ConfirmDeleteRunDialog({
 
 function ReportView({ results }: { results: EvalResult[] }) {
   const summary = summarizeResults(results);
+  // 历史记录可能含多个 agent_type（收敛前 4 类型 × 用例）；多类型时重新显示 Agent 列，
+  // 否则四条同用例行看起来像重复。单一类型的新运行不显示该列。
+  const showAgent = new Set(results.map((r) => r.agent_type)).size > 1;
   return (
     <div>
       <p className="mb-4 rounded-lg bg-gray-50 px-3 py-2 text-sm">
@@ -125,6 +128,7 @@ function ReportView({ results }: { results: EvalResult[] }) {
         <thead>
           <tr className="border-b border-border text-text-secondary">
             <th className="py-1.5 pr-2">用例</th>
+            {showAgent && <th className="py-1.5 pr-2">Agent</th>}
             <th className="py-1.5 pr-2">工具</th>
             <th className="py-1.5 pr-2">正确性</th>
             <th className="py-1.5 pr-2">完整性</th>
@@ -138,6 +142,7 @@ function ReportView({ results }: { results: EvalResult[] }) {
           {results.map((r) => (
             <tr key={`${r.case_id}-${r.agent_type}`} className="border-b border-border align-top">
               <td className="py-1.5 pr-2">{r.case_name}</td>
+              {showAgent && <td className="py-1.5 pr-2">{r.agent_type}</td>}
               <td className="py-1.5 pr-2 text-text-secondary">{formatTools(r)}</td>
               {r.error ? (
                 <td colSpan={4} className="py-1.5 pr-2 text-red-500">
@@ -351,6 +356,8 @@ export default function EvalPage() {
           <ul className="space-y-2">
             {runs.map((run) => {
               const expanded = expandedRunId === run.id;
+              // 历史多类型批次：头部标出类型，否则“共 N 条结果”里看不出为何重复。
+              const types = [...new Set(run.results.map((r) => r.agent_type))];
               return (
                 <li key={run.id} className="rounded-lg border border-border">
                   <div className="flex items-center gap-2 px-3 py-2 text-sm">
@@ -361,7 +368,9 @@ export default function EvalPage() {
                     >
                       <span>
                         <span className="font-medium">{formatTimestamp(run.created_at)}</span>
-                        <span className="ml-2 text-text-secondary">共 {run.results.length} 条结果</span>
+                        <span className="ml-2 text-text-secondary">
+                          {types.length > 1 ? `${types.join("、")} · ` : ""}共 {run.results.length} 条结果
+                        </span>
                       </span>
                       <span className="text-text-secondary">{expanded ? "收起" : "展开"}</span>
                     </button>
