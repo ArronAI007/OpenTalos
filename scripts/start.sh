@@ -145,9 +145,10 @@ wait_healthy() {  # name pid url check log_file timeout
 }
 
 # 拉起一个后端服务并等待健康；健康则把 pid/端口写入 .data/pids/ 供 stop 精确停止。
-ensure_service() {  # name port url check log_file -- cmd...
-  local name="$1" port="$2" url="$3" check="$4" log_file="$5"
-  shift 5
+# fatal=1（默认）时任何启动失败都硬退出；fatal=0 时失败只返回非零（调用方自行降级）。
+ensure_service() {  # name port url check log_file fatal cmd...
+  local name="$1" port="$2" url="$3" check="$4" log_file="$5" fatal="${6:-1}"
+  shift 6
   mkdir -p "$PID_DIR" "$LOG_DIR"
 
   if "$check" "$url"; then
@@ -157,7 +158,11 @@ ensure_service() {  # name port url check log_file -- cmd...
   local busy
   busy="$(port_listener "$port")"
   if [ -n "$busy" ]; then
-    die "port $port is held by pid $busy but it did not pass the health check ($url)"
+    if [ "$fatal" = "1" ]; then
+      die "port $port is held by pid $busy but it did not pass the health check ($url)"
+    fi
+    echo "warning: port $port is held by pid $busy but it did not pass the health check ($url) — skipping $name" >&2
+    return 1
   fi
 
   rotate_log "$log_file"
@@ -264,19 +269,19 @@ elif [ ! -d agentrl/.venv ]; then
   AGENTRL_ENABLED=0
 fi
 
-ensure_service "api" "$API_PORT" "$API_URL/health" healthy_status "$LOG_DIR/api.log" \
+ensure_service "api" "$API_PORT" "$API_URL/health" healthy_status "$LOG_DIR/api.log" 1 \
   env PYTHONPATH=packages uv run --no-sync uvicorn main:app --app-dir apps/api --host "$HOST" --port "$API_PORT"
 
 if [ "$AGENTRL_ENABLED" = "1" ]; then
   # agentrl 启动失败也只降级（AGENTRL_UP=0），不影响 api/a2apeer/web。
-  ensure_service "agentrl" "$AGENTRL_PORT" "$AGENTRL_URL/health" healthy_status "$LOG_DIR/agentrl.log" \
+  ensure_service "agentrl" "$AGENTRL_PORT" "$AGENTRL_URL/health" healthy_status "$LOG_DIR/agentrl.log" 0 \
     uv run --no-sync --directory agentrl uvicorn main:app --host "$HOST" --port "$AGENTRL_PORT" \
     || AGENTRL_UP=0
 else
   AGENTRL_UP=0
 fi
 
-ensure_service "a2apeer" "$A2APEER_PORT" "$A2APEER_URL/health" healthy_status "$LOG_DIR/a2apeer.log" \
+ensure_service "a2apeer" "$A2APEER_PORT" "$A2APEER_URL/health" healthy_status "$LOG_DIR/a2apeer.log" 1 \
   env PYTHONPATH=packages uv run --no-sync uvicorn a2apeer.main:app --host "$HOST" --port "$A2APEER_PORT"
 
 # web：next dev 无 /health，首页可访问即视为就绪；首次编译可能几十秒。
