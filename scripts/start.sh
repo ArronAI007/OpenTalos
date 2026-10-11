@@ -15,8 +15,9 @@
 #   - 端口、超时、是否自动同步全部可用环境变量覆盖（见下方“可调参数”），默认值适配常见本地开发。
 #   - 健康检查兼容 {"status":"ok"} 的空格/格式差异；失败时打印日志尾部，并回收本次拉起的进程，不留僵尸。
 #   - 只动 .data/pids/ 里记录的进程与端口：已在跑且健康的服务会被复用，且不归本脚本 stop 管理。
-#   - agentrl 是独立 uv 项目（agentrl/pyproject.toml，重型 ML 依赖），默认不自动安装：
-#     未初始化时只提示、跳过，不阻塞其余服务；需要自动装可设 AUTO_SYNC_AGENTRL=1。
+#   - agentrl 是独立 uv 项目（agentrl/pyproject.toml，重型 ML 依赖）：默认纳入启动流程，
+#     先 `uv sync --directory agentrl` 再拉起。但它有平台限制（torch 无 macOS x86_64 wheel），
+#     装不上/起不来时只警告并跳过，不拖垮其余服务。设 SKIP_AGENTRL=1 可整体跳过。
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
@@ -33,7 +34,8 @@ HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-90}"          # 后端服务健康检查窗口
 WEB_HEALTH_TIMEOUT="${WEB_HEALTH_TIMEOUT:-240}" # web 首次编译可能较慢，单独给更宽裕的窗口
 SYNC_TIMEOUT="${SYNC_TIMEOUT:-1800}"            # 依赖/前端安装兜底超时（秒），0 表示不限时
 AUTO_SYNC="${AUTO_SYNC:-1}"                     # 启动前是否自动 `uv sync`（0 关闭）
-AUTO_SYNC_AGENTRL="${AUTO_SYNC_AGENTRL:-0}"     # 是否自动初始化 agentrl（很重，默认关闭）
+AUTO_SYNC_AGENTRL="${AUTO_SYNC_AGENTRL:-1}"     # agentrl 依赖很重（torch 等），默认自动 sync 以保证服务能起来
+SKIP_AGENTRL="${SKIP_AGENTRL:-0}"               # 设为 1 时完全跳过 agentrl（不 sync、不启动）
 SKIP_WEB="${SKIP_WEB:-0}"                       # 设为 1 时只起后端服务，跳过 web 前端（CI/无头场景）
 WEB_PREWARM="${WEB_PREWARM:-1}"                 # dev 下后台预热各页面路由，避免侧栏首次切换时当场编译卡顿
 LOG_TAIL_LINES="${LOG_TAIL_LINES:-30}"          # 失败时回显日志尾部的行数
@@ -239,24 +241,38 @@ else
   echo "AUTO_SYNC=0 — skipping 'uv sync'"
 fi
 
+# agentrl 是独立 uv 项目（自带 pyproject.toml/.venv），依赖很重（torch/transformers/trl…），
+# 不在根项目 uv sync 范围内。这里单独 sync，保证 start.sh 能把所有服务都拉起来。
+AGENTRL_ENABLED=1
+if [ "$SKIP_AGENTRL" = "1" ]; then
+  echo "SKIP_AGENTRL=1 — skipping agentrl"
+  AGENTRL_ENABLED=0
+elif [ ! -f agentrl/pyproject.toml ]; then
+  echo "warning: agentrl project not found at agentrl/ — skipping agentrl" >&2
+  AGENTRL_ENABLED=0
+elif [ "$AUTO_SYNC_AGENTRL" = "1" ]; then
+  echo "syncing agentrl dependencies (uv sync --directory agentrl; heavy, one-time) ..."
+  # agentrl 依赖有平台限制（torch 只发 Linux / macOS arm64 / Windows 的 wheel）。
+  # 装不上时只警告并跳过它，不让整个 start.sh 陪葬。
+  if ! run_with_timeout "$SYNC_TIMEOUT" uv sync --directory agentrl; then
+    echo "warning: agentrl dependencies are unavailable on this platform — skipping agentrl." >&2
+    echo "         (torch ships no macOS x86_64 wheel; use Linux / Apple Silicon, or Docker. Set SKIP_AGENTRL=1 to silence.)" >&2
+    AGENTRL_ENABLED=0
+  fi
+elif [ ! -d agentrl/.venv ]; then
+  echo "warning: AUTO_SYNC_AGENTRL=0 but agentrl/.venv is missing — skipping agentrl" >&2
+  AGENTRL_ENABLED=0
+fi
+
 ensure_service "api" "$API_PORT" "$API_URL/health" healthy_status "$LOG_DIR/api.log" \
   env PYTHONPATH=packages uv run --no-sync uvicorn main:app --app-dir apps/api --host "$HOST" --port "$API_PORT"
 
-# agentrl 是独立的 uv 项目（自身 pyproject.toml / .venv），默认不自动安装重型依赖。
-if [ -d agentrl/.venv ] || [ "$AUTO_SYNC_AGENTRL" = "1" ]; then
-  if [ ! -d agentrl/.venv ]; then
-    echo "initializing agentrl (uv sync --directory agentrl) ..."
-    if ! run_with_timeout "$SYNC_TIMEOUT" uv sync --directory agentrl; then
-      echo "warning: agentrl sync failed — skipping agentrl" >&2
-      AGENTRL_UP=0
-    fi
-  fi
-  if [ "$AGENTRL_UP" = "1" ]; then
-    ensure_service "agentrl" "$AGENTRL_PORT" "$AGENTRL_URL/health" healthy_status "$LOG_DIR/agentrl.log" \
-      uv run --no-sync --directory agentrl uvicorn main:app --host "$HOST" --port "$AGENTRL_PORT"
-  fi
+if [ "$AGENTRL_ENABLED" = "1" ]; then
+  # agentrl 启动失败也只降级（AGENTRL_UP=0），不影响 api/a2apeer/web。
+  ensure_service "agentrl" "$AGENTRL_PORT" "$AGENTRL_URL/health" healthy_status "$LOG_DIR/agentrl.log" \
+    uv run --no-sync --directory agentrl uvicorn main:app --host "$HOST" --port "$AGENTRL_PORT" \
+    || AGENTRL_UP=0
 else
-  echo "skipping agentrl: agentrl/.venv missing — run once:  (cd agentrl && uv sync)   or set AUTO_SYNC_AGENTRL=1"
   AGENTRL_UP=0
 fi
 
@@ -319,6 +335,8 @@ fi
 echo "  api      $API_URL"
 if [ "$AGENTRL_UP" = "1" ]; then
   echo "  agentrl  $AGENTRL_URL"
+else
+  echo "  agentrl  (skipped)"
 fi
 echo "  a2apeer  $A2APEER_URL"
 echo "  skills   in-process (repo ./skills, no separate service)"

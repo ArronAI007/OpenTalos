@@ -153,18 +153,19 @@ cp .env.example .env   # fill in MODEL_PROVIDER/MODEL_API_KEY/MODEL_NAME, or lea
 
 uv run pytest tests/
 
-./scripts/start.sh   # chat API (:8400) + web frontend (:3010)
-                     # both spawn in the background, logs go to .data/logs/,
+./scripts/start.sh   # chat API (:8400) + agentrl (:8420) + a2apeer (:8430) + web (:3010)
+                     # all of them spawn in the background, logs go to .data/logs/,
                      # and the terminal is handed back once everything is healthy
                      # (skills are read from ./skills in-process — no skill service)
 ```
 
-AgentRL needs its own one-time setup first (separate project, heavy ML dependencies not
-installed by the root `uv sync` above):
-
-```bash
-cd agentrl && uv sync && cd ..
-```
+`start.sh` also runs `uv sync` for `agentrl/`, which is a separate uv project with heavy ML
+dependencies (`torch`, `transformers`, `trl`, …) — the first start downloads a lot and takes a
+while, later starts reuse it. AgentRL is best-effort: it needs a platform `torch` builds for
+(Linux, Apple Silicon macOS, or Windows) — on an Intel Mac `uv sync` cannot resolve `torch` and
+`start.sh` prints a warning and skips only that service, leaving the rest running. Set
+`SKIP_AGENTRL=1` to skip it deliberately (or `AUTO_SYNC_AGENTRL=0` to skip only its sync when
+`agentrl/.venv` is already prepared).
 
 Then open http://localhost:3010. A service already answering `{"status":"ok"}` on its port
 (or, for the web frontend, already serving its homepage) is reused rather than restarted —
