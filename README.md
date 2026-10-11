@@ -159,13 +159,10 @@ uv run pytest tests/
                      # (skills are read from ./skills in-process — no skill service)
 ```
 
-`start.sh` also runs `uv sync` for `agentrl/`, which is a separate uv project with heavy ML
-dependencies (`torch`, `transformers`, `trl`, …) — the first start downloads a lot and takes a
-while, later starts reuse it. AgentRL is best-effort: it needs a platform `torch` builds for
-(Linux, Apple Silicon macOS, or Windows) — on an Intel Mac `uv sync` cannot resolve `torch` and
-`start.sh` prints a warning and skips only that service, leaving the rest running. Set
-`SKIP_AGENTRL=1` to skip it deliberately (or `AUTO_SYNC_AGENTRL=0` to skip only its sync when
-`agentrl/.venv` is already prepared).
+`start.sh` also syncs and starts `agentrl/`, a separate uv project with heavy ML dependencies
+(`torch`, `transformers`, `trl`, …). It is best-effort and platform-restricted — see
+[Platform & environment notes](#platform--environment-notes) for the requirements and the
+`SKIP_AGENTRL` / `AUTO_SYNC_AGENTRL` knobs.
 
 Then open http://localhost:3010. A service already answering `{"status":"ok"}` on its port
 (or, for the web frontend, already serving its homepage) is reused rather than restarted —
@@ -185,6 +182,57 @@ requested — so the very first click on each sidebar entry can stall for a seco
 `NEXT_PUBLIC_API_URL=http://localhost:8400 pnpm -C apps/web build && pnpm -C apps/web start`
 (`NEXT_PUBLIC_*` values are inlined into the client bundle at **build** time, so they must be set
 for `build`, not `start`).
+
+## Platform & environment notes
+
+`scripts/start.sh` brings the whole stack up on one machine, but a few parts are
+environment-dependent. This is what can bite you per platform.
+
+| Component | Needs | Notes |
+|---|---|---|
+| chat API (`:8400`), a2apeer (`:8430`) | Python ≥3.12, `uv` | Cross-platform. |
+| web (`:3010`) | Node.js ≥20.9, `pnpm` | Next.js 16 requires Node ≥20.9.0 (its `engines`). |
+| skills | — | Read from `./skills` **in-process**; no service and no extra runtime. The scripts the agent runs through the `bash` tool still need their own interpreter on `PATH` (e.g. `python3`, `node`). |
+| agentrl (`:8420`) | a PyTorch-supported platform | See below — restricted. |
+
+### Python / `uv`
+
+- Python ≥3.12 and `uv` on `PATH`.
+- The root project pins `cryptography<49` in `pyproject.toml`. From v49 on, `cryptography`
+  ships **no macOS x86_64 wheel**, so `uv sync` falls back to a from-source Rust build (and
+  tries to auto-install Rust), which hangs on an Intel Mac. The pin keeps every platform on a
+  prebuilt wheel.
+- The first `uv sync` downloads packages; if your network is slow, raise `SYNC_TIMEOUT`
+  (default 1800s).
+
+### Node / web
+
+- Node.js ≥20.9 (`pnpm` on `PATH`).
+- `start.sh` runs `pnpm install` on first start when `apps/web/node_modules/.bin/next` is
+  missing/incomplete.
+
+### agentrl is platform-restricted
+
+AgentRL pulls in `torch`, and `torch` only publishes wheels for **`manylinux` x86_64 /
+`aarch64`, `macosx_*_arm64` (Apple Silicon), and `win_amd64`**. There is *no* macOS x86_64
+wheel and no source distribution, so on an **Intel Mac** `uv sync --directory agentrl` cannot
+resolve and `start.sh` prints a warning and skips just that service (the rest keep running).
+
+- To actually run AgentRL on an Intel Mac you need a Linux environment (e.g. a `linux/amd64`
+  container or VM).
+- `SKIP_AGENTRL=1` skips it entirely (no sync, no start); `AUTO_SYNC_AGENTRL=0` skips only the
+  sync when `agentrl/.venv` is already prepared.
+- Its first sync is heavy (hundreds of MB–GB); later starts reuse it.
+
+### Ports, network, tools
+
+- Default ports `3010` / `8400` / `8420` / `8430` are overridable with `WEB_PORT` / `API_PORT`
+  / `AGENTRL_PORT` / `A2APEER_PORT`.
+- `start.sh` requires `curl`. It uses `lsof` for port-based cleanup on `stop`; without `lsof`
+  it falls back to the recorded pids only (a warning is printed).
+- Docker is **not** required to start anything. It matters only if you drive the library
+  script runner with `SANDBOX_MODE=docker` — the agent-facing skills use the generic `bash`
+  tool and run on the host.
 
 ## Key Environment Variables
 
