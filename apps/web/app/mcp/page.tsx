@@ -65,7 +65,9 @@ export default function MCPPage() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    listMCPServers().then(setServers);
+    listMCPServers()
+      .then(setServers)
+      .catch(() => setServers([]));
   }, []);
 
   const handleAdd = async () => {

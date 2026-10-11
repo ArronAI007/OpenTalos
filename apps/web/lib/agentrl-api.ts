@@ -1,4 +1,4 @@
-const AGENTRL_URL = process.env.NEXT_PUBLIC_AGENTRL_URL || "http://localhost:8420";
+export const AGENTRL_URL = process.env.NEXT_PUBLIC_AGENTRL_URL || "http://localhost:8420";
 
 export interface AgentRLConfig {
   sft_samples: number;

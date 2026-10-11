@@ -195,13 +195,17 @@ export default function EvalPage() {
   }, []);
 
   useEffect(() => {
-    listEvalCases().then((loaded) => {
-      setCases(loaded);
-      setSelectedCaseIds(new Set(loaded.map((c) => c.id)));
-    });
-    fetchConfig().then((config) => {
-      setAgentTypes(config.agent_types);
-    });
+    listEvalCases()
+      .then((loaded) => {
+        setCases(loaded);
+        setSelectedCaseIds(new Set(loaded.map((c) => c.id)));
+      })
+      .catch(() => setCases([]));
+    fetchConfig()
+      .then((config) => {
+        setAgentTypes(config.agent_types);
+      })
+      .catch(() => undefined);
     // eslint-disable-next-line react-hooks/set-state-in-effect -- 挂载时拉历史记录（含错误态），与既有页面同范式
     reloadRuns();
   }, [reloadRuns]);

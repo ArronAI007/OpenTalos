@@ -75,7 +75,9 @@ export default function DeepResearchPage() {
   const streamsRef = useRef<Map<string, EventSource>>(new Map());
 
   useEffect(() => {
-    listDeepResearchRuns().then(setRuns);
+    listDeepResearchRuns()
+      .then(setRuns)
+      .catch(() => setRuns([]));
   }, []);
 
   // 四个 helper 都只闭包 setRuns（React 保证跨渲染稳定），用 useCallback 固定引用——这样

@@ -6,6 +6,7 @@ import {
   listAgentRLRuns,
   getAgentRLRun,
   deleteAgentRLRun,
+  AGENTRL_URL,
   type AgentRLRun,
 } from "@/lib/agentrl-api";
 import { TrashIcon } from "@/components/ui/icons";
@@ -94,10 +95,18 @@ export default function AgentRLPage() {
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    listAgentRLRuns().then(setRuns);
+    // AgentRL 服务是独立的（默认 :8420），没起时会直接连不上。没有 catch 会留下未处理
+    // 的 Promise 且 runs 永远是 null，页面就卡在骨架屏——这里降级成"服务不可达"提示。
+    listAgentRLRuns()
+      .then(setRuns)
+      .catch(() => {
+        setRuns([]);
+        setLoadError(true);
+      });
   }, []);
 
   useEffect(() => {
@@ -108,10 +117,14 @@ export default function AgentRLPage() {
     }
     pollRef.current = setInterval(async () => {
       const current = runs ?? [];
-      const updated = await Promise.all(
-        current.map((r) => (r.status === "running" ? getAgentRLRun(r.id) : Promise.resolve(r)))
-      );
-      setRuns(updated);
+      try {
+        const updated = await Promise.all(
+          current.map((r) => (r.status === "running" ? getAgentRLRun(r.id) : Promise.resolve(r)))
+        );
+        setRuns(updated);
+      } catch {
+        // 轮询偶发失败：保留现有数据，等下一轮再试
+      }
     }, 2500);
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
@@ -134,9 +147,13 @@ export default function AgentRLPage() {
   };
 
   const handleDelete = async (id: string) => {
-    await deleteAgentRLRun(id);
-    setRuns((prev) => prev?.filter((r) => r.id !== id) ?? null);
-    setExpandedRunId((prev) => (prev === id ? null : prev));
+    try {
+      await deleteAgentRLRun(id);
+      setRuns((prev) => prev?.filter((r) => r.id !== id) ?? null);
+      setExpandedRunId((prev) => (prev === id ? null : prev));
+    } catch {
+      setError("删除失败，请检查 AgentRL 服务是否在运行");
+    }
   };
 
   if (runs === null) return <PageSkeleton />;
@@ -144,6 +161,24 @@ export default function AgentRLPage() {
   return (
     <section className="p-6">
       <h1 className="mb-4 text-xl font-semibold">AgentRL</h1>
+
+      {loadError && (
+        <div className="mb-6 rounded-xl border border-red-500/40 bg-red-500/10 p-4 text-sm">
+          <p className="font-medium text-red-500">无法连接 AgentRL 服务（{AGENTRL_URL}）。</p>
+          <p className="mt-1 text-text-secondary">
+            AgentRL 是独立的 uv 项目（含 torch 等重型依赖，不在根项目 uv sync 范围内），
+            首次使用需先初始化：
+            <code className="mx-1 rounded bg-sidebar px-1">{"cd agentrl && uv sync"}</code>
+            ，之后由
+            <code className="mx-1 rounded bg-sidebar px-1">./scripts/start.sh start</code>
+            自动拉起（或手动
+            <code className="mx-1 rounded bg-sidebar px-1">
+              uv run --directory agentrl uvicorn main:app --port 8420
+            </code>
+            ）。
+          </p>
+        </div>
+      )}
       <p className="mb-4 text-sm text-text-secondary">
         在 Qwen3-0.6B 上跑一次真实的 SFT→GRPO 训练演示（CPU，分钟级，规模很小——仅用于展示流程）。
       </p>
@@ -165,7 +200,7 @@ export default function AgentRLPage() {
             </label>
           ))}
         </div>
-        <button type="button" onClick={() => void handleStart()} className="rounded-lg bg-text px-4 py-2 text-sm font-medium text-white">
+        <button type="button" onClick={() => void handleStart()} disabled={loadError} className="rounded-lg bg-text px-4 py-2 text-sm font-medium text-white disabled:opacity-40">
           开始训练
         </button>
         {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
