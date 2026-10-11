@@ -62,11 +62,14 @@ async def test_generate_list_bind_delete(api) -> None:
 
     task = (await http.post("/api/tasks", json={"agent_id": agent["id"]})).json()
     assert task["agent_id"] == agent["id"]
+    assert (await http.get(f"/api/tasks/{task['id']}")).json()["agent_name"] == "周报助手"
     suffix = await runtime._suffix_for(task)
     assert suffix is not None and suffix.startswith("你是周报助手。")
 
     assert (await http.delete(f"/api/agents/{agent['id']}")).status_code == 204
     # Agent 被删后任务退回默认 Agent，不报错
+    assert (await http.get(f"/api/tasks/{task['id']}")).json()["agent_name"] is None
+    assert (await http.get("/api/tasks/nope")).status_code == 404
     await runtime._ensure_skills()
     assert await runtime._suffix_for(task) == runtime._skills_suffix
 

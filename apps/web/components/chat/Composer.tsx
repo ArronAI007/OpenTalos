@@ -13,6 +13,7 @@ export function Composer({
   value: controlledValue,
   onChange,
   focusNonce,
+  agentName,
 }: {
   onSend: (text: string) => void;
   disabled: boolean;
@@ -22,6 +23,8 @@ export function Composer({
   onChange?: (value: string) => void;
   // 外部触发聚焦的 nonce：编辑回填相同内容也要重新聚焦，所以用计数而非布尔/字符串
   focusNonce?: number;
+  // 用户自建 Agent 的名字：非空时在输入框内带上标签，让人一眼知道在和谁对话
+  agentName?: string | null;
 }) {
   const [internalValue, setInternalValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -68,6 +71,14 @@ export function Composer({
       onSubmit={(event) => { event.preventDefault(); submit(); }}
     >
       <div className="mx-auto flex max-w-3xl items-end gap-2 rounded-composer border border-border bg-surface px-4 py-2">
+        {agentName && (
+          <span
+            title={`当前 Agent：${agentName}`}
+            className="mb-0.5 max-w-[10rem] shrink-0 truncate rounded-full bg-sidebar px-2.5 py-1 text-xs font-medium"
+          >
+            @{agentName}
+          </span>
+        )}
         <textarea
           ref={textareaRef}
           rows={1}
@@ -83,7 +94,7 @@ export function Composer({
             submit();
           }}
           disabled={disabled && !steering}
-          placeholder={steering ? "补充指令以纠偏…" : "给 OpenTalos 发任务…"}
+          placeholder={steering ? "补充指令以纠偏…" : `给 ${agentName ?? "OpenTalos"} 发任务…`}
           className="max-h-40 flex-1 resize-none overflow-y-auto bg-transparent text-base leading-6 outline-none disabled:opacity-50"
           aria-label="输入消息"
         />

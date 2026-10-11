@@ -121,7 +121,12 @@ class ChatStore:
 
     def get_task(self, task_id: str) -> dict | None:
         with self._connect() as conn:
-            row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+            # agent_name：用户自建 Agent 的名字（前端输入框展示）；默认 Agent / 已删除的 Agent 为 NULL
+            row = conn.execute(
+                "SELECT t.*, a.name AS agent_name FROM tasks t LEFT JOIN agents a ON a.id = t.agent_id"
+                " WHERE t.id = ?",
+                (task_id,),
+            ).fetchone()
         return dict(row) if row else None
 
     def list_tasks(self) -> list[dict]:

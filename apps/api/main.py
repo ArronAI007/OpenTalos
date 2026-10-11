@@ -260,6 +260,13 @@ def create_app(runtime: ChatRuntime | None = None, eval_cases_path: Path | None 
         if not store.delete_agent(agent_id):
             raise HTTPException(404, "agent not found")
 
+    @app.get("/api/tasks/{task_id}")
+    async def get_task(task_id: str) -> dict:
+        task = store.get_task(task_id)
+        if task is None:
+            raise HTTPException(404, "task not found")
+        return task
+
     @app.patch("/api/tasks/{task_id}")
     async def update_task(task_id: str, request: UpdateTaskRequest) -> dict:
         # 校验顺序保持 422（无有效字段）→ 400（title 空白 / 项目不存在）→ 404（任务不存在）。

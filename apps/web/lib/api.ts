@@ -1,6 +1,6 @@
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8400";
 
-export interface Task { id: string; title: string; agent_type: string; updated_at: string; pinned: boolean; starred: boolean; archived: boolean; project_id: string | null }
+export interface Task { id: string; title: string; agent_type: string; updated_at: string; pinned: boolean; starred: boolean; archived: boolean; project_id: string | null; agent_id?: string | null; agent_name?: string | null }
 
 // 后端 SQLite 用 0/1 存 pinned/starred/archived；统一在此处归一为 boolean，组件层只见 boolean。
 // project_id 两端同为 string | null，无需转换，随 Omit 直通。
@@ -78,6 +78,9 @@ export async function generateAgent(prompt: string): Promise<CustomAgent> {
 export async function deleteCustomAgent(id: string): Promise<void> {
   const res = await fetch(`${API_URL}/api/agents/${id}`, { method: "DELETE" });
   if (!res.ok) throw new Error(`API ${res.status} ${res.statusText}`);
+}
+export async function getTask(id: string): Promise<Task> {
+  return fetchJson<RawTask>(`${API_URL}/api/tasks/${id}`, { cache: "no-store" }).then(toTask);
 }
 export async function updateTask(id: string, patch: TaskPatch): Promise<Task> {
   return fetchJson<RawTask>(`${API_URL}/api/tasks/${id}`, {
