@@ -17,6 +17,7 @@ _PACKAGES_DIR = _REPO_ROOT / "packages"
 if str(_PACKAGES_DIR) not in sys.path:
     sys.path.insert(0, str(_PACKAGES_DIR))
 
+from agentgen import AgentGenerationError, generate_agent_spec  # noqa: E402
 from db import ChatStore  # noqa: E402
 from deepresearch import run_research, start_live_run, stream_run_events  # noqa: E402
 from mcpclient.client import MCPConnectionError, MCPServerConfig, connect_and_list_tools  # noqa: E402
@@ -54,7 +55,11 @@ configure_logging()
 
 
 class CreateTaskRequest(BaseModel):
-    pass
+    agent_id: str | None = None
+
+
+class GenerateAgentRequest(BaseModel):
+    prompt: str
 
 
 class PostMessageRequest(BaseModel):
@@ -225,7 +230,35 @@ def create_app(runtime: ChatRuntime | None = None, eval_cases_path: Path | None 
 
     @app.post("/api/tasks", status_code=201)
     async def create_task(request: CreateTaskRequest) -> dict:
-        return store.create_task("react")
+        if request.agent_id is not None and store.get_agent(request.agent_id) is None:
+            raise HTTPException(404, "agent not found")
+        return store.create_task("react", request.agent_id)
+
+    @app.get("/api/agents")
+    async def list_agents() -> dict:
+        return {"agents": store.list_agents()}
+
+    @app.post("/api/agents/generate", status_code=201)
+    async def generate_agent(request: GenerateAgentRequest) -> dict:
+        prompt = request.prompt.strip()
+        if not prompt:
+            raise HTTPException(422, "prompt must not be empty")
+        skills = discover_skills(_SKILLS_ROOT)
+        added = load_my_skills(_MY_SKILLS_PATH, [s.name for s in skills])
+        available = [(s.name, s.description) for s in skills if s.name in added]
+        try:
+            spec = await generate_agent_spec(runtime.model_client, prompt, available)
+        except AgentGenerationError as exc:
+            raise HTTPException(502, str(exc)) from exc
+        return store.create_agent(
+            name=spec.name, description=spec.description, system_prompt=spec.system_prompt,
+            skills=spec.skills, source_prompt=prompt,
+        )
+
+    @app.delete("/api/agents/{agent_id}", status_code=204)
+    async def delete_agent(agent_id: str) -> None:
+        if not store.delete_agent(agent_id):
+            raise HTTPException(404, "agent not found")
 
     @app.patch("/api/tasks/{task_id}")
     async def update_task(task_id: str, request: UpdateTaskRequest) -> dict:

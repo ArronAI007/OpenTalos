@@ -16,7 +16,17 @@ CREATE TABLE IF NOT EXISTS tasks (
   pinned INTEGER NOT NULL DEFAULT 0,  -- SQLite 布尔：0 未固定 / 1 已固定
   starred INTEGER NOT NULL DEFAULT 0,  -- SQLite 布尔：0 未收藏 / 1 已收藏
   archived INTEGER NOT NULL DEFAULT 0,  -- SQLite 布尔：0 未归档 / 1 已归档
-  project_id TEXT  -- 可空：所属项目；NULL = 未归组
+  project_id TEXT,  -- 可空：所属项目；NULL = 未归组
+  agent_id TEXT  -- 可空：用户自建 Agent（agents.id）；NULL = 默认 Agent。不设外键：删 Agent 不连带删任务
+);
+CREATE TABLE IF NOT EXISTS agents (
+  id TEXT PRIMARY KEY,
+  created_at TEXT NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL,
+  system_prompt TEXT NOT NULL,  -- 角色设定：追加在默认 ReAct 提示词之后，不替换
+  skills TEXT NOT NULL,         -- JSON 字符串数组：限定可用技能；空数组 = 不额外限定（用「我的技能」）
+  source_prompt TEXT NOT NULL   -- 用户当初那一句话，仅供展示
 );
 CREATE TABLE IF NOT EXISTS messages (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -83,6 +93,7 @@ class ChatStore:
         ("starred", "ALTER TABLE tasks ADD COLUMN starred INTEGER NOT NULL DEFAULT 0"),
         ("archived", "ALTER TABLE tasks ADD COLUMN archived INTEGER NOT NULL DEFAULT 0"),
         ("project_id", "ALTER TABLE tasks ADD COLUMN project_id TEXT"),
+        ("agent_id", "ALTER TABLE tasks ADD COLUMN agent_id TEXT"),
     )
 
     @staticmethod
@@ -98,13 +109,13 @@ class ChatStore:
         conn.execute("PRAGMA foreign_keys = ON")
         return conn
 
-    def create_task(self, agent_type: str) -> dict:
+    def create_task(self, agent_type: str, agent_id: str | None = None) -> dict:
         task_id = uuid.uuid4().hex
         now = _now()
         with self._connect() as conn:
             conn.execute(
-                "INSERT INTO tasks (id, title, agent_type, created_at, updated_at) VALUES (?, '', ?, ?, ?)",
-                (task_id, agent_type, now, now),
+                "INSERT INTO tasks (id, title, agent_type, agent_id, created_at, updated_at) VALUES (?, '', ?, ?, ?, ?)",
+                (task_id, agent_type, agent_id, now, now),
             )
         return self.get_task(task_id)
 
@@ -410,4 +421,43 @@ class ChatStore:
     def delete_mcp_server(self, server_id: str) -> bool:
         with self._connect() as conn:
             cursor = conn.execute("DELETE FROM mcp_servers WHERE id = ?", (server_id,))
+            return cursor.rowcount > 0
+
+    @staticmethod
+    def _agent_row_to_dict(row: sqlite3.Row) -> dict:
+        return {
+            "id": row["id"],
+            "created_at": row["created_at"],
+            "name": row["name"],
+            "description": row["description"],
+            "system_prompt": row["system_prompt"],
+            "skills": json.loads(row["skills"]),
+            "source_prompt": row["source_prompt"],
+        }
+
+    def create_agent(
+        self, *, name: str, description: str, system_prompt: str, skills: list[str], source_prompt: str
+    ) -> dict:
+        agent_id = uuid.uuid4().hex
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO agents (id, created_at, name, description, system_prompt, skills, source_prompt)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (agent_id, _now(), name, description, system_prompt, json.dumps(skills, ensure_ascii=False), source_prompt),
+            )
+        return self.get_agent(agent_id)
+
+    def get_agent(self, agent_id: str) -> dict | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM agents WHERE id = ?", (agent_id,)).fetchone()
+        return self._agent_row_to_dict(row) if row else None
+
+    def list_agents(self) -> list[dict]:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT * FROM agents ORDER BY created_at DESC, rowid DESC").fetchall()
+        return [self._agent_row_to_dict(row) for row in rows]
+
+    def delete_agent(self, agent_id: str) -> bool:
+        with self._connect() as conn:
+            cursor = conn.execute("DELETE FROM agents WHERE id = ?", (agent_id,))
             return cursor.rowcount > 0

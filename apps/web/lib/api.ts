@@ -49,11 +49,35 @@ export function tasksUrl(options?: { archived?: boolean }): string {
 export async function listTasks(options?: { archived?: boolean }): Promise<Task[]> {
   return fetchJson<{ tasks: RawTask[] }>(tasksUrl(options), { cache: "no-store" }).then((d) => d.tasks.map(toTask));
 }
-export async function createTask(): Promise<Task> {
+export async function createTask(agentId?: string): Promise<Task> {
   return fetchJson<RawTask>(`${API_URL}/api/tasks`, {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({}),
+    body: JSON.stringify(agentId ? { agent_id: agentId } : {}),
   }).then(toTask);
+}
+
+export interface CustomAgent {
+  id: string; created_at: string; name: string; description: string;
+  system_prompt: string; skills: string[]; source_prompt: string;
+}
+export async function listCustomAgents(): Promise<CustomAgent[]> {
+  return fetchJson<{ agents: CustomAgent[] }>(`${API_URL}/api/agents`, { cache: "no-store" }).then((d) => d.agents);
+}
+// 生成失败时后端返回 502 + detail（模型报错/输出无法解析），原样抛给调用方展示。
+export async function generateAgent(prompt: string): Promise<CustomAgent> {
+  const res = await fetch(`${API_URL}/api/agents/generate`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt }),
+  });
+  if (!res.ok) {
+    const detail = await res.json().then((d) => (typeof d?.detail === "string" ? d.detail : null)).catch(() => null);
+    throw new Error(detail ?? `API ${res.status} ${res.statusText}`);
+  }
+  return res.json() as Promise<CustomAgent>;
+}
+export async function deleteCustomAgent(id: string): Promise<void> {
+  const res = await fetch(`${API_URL}/api/agents/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(`API ${res.status} ${res.statusText}`);
 }
 export async function updateTask(id: string, patch: TaskPatch): Promise<Task> {
   return fetchJson<RawTask>(`${API_URL}/api/tasks/${id}`, {

@@ -182,6 +182,7 @@ class ChatRuntime:
         self._budget_tokens = budget_tokens
         self._skill_tools: list[Any] = []
         self._skills_suffix: str | None = None
+        self._added_skills: list = []
         self._skills_reachable: bool | None = None
         self._websearch_tools: list[Any] = []
         self._mcp_tools: list[Any] = []
@@ -236,6 +237,7 @@ class ChatRuntime:
         all_names = [skill.name for skill in skills]
         added = load_my_skills(self._my_skills_path, all_names)
         added_skills = [skill for skill in skills if skill.name in added]
+        self._added_skills = added_skills
         self._skills_suffix = format_skills_for_system_prompt(added_skills) or None
         self._skills_reachable = bool(skills)
         self._skill_tools = [ReadTool([self._skills_root]), BashTool([self._skills_root])]
@@ -332,16 +334,30 @@ class ChatRuntime:
             future.set_result(approved)
         return True
 
+    async def _suffix_for(self, task: dict[str, Any]) -> str | None:
+        """系统提示词的追加段。默认 Agent = 技能清单；用户自建 Agent = 角色设定 + 技能清单
+        （其 skills 非空时只保留其中仍在「我的技能」里的那些）。Agent 已被删除则退回默认。"""
+        agent_id = task.get("agent_id")
+        definition = await asyncio.to_thread(self._store.get_agent, agent_id) if agent_id else None
+        if definition is None:
+            return self._skills_suffix
+        skills = self._added_skills
+        if definition["skills"]:
+            skills = [skill for skill in skills if skill.name in definition["skills"]]
+        skills_part = format_skills_for_system_prompt(skills) or None
+        return "\n\n".join(part for part in (definition["system_prompt"], skills_part) if part)
+
     async def _get_agent(self, task: dict[str, Any]) -> Agent:
         agent = self._agents.get(task["id"])
         if agent is not None:
             return agent
         await self._ensure_skills()
         await self._ensure_mcp_tools()
+        suffix = await self._suffix_for(task)
         agent = build_agent(
             f"task-{task['id'][:8]}", self._client(),
             tool_registry=self._build_registry(task["id"]),
-            system_prompt_suffix=self._skills_suffix,
+            system_prompt_suffix=suffix,
             trace_dir=str(self._trace_dir) if self._trace_dir else None,
             trace_metadata={"task_id": task["id"]},
             compaction_token_limit=self._compaction_token_limit,
