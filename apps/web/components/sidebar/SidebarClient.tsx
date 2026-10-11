@@ -307,7 +307,8 @@ export function TaskList() {
           </div>
         ) : (
           <>
-            <a
+            {/* 必须用 Link：裸 <a> 会整页刷新（重载全部 JS、重挂整个应用），切换任务因此明显变慢 */}
+            <Link
               href={`/t/${task.id}`}
               // pr-8（而非 px-3 两侧统一）：右侧要给悬浮出现的 ⋯ 按钮（absolute right-2，约
               // 28px 宽）留出净空，否则标题的 truncate 省略号会截到按钮的位置，悬浮时两处
@@ -324,7 +325,7 @@ export function TaskList() {
                 <span className="truncate">{task.title || "（未命名任务）"}</span>
               </span>
               <span className="text-xs text-text-secondary">{task.agent_type}</span>
-            </a>
+            </Link>
             <button
               type="button"
               aria-label="更多选项"
