@@ -7,6 +7,7 @@ import {
   getAgentRLRun,
   deleteAgentRLRun,
   AGENTRL_URL,
+  AGENTRL_UNSUPPORTED,
   type AgentRLRun,
 } from "@/lib/agentrl-api";
 import { TrashIcon } from "@/components/ui/icons";
@@ -165,18 +166,29 @@ export default function AgentRLPage() {
       {loadError && (
         <div className="mb-6 rounded-xl border border-red-500/40 bg-red-500/10 p-4 text-sm">
           <p className="font-medium text-red-500">无法连接 AgentRL 服务（{AGENTRL_URL}）。</p>
-          <p className="mt-1 text-text-secondary">
-            AgentRL 是独立的 uv 项目（含 torch 等重型依赖，不在根项目 uv sync 范围内），
-            首次使用需先初始化：
-            <code className="mx-1 rounded bg-sidebar px-1">{"cd agentrl && uv sync"}</code>
-            ，之后由
-            <code className="mx-1 rounded bg-sidebar px-1">./scripts/start.sh start</code>
-            自动拉起（或手动
-            <code className="mx-1 rounded bg-sidebar px-1">
-              uv run --directory agentrl uvicorn main:app --port 8420
-            </code>
-            ）。
-          </p>
+          {AGENTRL_UNSUPPORTED ? (
+            <p className="mt-1 text-text-secondary">
+              当前平台不支持 AgentRL：它依赖 torch，而 torch 不提供 macOS x86_64（Intel Mac）的安装包，
+              <code className="mx-1 rounded bg-sidebar px-1">uv sync --directory agentrl</code>
+              无法完成，start.sh 已自动跳过。请改用 Linux、Apple Silicon Mac 或 Windows 运行，
+              或设置
+              <code className="mx-1 rounded bg-sidebar px-1">SKIP_AGENTRL=1</code>
+              不再尝试安装。
+            </p>
+          ) : (
+            <p className="mt-1 text-text-secondary">
+              AgentRL 是独立的 uv 项目（含 torch 等重型依赖，不在根项目 uv sync 范围内），
+              首次使用需先初始化：
+              <code className="mx-1 rounded bg-sidebar px-1">{"cd agentrl && uv sync"}</code>
+              ，之后由
+              <code className="mx-1 rounded bg-sidebar px-1">./scripts/start.sh start</code>
+              自动拉起（或手动
+              <code className="mx-1 rounded bg-sidebar px-1">
+                uv run --directory agentrl uvicorn main:app --port 8420
+              </code>
+              ）。
+            </p>
+          )}
         </div>
       )}
       <p className="mb-4 text-sm text-text-secondary">

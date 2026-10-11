@@ -1,4 +1,6 @@
 export const AGENTRL_URL = process.env.NEXT_PUBLIC_AGENTRL_URL || "http://localhost:8420";
+// start.sh 在 agentrl 依赖装不上（如 macOS x86_64 无 torch wheel）时置 1
+export const AGENTRL_UNSUPPORTED = process.env.NEXT_PUBLIC_AGENTRL_UNSUPPORTED === "1";
 
 export interface AgentRLConfig {
   sft_samples: number;

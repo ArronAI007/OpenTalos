@@ -249,6 +249,7 @@ fi
 # agentrl 是独立 uv 项目（自带 pyproject.toml/.venv），依赖很重（torch/transformers/trl…），
 # 不在根项目 uv sync 范围内。这里单独 sync，保证 start.sh 能把所有服务都拉起来。
 AGENTRL_ENABLED=1
+AGENTRL_UNSUPPORTED=0   # sync 失败（多半是平台无 torch wheel）时置 1，经 NEXT_PUBLIC_* 告知前端
 if [ "$SKIP_AGENTRL" = "1" ]; then
   echo "SKIP_AGENTRL=1 — skipping agentrl"
   AGENTRL_ENABLED=0
@@ -263,6 +264,7 @@ elif [ "$AUTO_SYNC_AGENTRL" = "1" ]; then
     echo "warning: agentrl dependencies are unavailable on this platform — skipping agentrl." >&2
     echo "         (torch ships no macOS x86_64 wheel; use Linux / Apple Silicon, or Docker. Set SKIP_AGENTRL=1 to silence.)" >&2
     AGENTRL_ENABLED=0
+    AGENTRL_UNSUPPORTED=1
   fi
 elif [ ! -d agentrl/.venv ]; then
   echo "warning: AUTO_SYNC_AGENTRL=0 but agentrl/.venv is missing — skipping agentrl" >&2
@@ -307,6 +309,7 @@ else
   (
     cd apps/web
     NEXT_PUBLIC_API_URL="$API_URL" NEXT_PUBLIC_AGENTRL_URL="$AGENTRL_URL" \
+    NEXT_PUBLIC_AGENTRL_UNSUPPORTED="$AGENTRL_UNSUPPORTED" \
       pnpm dev -p "$WEB_PORT"
   ) >>"$LOG_DIR/web.log" 2>&1 &
   web_pid=$!
