@@ -1,8 +1,8 @@
 # OpenTalos
 
 An experimental agent framework in Python: a small, dependency-clean core runtime plus
-building blocks for tool calling, context engineering, script-execution skills, four
-reusable agent reasoning patterns, and execution tracing — with a Manus-style web chat on top
+building blocks for tool calling, context engineering, script-execution skills, a
+ReAct agent (plus user-defined agents generated from one sentence), and execution tracing — with a Manus-style web chat on top
 to actually use it. "Dependency-clean" describes `packages/*` specifically — `agentrl/` is the
 one deliberate exception, a fully independent service with its own heavy ML dependencies (see
 below).
@@ -33,8 +33,9 @@ from the full marketplace.
 
 ![Added skills](assets/screenshots/my-skills.png)
 
-**Agent evaluation** — LLM-as-judge scoring of self-authored test cases across the four
-reasoning patterns side by side, with per-type averages/pass rates and a per-run detail table.
+**Agent evaluation** — LLM-as-judge scoring of self-authored test cases, with averages/pass
+rates and a per-run detail table. (The screenshot predates the collapse to a single ReAct agent
+type, so it still shows several agent types side by side.)
 
 ![Agent evaluation](assets/screenshots/eval.png)
 
@@ -47,9 +48,17 @@ reasoning patterns side by side, with per-type averages/pass rates and a per-run
 
 ## Features
 
-- **Four agent reasoning patterns**, selectable per task — tool-calling (single-turn), ReAct
-  (step-budgeted reason+act with an explicit `finish` tool), reflection (draft → critique →
-  revise), and plan-execute (plan into steps, then execute each with accumulating context).
+- **ReAct agent** — step-budgeted reason+act loop with an explicit `finish` tool; the one
+  agent type every task runs on.
+- **Custom agents from one sentence** (`/agents`) — describe the agent you want in a sentence
+  (e.g. "a strict code reviewer who only flags real problems") and the model designs it: a
+  name, a short description, a persona (system prompt), and which of your added skills it
+  should use (names the model invents are discarded). Agents are saved and shown as cards;
+  "start a new task" opens a chat with that agent, and the composer shows an `@name` chip so
+  you can see who you're talking to. The persona is *appended* to the default ReAct prompt
+  rather than replacing it, so the `finish` contract still holds; deleting an agent makes its
+  existing tasks fall back to the default agent. Generation failures (model error or unparsable
+  output) are reported to you instead of saving an empty agent.
 - **Skills marketplace** (`/skills`) — browse built-in skills, add/remove them to your own
   toolbox (only added skills are ever advertised to the agent), import skills from any public
   GitHub repository, or upload a `.zip`/`.skill` package with a YAML-frontmatter `SKILL.md`.
@@ -60,9 +69,9 @@ reasoning patterns side by side, with per-type averages/pass rates and a per-run
 - **Streaming chat** — SSE-driven replies with live tool-call bubbles, a reasoning trace,
   stop/resume, and model-generated follow-up question suggestions.
 - **Agent evaluation** (`/eval`) — author test cases (a task instruction plus an optional
-  reference answer), pick which of the four agent types to compare, and run them side by side.
-  Each reply is scored by an LLM judge (correctness/completeness/clarity, 1-5) with a written
-  comment; the report shows per-type averages and pass rates plus a full per-case breakdown.
+  reference answer), and run them. Each reply is scored by an LLM judge (correctness/completeness/clarity, 1-5)
+  with a written comment; the report shows averages and pass rates plus a full per-case
+  breakdown.
   Evaluation runs execute real conversations under the hood but are archived immediately, so
   they never clutter your task history.
 - **AgentRL** (`/agentrl`) — a real (not simulated), small-scale SFT→GRPO training demo on
@@ -110,14 +119,14 @@ constructed with `trace_dir`; `skill`'s agent-facing tools implement the `tool.T
 
 | Package | Responsibility |
 |---|---|
-| `packages/agents` | Four `core.Agent` implementations sharing one tool-calling loop (`dialogue.run_tool_turn`): `ToolCallingAgent` (single-turn, optional tool calling), `ReActAgent` (step-budgeted reason+act loop with an explicit `finish` tool), `ReflectionAgent` (draft → critique → revise), `PlanExecuteAgent` (plan into steps via a forced function call, then execute each with accumulating context). Plus `build_agent`/`default_subagent_builder` to construct one by type name. |
+| `packages/agents` | `ReActAgent` (step-budgeted reason+act loop with an explicit `finish` tool) and `build_agent`, which constructs it and can append extra text (skills list, a custom agent's persona) to its system prompt. |
 
 And `apps/` is what you actually run:
 
 | App | Responsibility |
 |---|---|
-| `apps/api` | FastAPI chat API: `config`/`tasks`/`messages` REST endpoints plus SSE streaming replies, with SQLite persistence (`.data/chat.db`) for tasks and messages. This is the sole backend for the web frontend `apps/web`. |
-| `apps/web` | Next.js frontend: two-pane shell with a sidebar (new task / Agent / skills / task history), a top bar with an agent-type dropdown and the model name, and a streaming chat view driven by the API's SSE replies. |
+| `apps/api` | FastAPI chat API: `config`/`tasks`/`messages`/`agents` REST endpoints (`agents/generate` builds a custom agent from one sentence) plus SSE streaming replies, with SQLite persistence (`.data/chat.db`) for tasks, messages and custom agents. This is the sole backend for the web frontend `apps/web`. |
+| `apps/web` | Next.js frontend: two-pane shell with a sidebar (new task / Agent / skills / task history), a top bar with the model name, an Agent page for generating custom agents, and a streaming chat view driven by the API's SSE replies. |
 
 `agentrl/` is a separate top-level project, not part of `apps/`: its own `pyproject.toml`
 (torch/transformers/peft/trl/accelerate/datasets), its own FastAPI service (`:8420`), its own
