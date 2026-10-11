@@ -177,6 +177,14 @@ and isn't touched by `stop`/`restart` either. Nothing needs `--env-file` —
 ./scripts/start.sh restart   # stop + start
 ```
 
+The web frontend runs under `next dev`, which compiles each page route the first time it is
+requested — so the very first click on each sidebar entry can stall for a second or two.
+`start.sh` pre-warms the known routes in the background right after startup (set
+`WEB_PREWARM=0` to disable). For instant navigation, build once and serve the prebuilt output:
+`NEXT_PUBLIC_API_URL=http://localhost:8400 pnpm -C apps/web build && pnpm -C apps/web start`
+(`NEXT_PUBLIC_*` values are inlined into the client bundle at **build** time, so they must be set
+for `build`, not `start`).
+
 ## Key Environment Variables
 
 Read by `packages/core/model.py` (`ModelClient()` with no constructor args), which

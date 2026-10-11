@@ -35,6 +35,7 @@ SYNC_TIMEOUT="${SYNC_TIMEOUT:-1800}"            # 依赖/前端安装兜底超�
 AUTO_SYNC="${AUTO_SYNC:-1}"                     # 启动前是否自动 `uv sync`（0 关闭）
 AUTO_SYNC_AGENTRL="${AUTO_SYNC_AGENTRL:-0}"     # 是否自动初始化 agentrl（很重，默认关闭）
 SKIP_WEB="${SKIP_WEB:-0}"                       # 设为 1 时只起后端服务，跳过 web 前端（CI/无头场景）
+WEB_PREWARM="${WEB_PREWARM:-1}"                 # dev 下后台预热各页面路由，避免侧栏首次切换时当场编译卡顿
 LOG_TAIL_LINES="${LOG_TAIL_LINES:-30}"          # 失败时回显日志尾部的行数
 
 API_URL="http://localhost:${API_PORT}"
@@ -295,6 +296,17 @@ else
     rm -f "$PID_DIR/web.pid" "$PID_DIR/web.port"
     exit 1
   fi
+fi
+
+# next dev 按需编译：每个页面路由首次被请求才编译（可长达数秒），侧栏第一次点会明显卡顿。
+# web 就绪后在后台把已知路由各请求一遍触发预编译；纯热身，失败不影响任何服务。
+if [ "$SKIP_WEB" != "1" ] && [ "$WEB_PREWARM" = "1" ]; then
+  echo "prewarming web routes in the background (dev compile) ..."
+  (
+    for route in "" agents skills eval agentrl deepresearch mcp; do
+      curl -fsS --max-time 120 -o /dev/null "$WEB_URL/${route}" 2>/dev/null || true
+    done
+  ) >>"$LOG_DIR/web.log" 2>&1 &
 fi
 
 echo
