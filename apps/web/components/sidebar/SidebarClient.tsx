@@ -114,6 +114,48 @@ export function SidebarRail({ busy, onCreate, onExpand, onOpenSearch, className 
   );
 }
 
+function ConfirmDeleteTaskDialog({
+  open,
+  taskTitle,
+  onCancel,
+  onConfirm,
+}: {
+  open: boolean;
+  taskTitle: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.isComposing) return;
+      if (e.key === "Escape") onCancel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onCancel]);
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+      <div className="absolute inset-0 bg-black/50" onClick={onCancel} aria-hidden="true" />
+      <div role="alertdialog" aria-modal="true" className="relative z-10 w-full max-w-sm rounded-2xl bg-surface p-5 shadow-2xl">
+        <h2 className="text-sm font-semibold">删除任务"{taskTitle}"？</h2>
+        <p className="mt-1.5 text-sm text-text-secondary">此操作不可撤销。</p>
+        <div className="mt-4 flex justify-end gap-2">
+          <button type="button" autoFocus onClick={onCancel} className="rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-sidebar">
+            取消
+          </button>
+          <button type="button" onClick={onConfirm} className="rounded-lg bg-red-500 px-3 py-1.5 text-sm text-white hover:bg-red-600">
+            删除
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function TaskList() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -123,6 +165,7 @@ export function TaskList() {
   const [editError, setEditError] = useState<string | null>(null);
   const [archOpen, setArchOpen] = useState(false);
   const [archived, setArchived] = useState<Task[] | null>(null); // null = 归档区尚未拉取
+  const [pendingDelete, setPendingDelete] = useState<{ task: Task; archived: boolean } | null>(null);
   const committingRef = useRef(false);
   const pathname = usePathname();
   const router = useRouter();
@@ -374,7 +417,7 @@ export function TaskList() {
                 }}
                 onDelete={() => {
                   setOpenMenuId(null);
-                  void handleDelete(task.id);
+                  setPendingDelete({ task, archived: false });
                 }}
               />
             )}
@@ -403,7 +446,19 @@ export function TaskList() {
         tasks={archived}
         onToggle={toggleArchivedSection}
         onRestore={(task) => void handleRestore(task)}
-        onDelete={(task) => void handleDeleteArchived(task)}
+        onDelete={(task) => setPendingDelete({ task, archived: true })}
+      />
+      <ConfirmDeleteTaskDialog
+        open={pendingDelete !== null}
+        taskTitle={pendingDelete?.task.title || "（未命名任务）"}
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={() => {
+          const pending = pendingDelete;
+          setPendingDelete(null);
+          if (!pending) return;
+          if (pending.archived) void handleDeleteArchived(pending.task);
+          else void handleDelete(pending.task.id);
+        }}
       />
     </section>
   );
