@@ -2,6 +2,7 @@
 import asyncio
 import json
 import os
+import re
 import sys
 import time
 from contextlib import asynccontextmanager
@@ -9,7 +10,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -140,6 +141,9 @@ class ConsolidateMemoriesBody(BaseModel):
 
 # 任务的布尔 flag 字段：PATCH 端点按下表统一装配，新增 flag 只需在此处与模型各加一行。
 _FLAG_FIELDS = ("pinned", "starred", "archived")
+
+# RunRecorder._new_session_id() 产出的精确格式；白名单校验，不合法直接 404，防止路径穿越。
+_SESSION_ID_PATTERN = re.compile(r"^run-\d{8}-\d{6}-[0-9a-f]{4}$")
 
 
 def _sse(event: dict) -> str:
@@ -683,6 +687,17 @@ def create_app(runtime: ChatRuntime | None = None, eval_cases_path: Path | None 
                 task_title = task["title"] if task else None
             enriched.append({**run, "task_title": task_title})
         return {"runs": enriched}
+
+    @app.get("/api/runs/{session_id}/report")
+    async def get_run_report_route(session_id: str) -> HTMLResponse:
+        if not _SESSION_ID_PATTERN.fullmatch(session_id):
+            raise HTTPException(404, "run not found")
+        if runtime.trace_dir is None:
+            raise HTTPException(404, "run not found")
+        report_path = runtime.trace_dir / f"{session_id}.html"
+        if not report_path.is_file():
+            raise HTTPException(404, "run not found")
+        return HTMLResponse(report_path.read_text(encoding="utf-8"))
 
     return app
 

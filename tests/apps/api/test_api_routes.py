@@ -911,3 +911,26 @@ async def test_list_runs_task_title_is_none_when_task_was_deleted(tmp_path, api)
     resp = await api.get("/api/runs")
 
     assert resp.json()["runs"][0]["task_title"] is None
+
+
+async def test_get_run_report_returns_the_generated_html(tmp_path, api) -> None:
+    traces_dir = tmp_path / "traces"
+    traces_dir.mkdir(parents=True, exist_ok=True)
+    session_id = "run-20260101-120000-aaaa"
+    (traces_dir / f"{session_id}.html").write_text("<html><body>Run Report</body></html>", encoding="utf-8")
+
+    resp = await api.get(f"/api/runs/{session_id}/report")
+
+    assert resp.status_code == 200
+    assert "Run Report" in resp.text
+    assert "text/html" in resp.headers["content-type"]
+
+
+async def test_get_run_report_404s_for_a_missing_session(api) -> None:
+    resp = await api.get("/api/runs/run-20260101-120000-ffff/report")
+    assert resp.status_code == 404
+
+
+async def test_get_run_report_404s_for_a_malformed_session_id(api) -> None:
+    resp = await api.get("/api/runs/not-a-real-id/report")
+    assert resp.status_code == 404
