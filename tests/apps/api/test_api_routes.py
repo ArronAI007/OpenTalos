@@ -735,6 +735,20 @@ async def test_create_mcp_server_probes_and_persists_tools(api) -> None:
     assert [s["id"] for s in listed.json()["servers"]] == [body["id"]]
 
 
+async def test_create_mcp_server_persists_env_field(api) -> None:
+    config = _mcp_demo_server_config()
+    config["env"] = {"FOO": "bar"}
+    resp = await api.post("/api/mcp/servers", json=config)
+    assert resp.status_code == 200
+    assert resp.json()["config"]["env"] == {"FOO": "bar"}
+
+
+async def test_create_mcp_server_without_env_omits_it_from_config(api) -> None:
+    resp = await api.post("/api/mcp/servers", json=_mcp_demo_server_config())
+    assert resp.status_code == 200
+    assert "env" not in resp.json()["config"]
+
+
 async def test_create_mcp_server_rejects_unreachable_config(api) -> None:
     resp = await api.post(
         "/api/mcp/servers",

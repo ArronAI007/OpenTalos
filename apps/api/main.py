@@ -115,6 +115,7 @@ class CreateMCPServerBody(BaseModel):
     command: str | None = None
     args: list[str] = []
     url: str | None = None
+    env: dict[str, str] | None = None
 
 
 class ApprovalDecisionBody(BaseModel):
@@ -575,14 +576,18 @@ def create_app(runtime: ChatRuntime | None = None, eval_cases_path: Path | None 
         if not name:
             raise HTTPException(400, "name must not be blank")
         server_config = MCPServerConfig(
-            transport=request.transport, command=request.command, args=request.args, url=request.url
+            transport=request.transport,
+            command=request.command,
+            args=request.args,
+            url=request.url,
+            env=request.env,
         )
         try:
             tools = await connect_and_list_tools(server_config)
         except MCPConnectionError as error:
             raise HTTPException(502, str(error)) from error
         config = (
-            {"command": request.command, "args": request.args}
+            {"command": request.command, "args": request.args, **({"env": request.env} if request.env else {})}
             if request.transport == "stdio"
             else {"url": request.url}
         )
