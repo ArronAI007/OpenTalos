@@ -12,6 +12,19 @@ import {
 import { TrashIcon } from "@/components/ui/icons";
 import { PageSkeleton } from "@/components/ui/PageSkeleton";
 
+export function parseEnvLines(text: string): Record<string, string> | undefined {
+  const entries = text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const idx = line.indexOf("=");
+      return idx > 0 ? [line.slice(0, idx), line.slice(idx + 1)] : null;
+    })
+    .filter((pair): pair is [string, string] => pair !== null);
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
 function ConfirmDeleteServerDialog({
   open,
   onCancel,
@@ -59,6 +72,7 @@ export default function MCPPage() {
   const [command, setCommand] = useState("");
   const [args, setArgs] = useState("");
   const [url, setUrl] = useState("");
+  const [env, setEnv] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -82,12 +96,14 @@ export default function MCPPage() {
         command: transport === "stdio" ? command.trim() : undefined,
         args: transport === "stdio" ? args.split(" ").filter(Boolean) : undefined,
         url: transport === "http" ? url.trim() : undefined,
+        env: transport === "stdio" ? parseEnvLines(env) : undefined,
       });
       setServers((prev) => [server, ...(prev ?? [])]);
       setName("");
       setCommand("");
       setArgs("");
       setUrl("");
+      setEnv("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "添加失败");
     } finally {
@@ -139,18 +155,27 @@ export default function MCPPage() {
             </label>
           </div>
           {transport === "stdio" ? (
-            <div className="flex gap-2">
-              <input
-                value={command}
-                onChange={(e) => setCommand(e.target.value)}
-                placeholder="命令，例如：python"
-                className="flex-1 rounded-lg border border-border px-3 py-1.5 text-sm"
-              />
-              <input
-                value={args}
-                onChange={(e) => setArgs(e.target.value)}
-                placeholder="参数（空格分隔），例如：demo_server.py"
-                className="flex-[2] rounded-lg border border-border px-3 py-1.5 text-sm"
+            <div className="space-y-2">
+              <div className="flex gap-2">
+                <input
+                  value={command}
+                  onChange={(e) => setCommand(e.target.value)}
+                  placeholder="命令，例如：python"
+                  className="flex-1 rounded-lg border border-border px-3 py-1.5 text-sm"
+                />
+                <input
+                  value={args}
+                  onChange={(e) => setArgs(e.target.value)}
+                  placeholder="参数（空格分隔），例如：demo_server.py"
+                  className="flex-[2] rounded-lg border border-border px-3 py-1.5 text-sm"
+                />
+              </div>
+              <textarea
+                value={env}
+                onChange={(e) => setEnv(e.target.value)}
+                placeholder={"环境变量（可选，每行一个 KEY=VALUE），例如：\nGITHUB_PERSONAL_ACCESS_TOKEN=ghp_xxx"}
+                rows={2}
+                className="w-full rounded-lg border border-border px-3 py-1.5 text-sm"
               />
             </div>
           ) : (
