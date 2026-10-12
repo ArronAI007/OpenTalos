@@ -7,6 +7,7 @@ import {
   dropTrailingTurn,
   dropTurn,
   finalizeStreaming,
+  isComplexThinking,
   parseSseBlock,
   reduceChatEvent,
   shouldShowThinkingHint,
@@ -290,15 +291,28 @@ describe("reasoning（思维链）", () => {
   });
 });
 
+describe("isComplexThinking", () => {
+  it("needs at least two tool calls", () => {
+    expect(isComplexThinking([{ id: "r", kind: "reasoning", content: "想" }])).toBe(false);
+    expect(isComplexThinking([{ id: "t", kind: "tool", name: "bash", arguments: {}, result: "x", ok: true }])).toBe(false);
+    expect(
+      isComplexThinking([
+        { id: "t1", kind: "tool", name: "a", arguments: {}, result: "x", ok: true },
+        { id: "t2", kind: "tool", name: "b", arguments: {}, result: "y", ok: true },
+      ]),
+    ).toBe(true);
+  });
+});
+
 describe("shouldShowThinkingHint", () => {
   it("shows while busy with nothing streaming yet", () => {
     const msgs: UiMessage[] = [{ id: "live-1", kind: "user", content: "问" }];
     expect(shouldShowThinkingHint(msgs, true)).toBe(true);
   });
 
-  it("hides once reasoning or content starts streaming, and when not busy", () => {
+  it("keeps the hint while a simple turn works, hides once content streams or when not busy", () => {
     const reasoning: UiMessage[] = [{ id: "live-1", kind: "reasoning", content: "想", streaming: true }];
-    expect(shouldShowThinkingHint(reasoning, true)).toBe(false);
+    expect(shouldShowThinkingHint(reasoning, true)).toBe(true); // 简单轮次无面板 → 用占位给反馈
     const delta: UiMessage[] = [{ id: "live-1", kind: "assistant", content: "答", streaming: true }];
     expect(shouldShowThinkingHint(delta, true)).toBe(false);
     expect(shouldShowThinkingHint([], false)).toBe(false);
@@ -323,13 +337,18 @@ describe("shouldShowThinkingHint", () => {
     expect(shouldShowThinkingHint(msgs, true)).toBe(false);
   });
 
-  it("hides when the tail is a thinking unit (reasoning/tool) — activity is already visible", () => {
-    const msgs: UiMessage[] = [
+  it("hides the hint for a complex thinking unit but shows it for a simple one", () => {
+    const simple: UiMessage[] = [
       { id: "live-1", kind: "user", content: "问" },
-      { id: "live-2", kind: "reasoning", content: "想", streaming: false },
-      { id: "live-3", kind: "tool", name: "web_search", arguments: {}, result: undefined },
+      { id: "live-2", kind: "tool", name: "bash", arguments: {}, result: undefined },
     ];
-    expect(shouldShowThinkingHint(msgs, true)).toBe(false);
+    expect(shouldShowThinkingHint(simple, true)).toBe(true);
+    const complex: UiMessage[] = [
+      { id: "live-1", kind: "user", content: "问" },
+      { id: "live-2", kind: "tool", name: "web_search", arguments: {}, result: "ok", ok: true },
+      { id: "live-3", kind: "tool", name: "bash", arguments: {}, result: undefined },
+    ];
+    expect(shouldShowThinkingHint(complex, true)).toBe(false);
   });
 });
 
@@ -392,26 +411,37 @@ describe("steer_interrupt", () => {
 });
 
 describe("visibleIndexes（虚拟化可见行）", () => {
-  it("merges a thinking run into the reply that follows it", () => {
+  it("hides a simple thinking run (<=1 tool) entirely", () => {
     const msgs: UiMessage[] = [
       { id: "u1", kind: "user", content: "问" },
       { id: "r1", kind: "reasoning", content: "想", streaming: false },
-      { id: "t1", kind: "tool", name: "echo", arguments: {} },
-      { id: "a1", kind: "assistant", content: "答" },
+      { id: "t1", kind: "tool", name: "bash", arguments: {} },
     ];
-    expect(visibleIndexes(msgs)).toEqual([0, 3]);
+    expect(visibleIndexes(msgs)).toEqual([0]);
   });
 
-  it("keeps only the first row of a standalone thinking run", () => {
+  it("renders a complex standalone thinking run at its first row", () => {
     const msgs: UiMessage[] = [
       { id: "u1", kind: "user", content: "问" },
       { id: "r1", kind: "reasoning", content: "想", streaming: false },
-      { id: "t1", kind: "tool", name: "echo", arguments: {} },
+      { id: "t1", kind: "tool", name: "a", arguments: {} },
+      { id: "t2", kind: "tool", name: "b", arguments: {} },
     ];
     expect(visibleIndexes(msgs)).toEqual([0, 1]);
   });
 
-  it("drops a stopped row merged into the previous reply but keeps an isolated one", () => {
+  it("keeps the reply for a thinking run merged into the assistant", () => {
+    const msgs: UiMessage[] = [
+      { id: "u1", kind: "user", content: "问" },
+      { id: "r1", kind: "reasoning", content: "想", streaming: false },
+      { id: "t1", kind: "tool", name: "a", arguments: {} },
+      { id: "t2", kind: "tool", name: "b", arguments: {} },
+      { id: "a1", kind: "assistant", content: "答" },
+    ];
+    expect(visibleIndexes(msgs)).toEqual([0, 4]);
+  });
+
+  it("drops a stopped row merged into a reply or a visible complex run, keeps the isolated one", () => {
     expect(
       visibleIndexes([
         { id: "u1", kind: "user", content: "问" },
@@ -419,6 +449,21 @@ describe("visibleIndexes（虚拟化可见行）", () => {
         { id: "s1", kind: "stopped" },
       ]),
     ).toEqual([0, 1]);
+    expect(
+      visibleIndexes([
+        { id: "u1", kind: "user", content: "问" },
+        { id: "t1", kind: "tool", name: "a", arguments: {} },
+        { id: "t2", kind: "tool", name: "b", arguments: {} },
+        { id: "s1", kind: "stopped" },
+      ]),
+    ).toEqual([0, 1]);
+    expect(
+      visibleIndexes([
+        { id: "u1", kind: "user", content: "问" },
+        { id: "r1", kind: "reasoning", content: "想", streaming: false },
+        { id: "s1", kind: "stopped" },
+      ]),
+    ).toEqual([0, 2]);
     expect(
       visibleIndexes([
         { id: "u1", kind: "user", content: "问" },

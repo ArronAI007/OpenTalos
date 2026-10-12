@@ -116,13 +116,22 @@ function settleReasoning(prev: UiMessage[]): UiMessage[] {
 // 覆盖的是请求→首个 SSE chunk 之间的空白；一旦思维链开始滚动即让位。
 // 末行守卫：回复泡已落定（done 已处理）而流未关闭的窗口（服务端在同一条流上算
 // suggestions，busy 仍为 true）不能再冒占位——带着品牌头出现会读作「第二轮思考」。
+// 末尾连续 reasoning/tool 的消息（供 isComplexThinking 与占位判定复用）。
+export type ThinkingItem = Extract<UiMessage, { kind: "reasoning" | "tool" }>;
+
 export function shouldShowThinkingHint(messages: UiMessage[], busy: boolean): boolean {
   if (!busy) return false;
-  if (messages.some((m) => (m.kind === "assistant" || m.kind === "reasoning") && m.streaming)) return false;
+  // 正文已在流式：正文本身就是反馈，不再显示占位。
+  if (messages.some((m) => m.kind === "assistant" && m.streaming)) return false;
   const last = messages[messages.length - 1];
-  // 末尾是思考单元（思路/工具动作）：已可见"正在思考…"与活动，不再叠加占位
-  if (last?.kind === "reasoning" || last?.kind === "tool" || last?.kind === "approval") return false;
-  return last?.kind !== "assistant" && last?.kind !== "stopped";
+  // 等待用户审批时不显示"正在思考"。
+  if (last?.kind === "approval") return false;
+  if (last?.kind === "assistant" || last?.kind === "stopped") return false;
+  // 末尾是思考单元：复杂轮次的面板已可见（不叠加占位）；简单轮次无面板，用占位给反馈。
+  if (last?.kind === "reasoning" || last?.kind === "tool") {
+    return !isComplexThinking(trailingThinking(messages));
+  }
+  return true;
 }
 
 // 停止流式后追加提示行（幂等：本会话已有 live 提示则返回原引用，防止双击停止叠加）。
@@ -196,26 +205,55 @@ export function turnUserMessage(
 
 // 虚拟列表用：哪些消息真正渲染成一行。被并入相邻块（非思考单元起始行、已并入回复块的思考单元）
 // 或被停止提示吸收的行会被排除，避免它们成为 0 高度 item 造成估算到实测的滚动抖动。
+// 简单问答直接给答案；只有需要多步工具协作（≥2 次工具调用）的“复杂”轮次才展示思考过程。
+const COMPLEX_TOOL_CALLS = 2;
+
+export function isComplexThinking(items: ThinkingItem[]): boolean {
+  return items.filter((m) => m.kind === "tool").length >= COMPLEX_TOOL_CALLS;
+}
+
+// 末尾连续的 reasoning/tool（一个思考单元）。
+function trailingThinking(messages: UiMessage[]): ThinkingItem[] {
+  const items: ThinkingItem[] = [];
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index];
+    if (message.kind === "reasoning" || message.kind === "tool") items.unshift(message as ThinkingItem);
+    else break;
+  }
+  return items;
+}
+
+// 虚拟列表用：哪些消息真正渲染成一行。简单轮次的思考单元不展示（直接给答案）；复杂轮次
+// （≥2 工具调用）且未并入回复块的思考单元由起始行渲染。stopped 紧跟已渲染的 assistant/复杂
+// 思考单元时并入该块。
 export function visibleIndexes(messages: UiMessage[]): number[] {
   const indexes: number[] = [];
-  for (let index = 0; index < messages.length; index++) {
+  let index = 0;
+  while (index < messages.length) {
     const message = messages[index];
     if (message.kind === "reasoning" || message.kind === "tool") {
-      const prev = index > 0 ? messages[index - 1] : undefined;
-      if (prev !== undefined && (prev.kind === "reasoning" || prev.kind === "tool")) continue; // 非单元起始行
       let end = index;
       while (end < messages.length && (messages[end].kind === "reasoning" || messages[end].kind === "tool")) end++;
-      if (end < messages.length && messages[end].kind === "assistant") continue; // 已并入回复块
-      indexes.push(index);
+      const standalone = end >= messages.length || messages[end].kind !== "assistant";
+      if (standalone && isComplexThinking(messages.slice(index, end) as ThinkingItem[])) indexes.push(index);
+      index = end;
       continue;
     }
     if (message.kind === "stopped") {
-      const prevKind = messages[index - 1]?.kind;
-      if (prevKind === "assistant" || prevKind === "reasoning" || prevKind === "tool") continue; // 已并入回复块
-      indexes.push(index);
+      const prev = messages[index - 1];
+      // 紧跟 assistant（并入回复块）或可见的复杂思考单元 → 已吸收，不再单列。
+      let absorbed = prev?.kind === "assistant";
+      if (!absorbed && prev !== undefined && (prev.kind === "reasoning" || prev.kind === "tool")) {
+        let start = index - 1;
+        while (start > 0 && (messages[start - 1].kind === "reasoning" || messages[start - 1].kind === "tool")) start--;
+        absorbed = isComplexThinking(messages.slice(start, index) as ThinkingItem[]);
+      }
+      if (!absorbed) indexes.push(index);
+      index++;
       continue;
     }
     indexes.push(index);
+    index++;
   }
   return indexes;
 }

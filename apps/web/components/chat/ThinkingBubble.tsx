@@ -1,12 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { UiMessage } from "@/lib/chat-events";
+import type { ThinkingItem, UiMessage } from "@/lib/chat-events";
 import { toolActionLabel } from "@/lib/humanize";
 
 // 统一"思考过程"单元：只展示 agent 正在做什么（自然语言动作行），展示层不暴露原始思维链、
 // 命令、参数或文件路径等系统内部信息（对齐 Codex / 豆包的做法）。
-export type ThinkingItem = Extract<UiMessage, { kind: "reasoning" | "tool" }>;
 
 function ToolActivity({ message }: { message: Extract<UiMessage, { kind: "tool" }> }) {
   const running = message.result === undefined;

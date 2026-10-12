@@ -6,7 +6,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import type { UiMessage } from "@/lib/chat-events";
-import { shouldShowThinkingHint, visibleIndexes } from "@/lib/chat-events";
+import { shouldShowThinkingHint, visibleIndexes, isComplexThinking, type ThinkingItem } from "@/lib/chat-events";
 import { humanizeToolCall } from "@/lib/humanize";
 import { copyText } from "@/lib/clipboard";
 import { isNearBottom } from "@/lib/scroll-stick";
@@ -15,7 +15,7 @@ import { CirclePauseIcon } from "@/components/ui/icons";
 import { formatDateTimeCN } from "@/lib/format-time";
 import { formatUsage } from "@/lib/usage";
 import { CopyReplyButton } from "./CopyReplyButton";
-import { ThinkingBubble, type ThinkingItem } from "./ThinkingBubble";
+import { ThinkingBubble } from "./ThinkingBubble";
 import { UserActionRow } from "./UserActionRow";
 
 // 从 start 起收集连续的 reasoning/tool —— 一个"思考过程"单元（自然语言思路 + 其中的工具动作）。
@@ -180,7 +180,7 @@ export function MessageList({
           <div className="max-w-[85%] text-base leading-6">
             {/* 每条回复带品牌头（流式与历史同等处理），对齐 Manus 版式 */}
             <BrandHeader />
-            {thinking.length > 0 && <ThinkingBubble items={thinking} streaming={thinkingStreaming} />}
+            {isComplexThinking(thinking) && <ThinkingBubble items={thinking} streaming={thinkingStreaming} />}
             <div className="md">
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
