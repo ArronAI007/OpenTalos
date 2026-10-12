@@ -205,11 +205,15 @@ export function turnUserMessage(
 
 // 虚拟列表用：哪些消息真正渲染成一行。被并入相邻块（非思考单元起始行、已并入回复块的思考单元）
 // 或被停止提示吸收的行会被排除，避免它们成为 0 高度 item 造成估算到实测的滚动抖动。
-// 简单问答直接给答案；只有需要多步工具协作（≥2 次工具调用）的“复杂”轮次才展示思考过程。
+// 简单问答直接给答案；需要多步工具协作（≥2 次工具调用）或联网检索（web 搜索/抓取）的轮次
+// 视为“复杂”，展示思考过程。
 const COMPLEX_TOOL_CALLS = 2;
+const THINKING_TRIGGER_TOOLS = new Set(["web_search", "web_extractor"]);
 
 export function isComplexThinking(items: ThinkingItem[]): boolean {
-  return items.filter((m) => m.kind === "tool").length >= COMPLEX_TOOL_CALLS;
+  const tools = items.filter((m): m is Extract<ThinkingItem, { kind: "tool" }> => m.kind === "tool");
+  if (tools.length >= COMPLEX_TOOL_CALLS) return true;
+  return tools.some((tool) => THINKING_TRIGGER_TOOLS.has(tool.name));
 }
 
 // 末尾连续的 reasoning/tool（一个思考单元）。

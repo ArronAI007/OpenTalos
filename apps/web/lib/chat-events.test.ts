@@ -292,13 +292,21 @@ describe("reasoning（思维链）", () => {
 });
 
 describe("isComplexThinking", () => {
-  it("needs at least two tool calls", () => {
+  it("needs at least two tool calls, or a web retrieval", () => {
     expect(isComplexThinking([{ id: "r", kind: "reasoning", content: "想" }])).toBe(false);
     expect(isComplexThinking([{ id: "t", kind: "tool", name: "bash", arguments: {}, result: "x", ok: true }])).toBe(false);
+    // 单次联网检索也算复杂
+    expect(
+      isComplexThinking([{ id: "t", kind: "tool", name: "web_search", arguments: {}, result: "x", ok: true }]),
+    ).toBe(true);
+    expect(
+      isComplexThinking([{ id: "t", kind: "tool", name: "web_extractor", arguments: {}, result: "x", ok: true }]),
+    ).toBe(true);
+    // 两次普通工具调用也算复杂
     expect(
       isComplexThinking([
-        { id: "t1", kind: "tool", name: "a", arguments: {}, result: "x", ok: true },
-        { id: "t2", kind: "tool", name: "b", arguments: {}, result: "y", ok: true },
+        { id: "t1", kind: "tool", name: "bash", arguments: {}, result: "x", ok: true },
+        { id: "t2", kind: "tool", name: "bash", arguments: {}, result: "y", ok: true },
       ]),
     ).toBe(true);
   });
