@@ -8,7 +8,7 @@ import { copyText } from "@/lib/clipboard";
 import { sortTasks } from "@/lib/task-sort";
 import { partitionTasks, visibleUngrouped } from "@/lib/task-projects";
 import { TASK_TITLE_UPDATED_EVENT, type TaskTitleUpdatedDetail } from "@/lib/task-events";
-import { BeakerIcon, BrainIcon, ChartBarIcon, ClockIcon, PencilSquareIcon, PinIcon, PlugIcon, PuzzleIcon, SearchIcon, SparklesIcon, StarIcon, TelescopeIcon } from "@/components/ui/icons";
+import { ActivityIcon, BeakerIcon, BrainIcon, ChartBarIcon, ClockIcon, PencilSquareIcon, PinIcon, PlugIcon, PuzzleIcon, SearchIcon, SparklesIcon, StarIcon, TelescopeIcon } from "@/components/ui/icons";
 import { LogoMark } from "./Logo";
 import { TaskListMenu } from "./TaskListMenu";
 import { ArchivedSection } from "./ArchivedSection";
@@ -109,6 +109,9 @@ export function SidebarRail({ busy, onCreate, onExpand, onOpenSearch, className 
       </Link>
       <Link href="/memory" aria-label="记忆" title="记忆" className={iconBtn}>
         <BrainIcon />
+      </Link>
+      <Link href="/runs" aria-label="运行记录" title="运行记录" className={iconBtn}>
+        <ActivityIcon />
       </Link>
       <button type="button" aria-label="任务历史" title="任务历史" onClick={onExpand} className={iconBtn}>
         <ClockIcon />

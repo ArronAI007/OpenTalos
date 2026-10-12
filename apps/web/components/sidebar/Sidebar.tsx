@@ -6,6 +6,7 @@ import { NewTaskButton, SidebarRail, TaskList, useCreateTask } from "./SidebarCl
 import { SidebarHeader } from "./SidebarHeader";
 import { SearchModal } from "@/components/search/SearchModal";
 import {
+  ActivityIcon,
   BeakerIcon,
   BrainIcon,
   ChartBarIcon,
@@ -100,6 +101,10 @@ export function Sidebar({ collapsed, mobileOpen, onToggleCollapse, onCloseMobile
         <Link href="/memory" onClick={onCloseMobile} className={navLinkCls}>
           <BrainIcon />
           记忆
+        </Link>
+        <Link href="/runs" onClick={onCloseMobile} className={navLinkCls}>
+          <ActivityIcon />
+          运行记录
         </Link>
         <hr className="my-3 border-border" />
         <TaskList />
