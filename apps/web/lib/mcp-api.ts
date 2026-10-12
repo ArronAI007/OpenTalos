@@ -11,7 +11,7 @@ export interface MCPServer {
   created_at: string;
   name: string;
   transport: "stdio" | "http";
-  config: { command?: string; args?: string[]; url?: string };
+  config: { command?: string; args?: string[]; url?: string; env?: Record<string, string> };
   enabled: boolean;
   cached_tools: MCPToolInfo[];
   last_error: string | null;
@@ -23,6 +23,7 @@ export interface CreateMCPServerInput {
   command?: string;
   args?: string[];
   url?: string;
+  env?: Record<string, string>;
 }
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
