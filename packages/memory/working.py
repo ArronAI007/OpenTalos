@@ -34,7 +34,7 @@ def seed_messages(system_prompt: str | None, history: list[Any], user_text: str)
     return messages
 
 
-class ShortTermMemory:
+class WorkingMemory:
     """短期记忆：包一层 TranscriptStore（只追加的回合记录）+ ContextAssembler（按轮次截断），
     对外暴露一个"把当前历史+本轮输入组装成合法 messages 列表"的 build_messages。
     """

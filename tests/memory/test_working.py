@@ -1,6 +1,6 @@
 from core.protocol import ChatMessage
 from context import AssemblyConfig
-from memory.short_term import ShortTermMemory, seed_messages
+from memory.working import WorkingMemory, seed_messages
 
 
 def test_seed_messages_includes_system_history_and_query():
@@ -64,7 +64,7 @@ def test_seed_messages_maps_summary_to_system_block():
 
 
 def test_short_term_memory_append_and_messages_round_trip():
-    memory = ShortTermMemory()
+    memory = WorkingMemory()
     memory.append(ChatMessage(content="hi", role="user"))
     memory.append(ChatMessage(content="hello", role="assistant"))
 
@@ -72,14 +72,14 @@ def test_short_term_memory_append_and_messages_round_trip():
 
 
 def test_short_term_memory_clear():
-    memory = ShortTermMemory()
+    memory = WorkingMemory()
     memory.append(ChatMessage(content="hi", role="user"))
     memory.clear()
     assert memory.messages() == []
 
 
 def test_short_term_memory_compress_folds_old_turns():
-    memory = ShortTermMemory(min_retain_turns=1)
+    memory = WorkingMemory(min_retain_turns=1)
     for i in range(4):
         memory.append(ChatMessage(content=f"question {i}", role="user"))
         memory.append(ChatMessage(content=f"answer {i}", role="assistant"))
@@ -92,24 +92,24 @@ def test_short_term_memory_compress_folds_old_turns():
 
 
 def test_short_term_memory_snapshot_and_restore_round_trip():
-    memory = ShortTermMemory()
+    memory = WorkingMemory()
     memory.append(ChatMessage(content="hi", role="user"))
     data = memory.snapshot()
 
-    restored = ShortTermMemory()
+    restored = WorkingMemory()
     restored.restore(data)
 
     assert [m.content for m in restored.messages()] == ["hi"]
 
 
 def test_short_term_memory_exposes_its_assembler():
-    memory = ShortTermMemory()
+    memory = WorkingMemory()
     assert hasattr(memory.assembler, "assemble")
     assert hasattr(memory.assembler, "select_recent_turns")
 
 
 def test_build_messages_uses_system_prompt_and_own_history():
-    memory = ShortTermMemory()
+    memory = WorkingMemory()
     memory.append(ChatMessage(content="hi", role="user"))
     memory.append(ChatMessage(content="hello", role="assistant"))
 
@@ -123,7 +123,7 @@ def test_build_messages_uses_system_prompt_and_own_history():
 
 def test_build_messages_truncates_history_via_token_budget():
     config = AssemblyConfig(max_tokens=10, reserve_ratio=0.0)
-    memory = ShortTermMemory(context_config=config)
+    memory = WorkingMemory(context_config=config)
     for i in range(10):
         memory.append(ChatMessage(content=f"question {i}" * 20, role="user"))
         memory.append(ChatMessage(content=f"answer {i}" * 20, role="assistant"))

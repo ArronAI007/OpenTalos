@@ -6,13 +6,13 @@ from .embedding import EmbeddingClient
 from .episodic import EpisodicMemory
 from .extraction import build_extraction_messages, parse_extraction
 from .long_term import LongTermMemory
-from .short_term import ShortTermMemory, seed_messages
+from .working import WorkingMemory, seed_messages
 
 __all__ = [
     "EmbeddingClient",
     "EpisodicMemory",
     "LongTermMemory",
-    "ShortTermMemory",
+    "WorkingMemory",
     "seed_messages",
     "build_extraction_messages",
     "parse_extraction",

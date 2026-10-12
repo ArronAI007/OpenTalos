@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from .compaction import summarize_history
 from .model import ModelClient
 from .protocol import ChatMessage, ToolInvocation
-from memory import ShortTermMemory
+from memory import WorkingMemory
 
 
 class RuntimeSettings(BaseModel):
@@ -67,7 +67,7 @@ class Agent(ABC):
         self.model_client = model_client
         self.system_prompt = system_prompt
         self.settings = settings or RuntimeSettings()
-        self._short_term = ShortTermMemory(
+        self._short_term = WorkingMemory(
             min_retain_turns=min_retain_turns, message_type=ChatMessage, context_config=context_config
         )
         self.recorder: RunRecorder | None = None
