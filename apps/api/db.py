@@ -1,10 +1,13 @@
-"""SQLite 会话/消息仓储。同步实现——FastAPI 的 def/async 端点内用 asyncio.to_thread
-或直接调用（操作均为毫秒级）；不引第三方 ORM。"""
+"""SQLite 会话仓储（任务/Agent/项目/评估/DeepResearch/MCP server）。消息（情景记忆）和跨会话
+记忆（长期记忆）的真实存储已经搬到 packages/memory，这里只持有它们的实例。同步实现——FastAPI
+的 def/async 端点内用 asyncio.to_thread 或直接调用（操作均为毫秒级）；不引第三方 ORM。"""
 import datetime
 import json
 import sqlite3
 import uuid
 from pathlib import Path
+
+from memory import EmbeddingClient, EpisodicMemory, LongTermMemory
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS tasks (
@@ -27,13 +30,6 @@ CREATE TABLE IF NOT EXISTS agents (
   system_prompt TEXT NOT NULL,  -- 角色设定：追加在默认 ReAct 提示词之后，不替换
   skills TEXT NOT NULL,         -- JSON 字符串数组：限定可用技能；空数组 = 不额外限定（用「我的技能」）
   source_prompt TEXT NOT NULL   -- 用户当初那一句话，仅供展示
-);
-CREATE TABLE IF NOT EXISTS messages (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-  kind TEXT NOT NULL,           -- 'user' | 'assistant' | 'tool' | 'summary' | 'stopped'
-  content TEXT NOT NULL,        -- tool 行存 JSON: {"call_id","name","arguments","result","ok"}; summary 行存 Surface 快照 JSON
-  created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS projects (
   id TEXT PRIMARY KEY,
@@ -64,12 +60,6 @@ CREATE TABLE IF NOT EXISTS mcp_servers (
   cached_tools TEXT NOT NULL,    -- JSON 数组：[{name, description, input_schema}]
   last_error TEXT                -- 最近一次探测/刷新失败的错误信息；成功为 NULL
 );
-CREATE TABLE IF NOT EXISTS memories (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  content TEXT NOT NULL UNIQUE,  -- 一条跨会话的稳定用户信息；同内容去重
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
 """
 
 
@@ -78,12 +68,14 @@ def _now() -> str:
 
 
 class ChatStore:
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, embedder: EmbeddingClient | None = None) -> None:
         self._path = Path(path)
         self._path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as conn:
             conn.executescript(_SCHEMA)
             self._migrate(conn)
+        self.episodic = EpisodicMemory(self._path)
+        self.long_term = LongTermMemory(self._path, embedder or EmbeddingClient())
 
     # 轻量迁移清单：CREATE TABLE IF NOT EXISTS 不会改造既有表，旧库缺列时逐条 ALTER 补上。
     # 仅列级变更需要登记在此；新表（如 projects）由 _SCHEMA 的 CREATE TABLE IF NOT EXISTS
@@ -151,66 +143,16 @@ class ChatStore:
             return cursor.rowcount > 0
 
     def append_message(self, task_id: str, kind: str, content: str) -> dict:
-        # stopped：会话被中断（前端停止/断连）的标记行，无内容，仅让刷新后仍能见到"已停止"
-        if kind not in ("user", "assistant", "tool", "summary", "stopped"):
-            raise ValueError(f"unknown message kind: {kind}")
-        now = _now()
+        row = self.episodic.append_message(task_id, kind, content)
         with self._connect() as conn:
-            cursor = conn.execute(
-                "INSERT INTO messages (task_id, kind, content, created_at) VALUES (?, ?, ?, ?)",
-                (task_id, kind, content, now),
-            )
-            conn.execute("UPDATE tasks SET updated_at = ? WHERE id = ?", (now, task_id))
-            row = conn.execute("SELECT * FROM messages WHERE id = ?", (cursor.lastrowid,)).fetchone()
-        return dict(row)
+            conn.execute("UPDATE tasks SET updated_at = ? WHERE id = ?", (row["created_at"], task_id))
+        return row
 
     def list_messages(self, task_id: str) -> list[dict]:
-        with self._connect() as conn:
-            rows = conn.execute("SELECT * FROM messages WHERE task_id = ? ORDER BY id", (task_id,)).fetchall()
-        return [dict(row) for row in rows]
-
-    def remember_memory(self, content: str) -> dict:
-        # 同内容 upsert：重复提取不叠加，只刷新 updated_at。
-        now = _now()
-        with self._connect() as conn:
-            conn.execute(
-                "INSERT INTO memories (content, created_at, updated_at) VALUES (?, ?, ?) "
-                "ON CONFLICT(content) DO UPDATE SET updated_at = excluded.updated_at",
-                (content, now, now),
-            )
-            row = conn.execute("SELECT * FROM memories WHERE content = ?", (content,)).fetchone()
-        return dict(row)
-
-    def list_memories(self) -> list[dict]:
-        # 新在前：召回同分时优先保留更新的记忆。
-        with self._connect() as conn:
-            rows = conn.execute("SELECT * FROM memories ORDER BY updated_at DESC, id DESC").fetchall()
-        return [dict(row) for row in rows]
+        return self.episodic.list_messages(task_id)
 
     def delete_turn(self, task_id: str, message_id: int) -> bool:
-        """删除一整轮问答：目标 user 行 + 其后直到下一条 user 行之前的所有行。
-
-        目标行必须存在、属于该任务、且 kind == 'user'，否则不删任何行返回 False。
-        不动 tasks.updated_at：删除是清理操作，不改变会话的活动排序。
-        """
-        with self._connect() as conn:
-            row = conn.execute(
-                "SELECT id, kind FROM messages WHERE id = ? AND task_id = ?", (message_id, task_id),
-            ).fetchone()
-            if row is None or row["kind"] != "user":
-                return False
-            next_user = conn.execute(
-                "SELECT MIN(id) AS n FROM messages WHERE task_id = ? AND id > ? AND kind = 'user'",
-                (task_id, message_id),
-            ).fetchone()["n"]
-            if next_user is None:
-                conn.execute("DELETE FROM messages WHERE task_id = ? AND id >= ?", (task_id, message_id))
-            else:
-                conn.execute(
-                    "DELETE FROM messages WHERE task_id = ? AND id >= ? AND id < ?",
-                    (task_id, message_id, next_user),
-                )
-            return True
+        return self.episodic.delete_turn(task_id, message_id)
 
     def update_task(self, task_id: str, **fields: str | int | None) -> dict | None:
         """通用字段更新通道，返回更新后的任务；任务不存在返回 None。
