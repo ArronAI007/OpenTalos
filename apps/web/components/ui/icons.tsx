@@ -318,6 +318,17 @@ export function PlugIcon(props: IconProps) {
   );
 }
 
+export function BrainIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M9 3a3 3 0 0 0-3 3v1a3 3 0 0 0-2 2.8V12a3 3 0 0 0 2 2.8V16a3 3 0 0 0 3 3" />
+      <path d="M15 3a3 3 0 0 1 3 3v1a3 3 0 0 1 2 2.8V12a3 3 0 0 1-2 2.8V16a3 3 0 0 1-3 3" />
+      <path d="M9 3a3 3 0 0 1 3 3v12a3 3 0 0 1-3 3" />
+      <path d="M15 3a3 3 0 0 0-3 3" />
+    </Icon>
+  );
+}
+
 export function UsersIcon(props: IconProps) {
   return (
     <Icon {...props}>
