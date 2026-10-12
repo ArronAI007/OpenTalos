@@ -10,14 +10,42 @@ const INLINE_CODE = /`([^`\n]+)`/g;
 const HEADING_PREFIX = /^[ \t]{0,3}#{1,6}[ \t]+/gm;
 const UNORDERED_BULLET = /^[ \t]*[-*+][ \t]+/gm;
 
+// 命令调用整段（python3 scripts/main.py / bash foo.sh ...）→ 自然语言。
+const COMMAND_CALL = /\b(?:python3?|node|bash|sh|zsh|npm|pnpm|uv)\s+[\w./~-]+/gi;
+// 残余的脚本/文件路径（scripts/main.py 等）。
+const SCRIPT_PATH = /[\w./~-]+\.(?:py|js|mjs|cjs|sh|ts|tsx)\b/gi;
+// 工具/函数名 → 自然语言（口径与 humanizeToolCall 一致）；finish 直接删（避免“然后 finish 给出…”这类冗余）。
+const CODE_TERMS: [RegExp, string][] = [
+  [/\brun_skill_script\b/gi, "运行技能脚本"],
+  [/\bread_skill\b/gi, "读取技能"],
+  [/\bweb_search\b/gi, "网页搜索"],
+  [/\bweb_extractor\b/gi, "抓取网页"],
+  [/\bdispatch_subagent\b/gi, "派发子任务"],
+  [/\bask_peer_agent\b/gi, "询问协作 Agent"],
+  [/\bfinish\b/gi, ""],
+  [/\bbash\b/gi, "命令行"],
+  [/\bpython3?\b/gi, "脚本"],
+  [/\bskills?\b/gi, "技能"],
+];
+
+// 去掉思维链里的代码级信息：命令调用、脚本路径、工具/函数名，换成自然语言。
+function stripCodeInfo(text: string): string {
+  let out = text.replace(COMMAND_CALL, "运行命令").replace(SCRIPT_PATH, "脚本");
+  for (const [pattern, replacement] of CODE_TERMS) out = out.replace(pattern, replacement);
+  // 删除 finish 等后可能留下多余空格，压平。
+  return out.replace(/[ \t]{2,}/g, " ");
+}
+
 export function humanizeReasoning(raw: string): string {
   if (!raw) return "";
-  const text = raw
-    .replace(CLOSED_FENCE, "")
-    .replace(OPEN_FENCE, "")
-    .replace(INLINE_CODE, "$1")
-    .replace(HEADING_PREFIX, "")
-    .replace(UNORDERED_BULLET, "• ")
+  const text = stripCodeInfo(
+    raw
+      .replace(CLOSED_FENCE, "")
+      .replace(OPEN_FENCE, "")
+      .replace(INLINE_CODE, "$1")
+      .replace(HEADING_PREFIX, "")
+      .replace(UNORDERED_BULLET, "• "),
+  )
     .split("\n")
     .map((line) => line.replace(/[ \t]+$/, ""))
     .join("\n")
