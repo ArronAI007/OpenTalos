@@ -2,6 +2,7 @@
 embedding 语义检索）—— 三者都是真实的 SQLite/内存实现，不是接口声明。
 """
 
+from .consolidation import build_consolidation_messages, parse_consolidation
 from .embedding import EmbeddingClient
 from .episodic import EpisodicMemory
 from .extraction import ExtractedMemory, build_extraction_messages, parse_extraction
@@ -17,4 +18,6 @@ __all__ = [
     "seed_messages",
     "build_extraction_messages",
     "parse_extraction",
+    "build_consolidation_messages",
+    "parse_consolidation",
 ]
