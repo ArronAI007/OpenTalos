@@ -831,3 +831,25 @@ async def test_metrics_endpoint_exposes_prometheus_text(api) -> None:
     assert resp.status_code == 200
     assert "text/plain" in resp.headers["content-type"]
     assert "opentalos_http_requests_total" in resp.text
+
+
+async def test_list_memories_returns_empty_when_none_remembered(api) -> None:
+    resp = await api.get("/api/memories")
+    assert resp.status_code == 200
+    assert resp.json() == {"memories": []}
+
+
+async def test_delete_missing_memory_returns_404(api) -> None:
+    resp = await api.delete("/api/memories/999999")
+    assert resp.status_code == 404
+
+
+async def test_forget_rejects_unknown_strategy(api) -> None:
+    resp = await api.post("/api/memories/forget", json={"strategy": "no-such-strategy"})
+    assert resp.status_code == 400
+
+
+async def test_consolidate_returns_zero_when_nothing_to_merge(api) -> None:
+    resp = await api.post("/api/memories/consolidate", json={})
+    assert resp.status_code == 200
+    assert resp.json() == {"merged": 0}

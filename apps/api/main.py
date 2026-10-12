@@ -126,6 +126,17 @@ class UpdateMCPServerBody(BaseModel):
     enabled: bool
 
 
+class ForgetMemoriesBody(BaseModel):
+    strategy: str  # 'importance_based' | 'time_based' | 'capacity_based'
+    threshold: float = 0.3
+    max_age_days: int = 30
+    max_count: int = 1000
+
+
+class ConsolidateMemoriesBody(BaseModel):
+    similarity_threshold: float = 0.9
+
+
 # 任务的布尔 flag 字段：PATCH 端点按下表统一装配，新增 flag 只需在此处与模型各加一行。
 _FLAG_FIELDS = ("pinned", "starred", "archived")
 
@@ -629,6 +640,36 @@ def create_app(runtime: ChatRuntime | None = None, eval_cases_path: Path | None 
     async def delete_mcp_server_route(server_id: str) -> None:
         if not store.delete_mcp_server(server_id):
             raise HTTPException(404, "server not found")
+
+    @app.get("/api/memories")
+    async def list_memories_route() -> dict:
+        memories = [
+            {k: v for k, v in m.items() if k != "embedding"} for m in store.semantic.list_memories()
+        ]
+        return {"memories": memories}
+
+    @app.delete("/api/memories/{memory_id}", status_code=204)
+    async def delete_memory_route(memory_id: int) -> None:
+        if not store.semantic.delete_memory(memory_id):
+            raise HTTPException(404, "memory not found")
+
+    @app.post("/api/memories/forget")
+    async def forget_memories_route(request: ForgetMemoriesBody) -> dict:
+        try:
+            deleted = store.semantic.forget(
+                request.strategy,
+                threshold=request.threshold,
+                max_age_days=request.max_age_days,
+                max_count=request.max_count,
+            )
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from error
+        return {"deleted": deleted}
+
+    @app.post("/api/memories/consolidate")
+    async def consolidate_memories_route(request: ConsolidateMemoriesBody) -> dict:
+        merged = await runtime.consolidate_memories(request.similarity_threshold)
+        return {"merged": merged}
 
     return app
 
