@@ -30,7 +30,7 @@ describe("ThinkingBubble", () => {
     expect(screen.queryByText("查看原始细节")).not.toBeInTheDocument();
   });
 
-  it("collapses when settled and expands on click", async () => {
+  it("stays expanded when settled and collapses on click", async () => {
     render(
       <ThinkingBubble
         streaming={false}
@@ -40,9 +40,9 @@ describe("ThinkingBubble", () => {
     const user = userEvent.setup();
 
     expect(screen.getByText("思考过程")).toBeInTheDocument();
-    expect(screen.queryByText(/网页搜索/)).not.toBeInTheDocument(); // 定稿后自动收起
+    expect(screen.getByText(/网页搜索/)).toBeInTheDocument(); // 定稿后仍展开，思考过程可见
 
     await user.click(screen.getByRole("button"));
-    expect(screen.getByText(/网页搜索/)).toBeInTheDocument();
+    expect(screen.queryByText(/网页搜索/)).not.toBeInTheDocument();
   });
 });

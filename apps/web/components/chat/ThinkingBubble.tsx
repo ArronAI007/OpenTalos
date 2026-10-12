@@ -5,7 +5,8 @@ import type { ThinkingItem, UiMessage } from "@/lib/chat-events";
 import { toolActionLabel } from "@/lib/humanize";
 
 // 统一"思考过程"单元：只展示 agent 正在做什么（自然语言动作行），展示层不暴露原始思维链、
-// 命令、参数或文件路径等系统内部信息（对齐 Codex / 豆包的做法）。
+// 命令、参数或文件路径等系统内部信息（对齐 Codex / 豆包的做法）。定稿后保持展开，让"思考过程"
+// 切实可见（用户可手动收起）。
 
 function ToolActivity({ message }: { message: Extract<UiMessage, { kind: "tool" }> }) {
   const running = message.result === undefined;
@@ -23,15 +24,8 @@ function ToolActivity({ message }: { message: Extract<UiMessage, { kind: "tool" 
 
 export function ThinkingBubble({ items, streaming }: { items: ThinkingItem[]; streaming?: boolean }) {
   const [expanded, setExpanded] = useState(true);
-  const touchedRef = useRef(false);
   const bodyRef = useRef<HTMLDivElement>(null);
   const tools = items.filter((m): m is Extract<UiMessage, { kind: "tool" }> => m.kind === "tool");
-
-  // 流式期间默认展开（等待反馈正是它的意义），定稿后自动收起；用户一旦手动开合过，
-  // 定稿时尊重用户选择不再动它（touched 记录）。
-  useEffect(() => {
-    if (!streaming && !touchedRef.current) setExpanded(false);
-  }, [streaming]);
 
   // 流式期间跟随最新动作：内容增长时把视图滚到底（仅展开态有意义）。
   useEffect(() => {
@@ -45,10 +39,7 @@ export function ThinkingBubble({ items, streaming }: { items: ThinkingItem[]; st
       <button
         type="button"
         aria-expanded={expanded}
-        onClick={() => {
-          touchedRef.current = true;
-          setExpanded((v) => !v);
-        }}
+        onClick={() => setExpanded((v) => !v)}
         className="flex w-full cursor-pointer select-none items-center gap-1.5 px-3 py-1.5 text-left"
       >
         <span aria-hidden className={streaming ? "animate-pulse" : undefined}>
