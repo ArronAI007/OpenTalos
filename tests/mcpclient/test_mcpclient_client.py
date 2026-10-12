@@ -6,7 +6,13 @@ from pathlib import Path
 
 import pytest
 
-from mcpclient.client import MCPConnectionError, MCPServerConfig, connect_and_call_tool, connect_and_list_tools
+from mcpclient.client import (
+    MCPConnectionError,
+    MCPServerConfig,
+    _connect_target,
+    connect_and_call_tool,
+    connect_and_list_tools,
+)
 
 _DEMO_SERVER = str(Path(__file__).resolve().parent.parent.parent / "packages" / "mcpclient" / "demo_server.py")
 
@@ -32,6 +38,18 @@ class TestConnectAndCallToolStdio:
     async def test_returns_real_weather_text(self) -> None:
         result = await connect_and_call_tool(_stdio_config(), "get_weather", {"city": "Beijing"})
         assert "Beijing" in result
+
+
+class TestConnectTarget:
+    def test_stdio_forwards_env_to_stdio_server_parameters(self) -> None:
+        config = MCPServerConfig(transport="stdio", command="x", args=["y"], env={"FOO": "bar"})
+        target = _connect_target(config)
+        assert target.env == {"FOO": "bar"}
+
+    def test_stdio_without_env_defaults_to_none(self) -> None:
+        config = MCPServerConfig(transport="stdio", command="x", args=["y"])
+        target = _connect_target(config)
+        assert target.env is None
 
 
 def _free_port() -> int:

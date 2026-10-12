@@ -19,6 +19,7 @@ class MCPServerConfig:
     command: str | None = None  # stdio 专用
     args: list[str] = field(default_factory=list)  # stdio 专用
     url: str | None = None  # http 专用
+    env: dict[str, str] | None = None  # stdio 专用，透传给子进程（例如 API key）
 
 
 @dataclass
@@ -30,7 +31,9 @@ class MCPToolInfo:
 
 def _connect_target(server_config: MCPServerConfig) -> "mcp.StdioServerParameters | str":
     if server_config.transport == "stdio":
-        return mcp.StdioServerParameters(command=server_config.command, args=server_config.args)
+        return mcp.StdioServerParameters(
+            command=server_config.command, args=server_config.args, env=server_config.env
+        )
     return server_config.url
 
 
