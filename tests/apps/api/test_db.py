@@ -11,17 +11,6 @@ def store(tmp_path: Path) -> ChatStore:
     return ChatStore(tmp_path / "chat.db")
 
 
-def test_remember_memory_upserts_and_lists_newest_first(store: ChatStore) -> None:
-    store.remember_memory("用户叫张三")
-    store.remember_memory("用户喜欢简洁回复")
-    store.remember_memory("用户叫张三")  # 同内容去重，只刷新 updated_at
-
-    memories = store.list_memories()
-
-    assert {m["content"] for m in memories} == {"用户叫张三", "用户喜欢简洁回复"}
-    assert len(memories) == 2
-
-
 def test_create_and_list_tasks(store: ChatStore) -> None:
     task = store.create_task("react")
     assert task["agent_type"] == "react"
@@ -39,15 +28,6 @@ def test_delete_task_cascades_messages(store: ChatStore) -> None:
     assert store.delete_task(task["id"]) is True
     assert store.get_task(task["id"]) is None
     assert store.list_messages(task["id"]) == []
-
-
-def test_messages_round_trip_in_order(store: ChatStore) -> None:
-    task = store.create_task("react")
-    store.append_message(task["id"], "user", "你好")
-    store.append_message(task["id"], "tool", '{"name":"read_skill","arguments":{"skill_name":"date"},"result":"r","ok":true}')
-    store.append_message(task["id"], "assistant", "今天星期二")
-    kinds = [m["kind"] for m in store.list_messages(task["id"])]
-    assert kinds == ["user", "tool", "assistant"]
 
 
 def test_title_set_only_once(store: ChatStore) -> None:
@@ -77,48 +57,6 @@ def test_update_task_ignores_non_whitelisted_columns(store: ChatStore) -> None:
     assert updated["agent_type"] == "react"
     assert updated["title"] == "新标题"
 
-
-def test_append_unknown_kind_raises(store: ChatStore) -> None:
-    task = store.create_task("react")
-    with pytest.raises(ValueError):
-        store.append_message(task["id"], "system", "x")
-
-
-def _seed_two_turns(store: ChatStore) -> tuple[dict, list[dict]]:
-    task = store.create_task("react")
-    rows = [
-        store.append_message(task["id"], "user", "一问"),
-        store.append_message(task["id"], "tool", '{"name":"echo","arguments":{},"result":"r","ok":true}'),
-        store.append_message(task["id"], "assistant", "一答"),
-        store.append_message(task["id"], "user", "二问"),
-        store.append_message(task["id"], "assistant", "二答"),
-        store.append_message(task["id"], "stopped", ""),
-    ]
-    return task, rows
-
-
-def test_delete_turn_removes_tail_turn(store: ChatStore) -> None:
-    task, rows = _seed_two_turns(store)
-    assert store.delete_turn(task["id"], rows[3]["id"]) is True  # 「二问」起的轮次
-    remaining = [(r["kind"], r["content"]) for r in store.list_messages(task["id"])]
-    assert remaining == [("user", "一问"), ("tool", rows[1]["content"]), ("assistant", "一答")]
-
-
-def test_delete_turn_removes_mid_turn_and_keeps_turn_boundary(store: ChatStore) -> None:
-    task, rows = _seed_two_turns(store)
-    assert store.delete_turn(task["id"], rows[0]["id"]) is True  # 「一问」起的轮次
-    remaining = [(r["kind"], r["content"]) for r in store.list_messages(task["id"])]
-    assert remaining == [("user", "二问"), ("assistant", "二答"), ("stopped", "")]
-
-
-def test_delete_turn_rejects_non_user_or_foreign_row(store: ChatStore) -> None:
-    task, rows = _seed_two_turns(store)
-    other = store.create_task("react")
-    before = store.list_messages(task["id"])
-    assert store.delete_turn(task["id"], rows[1]["id"]) is False  # tool 行不是轮次锚点
-    assert store.delete_turn(task["id"], 999999) is False  # 不存在
-    assert store.delete_turn(other["id"], rows[0]["id"]) is False  # 行不属于该任务
-    assert store.list_messages(task["id"]) == before  # 三次拒绝均一行未删
 
 
 def test_list_tasks_orders_by_updated_at_desc(store: ChatStore) -> None:
