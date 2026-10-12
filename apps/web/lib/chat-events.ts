@@ -205,15 +205,13 @@ export function turnUserMessage(
 
 // 虚拟列表用：哪些消息真正渲染成一行。被并入相邻块（非思考单元起始行、已并入回复块的思考单元）
 // 或被停止提示吸收的行会被排除，避免它们成为 0 高度 item 造成估算到实测的滚动抖动。
-// 简单问答直接给答案：仅有"读技能文件/跑技能脚本"这类基础工具（read/bash）且只调用一次时视为简单；
-// 任何其他工具（网页搜索/抓取、MCP、协作 Agent、子任务分派、未知工具…）或 ≥2 次工具调用
-// 都算复杂，展示思考过程。
+// 简单问答直接给答案：只调用了"读技能文件/跑技能脚本"（read/bash）这类内部基础工具时不显示
+// 面板（如"今天几号"跑技能脚本）；只要调用了任何用户可见的工具（联网搜索/抓取、MCP、协作
+// Agent、子任务分派…）就展示思考过程——对齐豆包：面板出现与否取决于模型是否真的发起了动作。
 const SIMPLE_TOOLS = new Set(["bash", "read"]);
-const COMPLEX_TOOL_CALLS = 2;
 
 export function isComplexThinking(items: ThinkingItem[]): boolean {
   const tools = items.filter((m): m is Extract<ThinkingItem, { kind: "tool" }> => m.kind === "tool");
-  if (tools.length >= COMPLEX_TOOL_CALLS) return true;
   return tools.some((tool) => !SIMPLE_TOOLS.has(tool.name));
 }
 

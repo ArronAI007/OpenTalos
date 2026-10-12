@@ -1,6 +1,8 @@
 // 工具调用 → 自然语言（供"思考过程"面板展示 agent 正在做什么）。这里刻意不包含命令、参数、
 // 文件路径等系统内部信息——那些会泄露实现细节。未登记的工具（如 MCP 动态注册的）回退成原始名字。
 
+import type { ThinkingItem } from "./chat-events";
+
 const TOOL_LABELS: Record<string, string> = {
   bash: "运行技能脚本",
   read: "读取技能文档",
@@ -16,6 +18,15 @@ const TOOL_LABELS: Record<string, string> = {
 // "思考过程"面板用的动作名。
 export function toolActionLabel(name: string): string {
   return TOOL_LABELS[name] ?? name;
+}
+
+// 面板完成后收起成的一行摘要（对齐豆包"已深度思考 / 已搜索 N 个网页"）。
+export function thinkingSummary(items: ThinkingItem[]): string {
+  const tools = items.filter((m): m is Extract<ThinkingItem, { kind: "tool" }> => m.kind === "tool");
+  if (tools.length === 0) return "思考过程";
+  const web = tools.filter((tool) => tool.name === "web_search" || tool.name === "web_extractor").length;
+  if (web > 0) return `已联网搜索 · ${web} 步`;
+  return `已执行 · ${tools.length} 步`;
 }
 
 // 审批卡片用：动作名 + 一句人类可读的参数摘要（审批场景需要知道具体在批准什么，故保留参数）。

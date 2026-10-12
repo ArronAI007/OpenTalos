@@ -292,26 +292,22 @@ describe("reasoning（思维链）", () => {
 });
 
 describe("isComplexThinking", () => {
-  it("treats only single read/bash skill calls as simple", () => {
+  it("shows the panel only when a user-visible tool was called", () => {
     expect(isComplexThinking([{ id: "r", kind: "reasoning", content: "想" }])).toBe(false);
-    expect(isComplexThinking([{ id: "t", kind: "tool", name: "bash", arguments: {}, result: "x", ok: true }])).toBe(false);
+    // 仅内部基础工具（read/bash）→ 不显示（如"今天几号"跑技能脚本）
     expect(isComplexThinking([{ id: "t", kind: "tool", name: "read", arguments: {}, result: "x", ok: true }])).toBe(false);
-    // 任何其他工具（联网检索/MCP/协作/未知）都算复杂
+    expect(
+      isComplexThinking([
+        { id: "t1", kind: "tool", name: "read", arguments: {}, result: "x", ok: true },
+        { id: "t2", kind: "tool", name: "bash", arguments: {}, result: "y", ok: true },
+      ]),
+    ).toBe(false);
+    // 任何用户可见的工具（联网检索/MCP/协作/未知）→ 显示
     expect(
       isComplexThinking([{ id: "t", kind: "tool", name: "web_search", arguments: {}, result: "x", ok: true }]),
     ).toBe(true);
     expect(
-      isComplexThinking([{ id: "t", kind: "tool", name: "web_extractor", arguments: {}, result: "x", ok: true }]),
-    ).toBe(true);
-    expect(
       isComplexThinking([{ id: "t", kind: "tool", name: "get_weather", arguments: {}, result: "x", ok: true }]),
-    ).toBe(true);
-    // 多次基础工具调用也算复杂
-    expect(
-      isComplexThinking([
-        { id: "t1", kind: "tool", name: "bash", arguments: {}, result: "x", ok: true },
-        { id: "t2", kind: "tool", name: "bash", arguments: {}, result: "y", ok: true },
-      ]),
     ).toBe(true);
   });
 });
@@ -423,7 +419,7 @@ describe("steer_interrupt", () => {
 });
 
 describe("visibleIndexes（虚拟化可见行）", () => {
-  it("hides a simple thinking run (<=1 tool) entirely", () => {
+  it("hides a read/bash-only thinking run entirely", () => {
     const msgs: UiMessage[] = [
       { id: "u1", kind: "user", content: "问" },
       { id: "r1", kind: "reasoning", content: "想", streaming: false },

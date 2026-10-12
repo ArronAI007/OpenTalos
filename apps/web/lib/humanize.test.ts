@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { humanizeToolCall, toolActionLabel } from "./humanize";
+import { humanizeToolCall, thinkingSummary, toolActionLabel } from "./humanize";
 
 describe("toolActionLabel", () => {
   it("maps known tools to natural-language actions", () => {
@@ -10,6 +10,21 @@ describe("toolActionLabel", () => {
 
   it("falls back to the raw name for unknown (e.g. MCP) tools", () => {
     expect(toolActionLabel("get_weather")).toBe("get_weather");
+  });
+});
+
+describe("thinkingSummary", () => {
+  it("summarizes web retrieval and generic actions for the collapsed header", () => {
+    expect(
+      thinkingSummary([
+        { id: "t1", kind: "tool", name: "web_search", arguments: {}, result: "x", ok: true },
+        { id: "t2", kind: "tool", name: "web_search", arguments: {}, result: "y", ok: true },
+      ]),
+    ).toBe("已联网搜索 · 2 步");
+    expect(thinkingSummary([{ id: "r", kind: "reasoning", content: "想" }])).toBe("思考过程");
+    expect(thinkingSummary([{ id: "t", kind: "tool", name: "get_weather", arguments: {}, result: "x", ok: true }])).toBe(
+      "已执行 · 1 步",
+    );
   });
 });
 
