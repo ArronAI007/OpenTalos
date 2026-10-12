@@ -165,3 +165,50 @@ async def test_delete_memory_removes_one_row(tmp_path: Path) -> None:
 def test_delete_memory_missing_returns_false(tmp_path: Path) -> None:
     store = SemanticMemory(tmp_path / "memory.db", _make_embedder({}))
     assert store.delete_memory(999999) is False
+
+
+async def test_find_similar_groups_clusters_by_cosine_similarity(tmp_path: Path) -> None:
+    embedder = _make_embedder(
+        {"记忆A": [1.0, 0.0], "记忆B": [0.99, 0.01], "不相关": [0.0, 1.0]}
+    )
+    store = SemanticMemory(tmp_path / "memory.db", embedder)
+    await store.remember("记忆A")
+    await store.remember("记忆B")
+    await store.remember("不相关")
+
+    groups = store.find_similar_groups(similarity_threshold=0.9)
+
+    assert len(groups) == 1
+    assert {m["content"] for m in groups[0]} == {"记忆A", "记忆B"}
+
+
+async def test_find_similar_groups_skips_rows_without_embedding(tmp_path: Path) -> None:
+    db_path = tmp_path / "memory.db"
+    embedder = _make_embedder({"有向量": [1.0, 0.0]})
+    store = SemanticMemory(db_path, embedder)
+    await store.remember("有向量")
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "INSERT INTO memories (content, created_at, updated_at, importance) VALUES (?, ?, ?, ?)",
+            ("没有向量", "2020-01-01T00:00:00", "2020-01-01T00:00:00", 0.5),
+        )
+
+    groups = store.find_similar_groups(similarity_threshold=0.9)
+
+    assert groups == []  # 只有一条有 embedding，凑不成组；没 embedding 的那条被跳过不参与聚类
+
+
+async def test_replace_with_merged_deletes_old_rows_and_inserts_new_one(tmp_path: Path) -> None:
+    embedder = _make_embedder(
+        {"记忆A": [1.0, 0.0], "记忆B": [0.99, 0.01], "合并后的记忆": [1.0, 0.0]}
+    )
+    store = SemanticMemory(tmp_path / "memory.db", embedder)
+    row_a = await store.remember("记忆A", importance=0.6)
+    row_b = await store.remember("记忆B", importance=0.8)
+
+    merged = await store.replace_with_merged([row_a["id"], row_b["id"]], "合并后的记忆", importance=0.8)
+
+    remaining = store.list_memories()
+    assert [m["content"] for m in remaining] == ["合并后的记忆"]
+    assert merged["content"] == "合并后的记忆"
+    assert merged["importance"] == 0.8

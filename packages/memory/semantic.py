@@ -128,3 +128,47 @@ class SemanticMemory:
                 scored.append((similarity, row["content"]))
         scored.sort(key=lambda item: item[0], reverse=True)
         return [content for _, content in scored[:limit]]
+
+    def find_similar_groups(self, similarity_threshold: float = 0.9) -> list[list[dict]]:
+        """贪心聚类：两两算余弦相似度（只用已存的 embedding，为 NULL 的行跳过——懒补齐是
+        recall() 的职责，这里不做），相似度 >= 阈值的归到同一组。只返回成员数 >= 2 的组。"""
+        rows = [row for row in self.list_memories() if row["embedding"] is not None]
+        vectors = {row["id"]: json.loads(row["embedding"]) for row in rows}
+        assigned: set[int] = set()
+        groups: list[list[dict]] = []
+        for row in rows:
+            if row["id"] in assigned:
+                continue
+            group = [row]
+            assigned.add(row["id"])
+            for other in rows:
+                if other["id"] in assigned:
+                    continue
+                if _cosine_similarity(vectors[row["id"]], vectors[other["id"]]) >= similarity_threshold:
+                    group.append(other)
+                    assigned.add(other["id"])
+            if len(group) >= 2:
+                groups.append(group)
+        return groups
+
+    def _replace_with_merged_sync(
+        self, old_ids: list[int], content: str, embedding: list[float], importance: float
+    ) -> dict:
+        now = _now()
+        embedding_json = json.dumps(embedding)
+        with self._connect() as conn:
+            conn.executemany("DELETE FROM memories WHERE id = ?", [(old_id,) for old_id in old_ids])
+            conn.execute(
+                "INSERT INTO memories (content, created_at, updated_at, embedding, importance) VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(content) DO UPDATE SET "
+                "updated_at = excluded.updated_at, embedding = excluded.embedding, importance = excluded.importance",
+                (content, now, now, embedding_json, importance),
+            )
+            row = conn.execute("SELECT * FROM memories WHERE content = ?", (content,)).fetchone()
+        return dict(row)
+
+    async def replace_with_merged(self, old_ids: list[int], merged_content: str, importance: float) -> dict:
+        embedding = await self._embedder.embed(merged_content)
+        return await asyncio.to_thread(
+            self._replace_with_merged_sync, old_ids, merged_content, embedding, importance
+        )
