@@ -19,7 +19,7 @@ from core.agent import Agent
 from core.cancellation import CancellationToken
 from core.model import ModelClient
 from core.protocol import ChatMessage, ToolInvocation
-from memory import build_extraction_messages, parse_extraction
+from memory import build_consolidation_messages, build_extraction_messages, parse_consolidation, parse_extraction
 from observability import metrics
 from skill.discovery import discover_skills
 from skill.my_skills import load_my_skills
@@ -448,11 +448,32 @@ class ChatRuntime:
         # 记忆是锦上添花：任何失败静默吞掉，不影响对话主流程。
         try:
             completion = await self._client().acomplete(build_extraction_messages(user_text, assistant_text))
-            content = parse_extraction(completion.text)
-            if content:
-                await self._store.semantic.remember(content)
+            extracted = parse_extraction(completion.text)
+            if extracted:
+                await self._store.semantic.remember(extracted.content, importance=extracted.importance)
         except Exception:  # noqa: BLE001 - 提取失败不影响本轮
             pass
+
+    async def consolidate_memories(self, similarity_threshold: float = 0.9) -> int:
+        """扫描语义记忆，把相似的合并，返回"减少的条目数"。单个分组合并失败（模型调用异常、
+        返回无法解析）不影响其它分组，静默跳过继续下一组——和 _extract_and_remember 同样的
+        "记忆是锦上添花"容错哲学。"""
+        groups = self._store.semantic.find_similar_groups(similarity_threshold)
+        reduced = 0
+        for group in groups:
+            try:
+                contents = [m["content"] for m in group]
+                completion = await self._client().acomplete(build_consolidation_messages(contents))
+                merged = parse_consolidation(completion.text)
+                if merged:
+                    importance = max(m["importance"] for m in group)
+                    await self._store.semantic.replace_with_merged(
+                        [m["id"] for m in group], merged, importance
+                    )
+                    reduced += len(group) - 1
+            except Exception:  # noqa: BLE001 - 这一组合并失败不影响其它组
+                continue
+        return reduced
 
     def _sweep_runs(self) -> None:
         now = time.monotonic()

@@ -1116,6 +1116,61 @@ async def test_completed_turn_extracts_and_saves_a_memory(scripted_client, tmp_p
     assert [m["content"] for m in store.semantic.list_memories()] == ["用户叫张三"]
 
 
+async def test_completed_turn_saves_the_model_assigned_importance(scripted_client, tmp_path) -> None:
+    embedder = EmbeddingClient()
+
+    async def fake_embed(text: str) -> list[float]:
+        return [1.0]
+
+    embedder.embed = fake_embed  # type: ignore[method-assign]
+    store = ChatStore(tmp_path / "chat.db", embedder=embedder)
+    client = scripted_client(tool_completions=[ToolCompletion(text="你好张三", requested_tools=[], model_id="mock-model")])
+
+    async def routed_acomplete(messages, **kwargs):
+        if any("shouldSave" in (m.get("content") or "") for m in messages):
+            return Completion(
+                text='{"shouldSave": true, "content": "用户叫张三", "importance": 0.95}', model_id="mock-model"
+            )
+        return Completion(text="[]", model_id="mock-model")
+
+    client.acomplete = routed_acomplete  # type: ignore[method-assign]
+    runtime = _runtime(store, client, tmp_path, memory_enabled=True)
+    task = store.create_task("react")
+    store.update_task(task["id"], title="已有标题")
+
+    await _collect(runtime, task["id"], "我叫张三")
+
+    assert store.semantic.list_memories()[0]["importance"] == 0.95
+
+
+async def test_consolidate_memories_merges_similar_ones_via_the_model(tmp_path) -> None:
+    embedder = EmbeddingClient()
+
+    async def fake_embed(text: str) -> list[float]:
+        # 所有文本都映射到同一个向量：两条原始记忆和合并后的新记忆要保持足够相似，
+        # 这样 find_similar_groups(0.9) 才能把前两条聚成一组。
+        return [1.0, 0.0]
+
+    embedder.embed = fake_embed  # type: ignore[method-assign]
+    store = ChatStore(tmp_path / "chat.db", embedder=embedder)
+    await store.semantic.remember("用户叫张三", importance=0.6)
+    await store.semantic.remember("用户姓张名三", importance=0.8)
+
+    async def merge_acomplete(messages, **kwargs):
+        return Completion(text='{"merged": "合并后的记忆"}', model_id="mock-model")
+
+    client = ModelClient(provider="mock")
+    client.acomplete = merge_acomplete  # type: ignore[method-assign]
+    runtime = ChatRuntime(store, model_client=client, trace_dir=tmp_path / "traces")
+
+    merged_count = await runtime.consolidate_memories(similarity_threshold=0.9)
+
+    assert merged_count == 1
+    remaining = store.semantic.list_memories()
+    assert [m["content"] for m in remaining] == ["合并后的记忆"]
+    assert remaining[0]["importance"] == 0.8  # 取两条里重要性较高的
+
+
 def test_steer_without_active_run_returns_false(store) -> None:
     runtime = ChatRuntime(store, model_client=ModelClient(provider="mock"))
 
