@@ -1,18 +1,19 @@
-"""记忆统一管理：短期（ShortTermMemory，真正生效）+ 情景（EpisodicMemory 接口声明）+
-长期（LongTermMemory 形状 + 提取/召回工具）。
+"""记忆统一管理：短期（ShortTermMemory）+ 情景（EpisodicMemory）+ 长期（LongTermMemory，
+embedding 语义检索）—— 三者都是真实的 SQLite/内存实现，不是接口声明。
 """
 
+from .embedding import EmbeddingClient
 from .episodic import EpisodicMemory
 from .extraction import build_extraction_messages, parse_extraction
-from .long_term import LongTermMemory, rank_memories
+from .long_term import LongTermMemory
 from .short_term import ShortTermMemory, seed_messages
 
 __all__ = [
+    "EmbeddingClient",
     "EpisodicMemory",
     "LongTermMemory",
     "ShortTermMemory",
     "seed_messages",
     "build_extraction_messages",
     "parse_extraction",
-    "rank_memories",
 ]
