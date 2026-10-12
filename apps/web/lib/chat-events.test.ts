@@ -292,9 +292,9 @@ describe("reasoning（思维链）", () => {
 });
 
 describe("isComplexThinking", () => {
-  it("shows the panel only when a user-visible tool was called", () => {
+  it("shows the panel for a user-visible tool or substantial reasoning", () => {
     expect(isComplexThinking([{ id: "r", kind: "reasoning", content: "想" }])).toBe(false);
-    // 仅内部基础工具（read/bash）→ 不显示（如"今天几号"跑技能脚本）
+    // 仅内部基础工具（read/bash）+ 短推理 → 不显示（如"今天几号"、"1+1"）
     expect(isComplexThinking([{ id: "t", kind: "tool", name: "read", arguments: {}, result: "x", ok: true }])).toBe(false);
     expect(
       isComplexThinking([
@@ -302,6 +302,8 @@ describe("isComplexThinking", () => {
         { id: "t2", kind: "tool", name: "bash", arguments: {}, result: "y", ok: true },
       ]),
     ).toBe(false);
+    // 推理达到阈值 → 显示（如无工具的知识问答）
+    expect(isComplexThinking([{ id: "r", kind: "reasoning", content: "x".repeat(40) }])).toBe(true);
     // 任何用户可见的工具（联网检索/MCP/协作/未知）→ 显示
     expect(
       isComplexThinking([{ id: "t", kind: "tool", name: "web_search", arguments: {}, result: "x", ok: true }]),

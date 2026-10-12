@@ -2,11 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ThinkingItem, UiMessage } from "@/lib/chat-events";
-import { toolActionLabel, thinkingSummary } from "@/lib/humanize";
+import { humanizeReasoning, toolActionLabel, thinkingSummary } from "@/lib/humanize";
 
-// 统一"思考过程"单元：只展示 agent 正在做什么（自然语言动作行），展示层不暴露原始思维链、
-// 命令、参数或文件路径等系统内部信息（对齐豆包）。过程中展开实时显示动作，完成后收起成一行
-// 摘要（"已联网搜索 · N 步"），点击可再展开。
+// 统一"思考过程"单元（对齐豆包）：把模型自然语言化的推理文本与工具动作收进同一折叠容器。
+// 过程中展开实时显示，完成后收起成一行摘要，点击可再展开。展示层不暴露命令/参数/文件路径等
+// 系统内部信息。
 
 function ToolActivity({ message }: { message: Extract<UiMessage, { kind: "tool" }> }) {
   const running = message.result === undefined;
@@ -27,6 +27,12 @@ export function ThinkingBubble({ items, streaming }: { items: ThinkingItem[]; st
   const touchedRef = useRef(false);
   const bodyRef = useRef<HTMLDivElement>(null);
   const tools = items.filter((m): m is Extract<UiMessage, { kind: "tool" }> => m.kind === "tool");
+  const reasoning = humanizeReasoning(
+    items
+      .filter((m): m is Extract<UiMessage, { kind: "reasoning" }> => m.kind === "reasoning")
+      .map((m) => m.content)
+      .join("\n\n"),
+  );
 
   // 过程中默认展开（实时看动作），完成后自动收起成一行摘要；用户手动开合过后尊重其选择。
   useEffect(() => {
@@ -61,10 +67,12 @@ export function ThinkingBubble({ items, streaming }: { items: ThinkingItem[]; st
       </button>
       {expanded && (
         <div ref={bodyRef} className="max-h-64 space-y-0.5 overflow-y-auto px-3 pb-2">
-          {tools.length === 0 ? (
-            <div className="leading-5">{streaming ? "正在思考…" : "本次没有调用工具。"}</div>
-          ) : (
-            tools.map((tool) => <ToolActivity key={tool.id} message={tool} />)
+          {reasoning && <div className="whitespace-pre-wrap break-words leading-5">{reasoning}</div>}
+          {tools.map((tool) => (
+            <ToolActivity key={tool.id} message={tool} />
+          ))}
+          {!reasoning && tools.length === 0 && (
+            <div className="leading-5">{streaming ? "正在思考…" : "本次没有可展示的思考内容。"}</div>
           )}
         </div>
       )}

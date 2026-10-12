@@ -205,14 +205,17 @@ export function turnUserMessage(
 
 // 虚拟列表用：哪些消息真正渲染成一行。被并入相邻块（非思考单元起始行、已并入回复块的思考单元）
 // 或被停止提示吸收的行会被排除，避免它们成为 0 高度 item 造成估算到实测的滚动抖动。
-// 简单问答直接给答案：只调用了"读技能文件/跑技能脚本"（read/bash）这类内部基础工具时不显示
-// 面板（如"今天几号"跑技能脚本）；只要调用了任何用户可见的工具（联网搜索/抓取、MCP、协作
-// Agent、子任务分派…）就展示思考过程——对齐豆包：面板出现与否取决于模型是否真的发起了动作。
+// 简单问答直接给答案：只调用了 read/bash 这类内部基础工具、且推理很短的轮次不显示面板（如"今天
+// 几号"、"1+1"）。其余情况——调用了任何用户可见工具（联网搜索/抓取、MCP、协作 Agent、子任务
+// 分派…），或推理文本达到一定长度——都展示思考过程（对齐豆包：搜索动作 / 深度思考都会出面板）。
 const SIMPLE_TOOLS = new Set(["bash", "read"]);
+const REASONING_MIN_CHARS = 40;
 
 export function isComplexThinking(items: ThinkingItem[]): boolean {
   const tools = items.filter((m): m is Extract<ThinkingItem, { kind: "tool" }> => m.kind === "tool");
-  return tools.some((tool) => !SIMPLE_TOOLS.has(tool.name));
+  if (tools.some((tool) => !SIMPLE_TOOLS.has(tool.name))) return true;
+  const reasoningChars = items.reduce((n, m) => (m.kind === "reasoning" ? n + m.content.length : n), 0);
+  return reasoningChars >= REASONING_MIN_CHARS;
 }
 
 // 末尾连续的 reasoning/tool（一个思考单元）。

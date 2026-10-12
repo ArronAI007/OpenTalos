@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { humanizeToolCall, thinkingSummary, toolActionLabel } from "./humanize";
+import { humanizeReasoning, humanizeToolCall, thinkingSummary, toolActionLabel } from "./humanize";
+
+describe("humanizeReasoning", () => {
+  it("strips code fences, commands and paths into natural language", () => {
+    const out = humanizeReasoning("先运行 bash scripts/main.py 看一下\n```py\nprint(1)\n```\n然后 web_search 确认");
+    expect(out).not.toMatch(/scripts\/main\.py|python3|\bbash\b|web_search|```/);
+    expect(out).toContain("运行命令");
+    expect(out).toContain("网页搜索");
+  });
+});
 
 describe("toolActionLabel", () => {
   it("maps known tools to natural-language actions", () => {
@@ -21,7 +30,7 @@ describe("thinkingSummary", () => {
         { id: "t2", kind: "tool", name: "web_search", arguments: {}, result: "y", ok: true },
       ]),
     ).toBe("已联网搜索 · 2 步");
-    expect(thinkingSummary([{ id: "r", kind: "reasoning", content: "想" }])).toBe("思考过程");
+    expect(thinkingSummary([{ id: "r", kind: "reasoning", content: "想" }])).toBe("已深度思考");
     expect(thinkingSummary([{ id: "t", kind: "tool", name: "get_weather", arguments: {}, result: "x", ok: true }])).toBe(
       "已执行 · 1 步",
     );

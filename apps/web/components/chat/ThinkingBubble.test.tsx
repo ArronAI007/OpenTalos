@@ -5,6 +5,22 @@ import { describe, expect, it } from "vitest";
 import { ThinkingBubble } from "./ThinkingBubble";
 
 describe("ThinkingBubble", () => {
+  it("shows humanized reasoning while streaming (reasoning-only turn)", () => {
+    render(
+      <ThinkingBubble
+        streaming
+        items={[
+          { id: "r1", kind: "reasoning", content: "先运行 bash scripts/main.py，然后 web_search 确认", streaming: true },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("正在思考…")).toBeInTheDocument();
+    expect(screen.getByText(/运行命令/)).toBeInTheDocument();
+    // 自然语言化：不暴露脚本路径 / 命令 / 工具名。
+    expect(screen.queryByText(/scripts\/main\.py|\bbash\b|web_search/)).not.toBeInTheDocument();
+  });
+
   it("shows only natural-language tool actions while streaming", () => {
     render(
       <ThinkingBubble

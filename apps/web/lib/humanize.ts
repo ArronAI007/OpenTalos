@@ -1,7 +1,59 @@
-// 工具调用 → 自然语言（供"思考过程"面板展示 agent 正在做什么）。这里刻意不包含命令、参数、
-// 文件路径等系统内部信息——那些会泄露实现细节。未登记的工具（如 MCP 动态注册的）回退成原始名字。
+// 把模型输出整理成自然语言的"思考过程"展示（对齐豆包）：
+// - humanizeReasoning：原始思维链去掉代码围栏/行内代码/命令/路径等"代码感"内容，压平空白，
+//   读起来像一段自然语言叙述；
+// - toolActionLabel / thinkingSummary：工具调用 → 自然语言动作行 / 收起摘要。
 
 import type { ThinkingItem } from "./chat-events";
+
+const CLOSED_FENCE = /```[\s\S]*?```/g;
+// 流式中围栏可能还没闭合：从最后一个未闭合的 ``` 起全部当作代码去掉。
+const OPEN_FENCE = /```[\s\S]*$/;
+const INLINE_CODE = /`([^`\n]+)`/g;
+const HEADING_PREFIX = /^[ \t]{0,3}#{1,6}[ \t]+/gm;
+const UNORDERED_BULLET = /^[ \t]*[-*+][ \t]+/gm;
+
+// 命令调用整段（python3 scripts/main.py / bash foo.sh ...）→ 自然语言。
+const COMMAND_CALL = /\b(?:python3?|node|bash|sh|zsh|npm|pnpm|uv)\s+[\w./~-]+/gi;
+// 残余的脚本/文件路径（scripts/main.py 等）。
+const SCRIPT_PATH = /[\w./~-]+\.(?:py|js|mjs|cjs|sh|ts|tsx)\b/gi;
+// 工具/函数名 → 自然语言；finish 直接删（避免“然后 finish 给出…”这类冗余）。
+const CODE_TERMS: [RegExp, string][] = [
+  [/\brun_skill_script\b/gi, "运行技能脚本"],
+  [/\bread_skill\b/gi, "读取技能"],
+  [/\bweb_search\b/gi, "网页搜索"],
+  [/\bweb_extractor\b/gi, "抓取网页"],
+  [/\bdispatch_subagent\b/gi, "派发子任务"],
+  [/\bask_peer_agent\b/gi, "询问协作 Agent"],
+  [/\bfinish\b/gi, ""],
+  [/\bbash\b/gi, "命令行"],
+  [/\bpython3?\b/gi, "脚本"],
+  [/\bskills?\b/gi, "技能"],
+];
+
+// 去掉思维链里的代码级信息：命令调用、脚本路径、工具/函数名，换成自然语言。
+function stripCodeInfo(text: string): string {
+  let out = text.replace(COMMAND_CALL, "运行命令").replace(SCRIPT_PATH, "脚本");
+  for (const [pattern, replacement] of CODE_TERMS) out = out.replace(pattern, replacement);
+  return out.replace(/[ \t]{2,}/g, " ");
+}
+
+export function humanizeReasoning(raw: string): string {
+  if (!raw) return "";
+  const text = stripCodeInfo(
+    raw
+      .replace(CLOSED_FENCE, "")
+      .replace(OPEN_FENCE, "")
+      .replace(INLINE_CODE, "$1")
+      .replace(HEADING_PREFIX, "")
+      .replace(UNORDERED_BULLET, "• "),
+  )
+    .split("\n")
+    .map((line) => line.replace(/[ \t]+$/, ""))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return text;
+}
 
 const TOOL_LABELS: Record<string, string> = {
   bash: "运行技能脚本",
@@ -23,10 +75,10 @@ export function toolActionLabel(name: string): string {
 // 面板完成后收起成的一行摘要（对齐豆包"已深度思考 / 已搜索 N 个网页"）。
 export function thinkingSummary(items: ThinkingItem[]): string {
   const tools = items.filter((m): m is Extract<ThinkingItem, { kind: "tool" }> => m.kind === "tool");
-  if (tools.length === 0) return "思考过程";
   const web = tools.filter((tool) => tool.name === "web_search" || tool.name === "web_extractor").length;
   if (web > 0) return `已联网搜索 · ${web} 步`;
-  return `已执行 · ${tools.length} 步`;
+  if (tools.length > 0) return `已执行 · ${tools.length} 步`;
+  return "已深度思考";
 }
 
 // 审批卡片用：动作名 + 一句人类可读的参数摘要（审批场景需要知道具体在批准什么，故保留参数）。
