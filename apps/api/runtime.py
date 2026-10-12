@@ -150,6 +150,7 @@ class ChatRuntime:
         run_ttl_seconds: float = 300.0,
         memory_enabled: bool = False,
         budget_tokens: int | None = None,
+        bash_requires_approval: bool = False,
     ) -> None:
         self._store = store
         self._model_client = model_client  # None → 首次需要时按 env 构造
@@ -180,6 +181,8 @@ class ChatRuntime:
         self._memory_enabled = memory_enabled
         # 每轮 token 预算：超过即中止该轮（默认无限制）。
         self._budget_tokens = budget_tokens
+        # bash 技能工具是否需要人工审批（默认否：技能是用户自己装的，直接执行）。
+        self._bash_requires_approval = bash_requires_approval
         self._skill_tools: list[Any] = []
         self._skills_suffix: str | None = None
         self._added_skills: list = []
@@ -240,7 +243,10 @@ class ChatRuntime:
         self._added_skills = added_skills
         self._skills_suffix = format_skills_for_system_prompt(added_skills) or None
         self._skills_reachable = bool(skills)
-        self._skill_tools = [ReadTool([self._skills_root]), BashTool([self._skills_root])]
+        self._skill_tools = [
+            ReadTool([self._skills_root]),
+            BashTool([self._skills_root], requires_approval=self._bash_requires_approval),
+        ]
 
     async def _ensure_mcp_tools(self) -> None:
         # 和 _ensure_skills 同样的取舍：不做"只算一次"的永久缓存，每次新建 agent 时都重新

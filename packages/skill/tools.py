@@ -4,7 +4,8 @@
 - bash：在技能目录里执行命令（跑技能自带脚本），需要人工审批，输出视为不可信。
 
 两者都把可访问路径限制在一组允许的根目录（技能根）内，防止越界读取/执行。bash 无法在
-进程层真正沙箱化（后续专门重做），所以额外用 requires_approval 把每次执行交给人工确认。
+进程层真正沙箱化（后续专门重做），并且已经在技能目录内、输出视为不可信；是否要人工审批由
+requires_approval 决定（默认关闭——技能是用户自己安装的，直接执行；需要时可设为 True）。
 """
 import asyncio
 from collections.abc import Sequence
@@ -87,9 +88,15 @@ class ReadTool(Tool):
 
 
 class BashTool(Tool):
-    """在技能目录里执行 shell 命令（跑技能自带脚本）。需要人工审批。"""
+    """在技能目录里执行 shell 命令（跑技能自带脚本）。默认无需人工审批。"""
 
-    def __init__(self, roots: Sequence[Path], *, timeout_seconds: float = DEFAULT_BASH_TIMEOUT_SECONDS) -> None:
+    def __init__(
+        self,
+        roots: Sequence[Path],
+        *,
+        timeout_seconds: float = DEFAULT_BASH_TIMEOUT_SECONDS,
+        requires_approval: bool = False,
+    ) -> None:
         super().__init__(
             name="bash",
             description=(
@@ -97,7 +104,7 @@ class BashTool(Tool):
                 "bundled scripts: the working directory must be (inside) a skill directory, and script "
                 "paths are relative to it, as documented in the skill's SKILL.md."
             ),
-            requires_approval=True,
+            requires_approval=requires_approval,
             untrusted_output=True,
         )
         self._paths = SkillPaths(roots)

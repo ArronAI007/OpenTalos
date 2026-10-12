@@ -67,10 +67,9 @@ async def test_bash_runs_a_script_in_the_skill_directory(skills_root: Path) -> N
     assert "2026-09-22" in outcome.output
 
 
-async def test_bash_requires_human_approval() -> None:
-    tool = BashTool([Path("/tmp")])
-
-    assert tool.requires_approval is True
+async def test_bash_approval_is_opt_in() -> None:
+    assert BashTool([Path("/tmp")]).requires_approval is False
+    assert BashTool([Path("/tmp")], requires_approval=True).requires_approval is True
 
 
 async def test_bash_rejects_cwd_outside_the_skill_roots(skills_root: Path) -> None:
