@@ -19,7 +19,7 @@ from core.agent import Agent
 from core.cancellation import CancellationToken
 from core.model import ModelClient
 from core.protocol import ChatMessage, ToolInvocation
-from memory import build_extraction_messages, parse_extraction, rank_memories
+from memory import build_extraction_messages, parse_extraction
 from observability import metrics
 from skill.discovery import discover_skills
 from skill.my_skills import load_my_skills
@@ -439,8 +439,10 @@ class ChatRuntime:
     async def _recall_memories(self, query: str) -> list[str]:
         if not self._memory_enabled:
             return []
-        rows = await asyncio.to_thread(self._store.list_memories)
-        return rank_memories(query, [row["content"] for row in rows])
+        try:
+            return await self._store.long_term.recall(query)
+        except Exception:  # noqa: BLE001 - 召回失败不影响对话主流程（embedding 调用可能因为网络/配置问题失败）
+            return []
 
     async def _extract_and_remember(self, user_text: str, assistant_text: str) -> None:
         # 记忆是锦上添花：任何失败静默吞掉，不影响对话主流程。
@@ -448,7 +450,7 @@ class ChatRuntime:
             completion = await self._client().acomplete(build_extraction_messages(user_text, assistant_text))
             content = parse_extraction(completion.text)
             if content:
-                await asyncio.to_thread(self._store.remember_memory, content)
+                await self._store.long_term.remember(content)
         except Exception:  # noqa: BLE001 - 提取失败不影响本轮
             pass
 
