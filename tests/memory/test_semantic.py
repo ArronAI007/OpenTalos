@@ -167,6 +167,29 @@ def test_delete_memory_missing_returns_false(tmp_path: Path) -> None:
     assert store.delete_memory(999999) is False
 
 
+async def test_migrates_a_legacy_table_missing_both_embedding_and_importance(tmp_path: Path) -> None:
+    """真机验证时发现的真实 bug：子项目二只建了新表（含 embedding 列），从没给已存在、
+    早于 embedding 列就建好的旧表补过这一列的迁移——.data/chat.db 就撞上了这个缺口。"""
+    db_path = tmp_path / "memory.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "CREATE TABLE memories (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "content TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"
+        )
+        conn.execute(
+            "INSERT INTO memories (content, created_at, updated_at) VALUES (?, ?, ?)",
+            ("旧记忆", "2020-01-01T00:00:00", "2020-01-01T00:00:00"),
+        )
+
+    embedder = _make_embedder({"旧记忆": [1.0, 0.0], "新记忆": [1.0, 0.0]})
+    store = SemanticMemory(db_path, embedder)
+    await store.remember("新记忆", importance=0.7)
+
+    memories = {m["content"]: m for m in store.list_memories()}
+    assert memories["旧记忆"]["importance"] == 0.5  # 迁移补的默认值
+    assert memories["新记忆"]["importance"] == 0.7
+
+
 async def test_find_similar_groups_clusters_by_cosine_similarity(tmp_path: Path) -> None:
     embedder = _make_embedder(
         {"记忆A": [1.0, 0.0], "记忆B": [0.99, 0.01], "不相关": [0.0, 1.0]}

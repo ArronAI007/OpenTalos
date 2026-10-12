@@ -47,6 +47,8 @@ class SemanticMemory:
     @staticmethod
     def _migrate(conn: sqlite3.Connection) -> None:
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(memories)")}
+        if "embedding" not in columns:
+            conn.execute("ALTER TABLE memories ADD COLUMN embedding TEXT")
         if "importance" not in columns:
             conn.execute("ALTER TABLE memories ADD COLUMN importance REAL NOT NULL DEFAULT 0.5")
 
