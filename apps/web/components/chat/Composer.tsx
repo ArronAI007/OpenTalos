@@ -98,7 +98,7 @@ export function Composer({
           className="max-h-40 flex-1 resize-none overflow-y-auto bg-transparent text-base leading-6 outline-none disabled:opacity-50"
           aria-label="输入消息"
         />
-        {disabled && onStop && (
+        {steering && !value.trim() ? (
           <button
             type="button"
             onClick={onStop}
@@ -107,15 +107,16 @@ export function Composer({
           >
             ■
           </button>
+        ) : (
+          <button
+            type="submit"
+            disabled={!value.trim() || (disabled && !steering)}
+            aria-label={steering ? "发送纠偏" : "发送"}
+            className="rounded-full bg-user-bubble px-3 py-1.5 text-sm text-white disabled:opacity-30"
+          >
+            ➤
+          </button>
         )}
-        <button
-          type="submit"
-          disabled={!value.trim() || (disabled && !steering)}
-          aria-label={steering ? "发送纠偏" : "发送"}
-          className="rounded-full bg-user-bubble px-3 py-1.5 text-sm text-white disabled:opacity-30"
-        >
-          ➤
-        </button>
       </div>
     </form>
   );

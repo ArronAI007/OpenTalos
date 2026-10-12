@@ -34,6 +34,20 @@ describe("Composer", () => {
     expect(onStop).toHaveBeenCalledTimes(1);
   });
 
+  it("shows a single button while busy: stop when empty, send once text is typed", async () => {
+    render(<Composer onSend={() => {}} disabled onStop={() => {}} />);
+    const user = userEvent.setup();
+
+    // 空输入时只有一个"停止生成"按钮，没有重复的发送按钮。
+    expect(screen.getByRole("button", { name: "停止生成" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "发送纠偏" })).not.toBeInTheDocument();
+
+    // 一旦输入内容，按钮切换成"发送纠偏"，停止按钮消失（同一个按钮槽位，不是两个按钮并存）。
+    await user.type(screen.getByLabelText("输入消息"), "改用中文");
+    expect(screen.getByRole("button", { name: "发送纠偏" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "停止生成" })).not.toBeInTheDocument();
+  });
+
   it("stays disabled while busy without an onStop (e.g. creating a task)", () => {
     render(<Composer onSend={() => {}} disabled />);
     expect(screen.getByLabelText("输入消息")).toBeDisabled();
