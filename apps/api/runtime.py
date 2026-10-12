@@ -200,6 +200,10 @@ class ChatRuntime:
         return self._store
 
     @property
+    def trace_dir(self) -> Path | None:
+        return self._trace_dir
+
+    @property
     def search_client(self) -> TavilyClient | None:
         return self._search_client
 

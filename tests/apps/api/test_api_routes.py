@@ -853,3 +853,61 @@ async def test_consolidate_returns_zero_when_nothing_to_merge(api) -> None:
     resp = await api.post("/api/memories/consolidate", json={})
     assert resp.status_code == 200
     assert resp.json() == {"merged": 0}
+
+
+async def test_list_runs_returns_empty_when_no_traces_exist(api) -> None:
+    resp = await api.get("/api/runs")
+    assert resp.status_code == 200
+    assert resp.json() == {"runs": []}
+
+
+async def test_list_runs_returns_parsed_summaries(tmp_path, api) -> None:
+    traces_dir = tmp_path / "traces"
+    traces_dir.mkdir(parents=True, exist_ok=True)
+    (traces_dir / "run-20260101-120000-aaaa.jsonl").write_text(
+        json.dumps({"ts": "2026-01-01T12:00:00", "event": "session_start", "step": None,
+                    "payload": {"agent_name": "bot", "agent_type": "ReActAgent"}}) + "\n"
+        + json.dumps({"ts": "2026-01-01T12:00:01", "event": "session_end", "step": None,
+                      "payload": {"status": "completed"}}) + "\n",
+        encoding="utf-8",
+    )
+
+    resp = await api.get("/api/runs")
+
+    assert resp.status_code == 200
+    runs = resp.json()["runs"]
+    assert len(runs) == 1
+    assert runs[0]["agent_name"] == "bot"
+    assert runs[0]["status"] == "completed"
+    assert runs[0]["task_title"] is None
+
+
+async def test_list_runs_resolves_task_title_when_task_exists(tmp_path, api) -> None:
+    task = (await api.post("/api/tasks", json={"agent_type": "react"})).json()
+    await api.patch(f"/api/tasks/{task['id']}", json={"title": "整理会议纪要"})
+    traces_dir = tmp_path / "traces"
+    traces_dir.mkdir(parents=True, exist_ok=True)
+    (traces_dir / "run-20260101-120000-bbbb.jsonl").write_text(
+        json.dumps({"ts": "2026-01-01T12:00:00", "event": "session_start", "step": None,
+                    "payload": {"agent_name": "bot", "task_id": task["id"]}}) + "\n",
+        encoding="utf-8",
+    )
+
+    resp = await api.get("/api/runs")
+
+    runs = resp.json()["runs"]
+    assert runs[0]["task_title"] == "整理会议纪要"
+
+
+async def test_list_runs_task_title_is_none_when_task_was_deleted(tmp_path, api) -> None:
+    traces_dir = tmp_path / "traces"
+    traces_dir.mkdir(parents=True, exist_ok=True)
+    (traces_dir / "run-20260101-120000-cccc.jsonl").write_text(
+        json.dumps({"ts": "2026-01-01T12:00:00", "event": "session_start", "step": None,
+                    "payload": {"agent_name": "bot", "task_id": "no-such-task"}}) + "\n",
+        encoding="utf-8",
+    )
+
+    resp = await api.get("/api/runs")
+
+    assert resp.json()["runs"][0]["task_title"] is None

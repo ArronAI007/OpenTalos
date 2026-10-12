@@ -30,6 +30,7 @@ from evaluation import (  # noqa: E402
 )
 from runtime import ChatRuntime  # noqa: E402
 from observability import configure_logging, metrics  # noqa: E402
+from observability.run_index import list_run_summaries  # noqa: E402
 from skill.discovery import discover_skills, list_skill_files  # noqa: E402
 from skill.frontmatter import extract_frontmatter_text, parse_frontmatter  # noqa: E402
 from skill.github_import import (  # noqa: E402
@@ -670,6 +671,18 @@ def create_app(runtime: ChatRuntime | None = None, eval_cases_path: Path | None 
     async def consolidate_memories_route(request: ConsolidateMemoriesBody) -> dict:
         merged = await runtime.consolidate_memories(request.similarity_threshold)
         return {"merged": merged}
+
+    @app.get("/api/runs")
+    async def list_runs_route(limit: int = Query(50, ge=1, le=200)) -> dict:
+        runs = list_run_summaries(runtime.trace_dir, limit=limit) if runtime.trace_dir else []
+        enriched = []
+        for run in runs:
+            task_title = None
+            if run["task_id"]:
+                task = store.get_task(run["task_id"])
+                task_title = task["title"] if task else None
+            enriched.append({**run, "task_title": task_title})
+        return {"runs": enriched}
 
     return app
 
