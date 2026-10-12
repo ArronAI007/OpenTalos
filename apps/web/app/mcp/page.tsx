@@ -25,6 +25,61 @@ export function parseEnvLines(text: string): Record<string, string> | undefined 
   return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 
+interface CommonMCPServer {
+  name: string;
+  description: string;
+  command: string;
+  args: string[];
+  envKeys?: string[];
+}
+
+const COMMON_MCP_SERVERS: CommonMCPServer[] = [
+  {
+    name: "filesystem",
+    description: "读写本地文件系统（需要指定一个允许访问的目录）",
+    command: "npx",
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/directory"],
+  },
+  {
+    name: "memory",
+    description: "基于知识图谱的持久化记忆",
+    command: "npx",
+    args: ["-y", "@modelcontextprotocol/server-memory"],
+  },
+  {
+    name: "sequential-thinking",
+    description: "结构化的分步思考辅助",
+    command: "npx",
+    args: ["-y", "@modelcontextprotocol/server-sequential-thinking"],
+  },
+  {
+    name: "everything",
+    description: "官方演示/测试 server，覆盖 MCP 全部能力",
+    command: "npx",
+    args: ["-y", "@modelcontextprotocol/server-everything"],
+  },
+  {
+    name: "fetch",
+    description: "抓取网页内容并转成 Markdown",
+    command: "uvx",
+    args: ["mcp-server-fetch"],
+  },
+  {
+    name: "github",
+    description: "GitHub 仓库/Issue/PR 操作",
+    command: "npx",
+    args: ["-y", "@modelcontextprotocol/server-github"],
+    envKeys: ["GITHUB_PERSONAL_ACCESS_TOKEN"],
+  },
+  {
+    name: "brave-search",
+    description: "Brave 搜索引擎",
+    command: "npx",
+    args: ["-y", "@modelcontextprotocol/server-brave-search"],
+    envKeys: ["BRAVE_API_KEY"],
+  },
+];
+
 function ConfirmDeleteServerDialog({
   open,
   onCancel,
@@ -111,6 +166,15 @@ export default function MCPPage() {
     }
   };
 
+  const handlePickCommon = (preset: CommonMCPServer) => {
+    setError(null);
+    setName(preset.name);
+    setTransport("stdio");
+    setCommand(preset.command);
+    setArgs(preset.args.join(" "));
+    setEnv(preset.envKeys ? preset.envKeys.map((key) => `${key}=`).join("\n") : "");
+  };
+
   const handleToggle = async (server: MCPServer) => {
     const updated = await setMCPServerEnabled(server.id, !server.enabled);
     setServers((prev) => prev?.map((s) => (s.id === server.id ? updated : s)) ?? null);
@@ -134,6 +198,23 @@ export default function MCPPage() {
       <p className="mb-4 text-sm text-text-secondary">
         连接外部 MCP（Model Context Protocol）server，把它暴露的工具接入 agent 的工具集。
       </p>
+
+      <div className="mb-6 rounded-xl border border-border bg-surface p-4">
+        <h2 className="mb-3 text-sm font-medium">常用 MCP</h2>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {COMMON_MCP_SERVERS.map((preset) => (
+            <button
+              key={preset.name}
+              type="button"
+              onClick={() => handlePickCommon(preset)}
+              className="rounded-lg border border-border p-3 text-left text-sm hover:bg-sidebar"
+            >
+              <div className="font-medium">{preset.name}</div>
+              <div className="mt-0.5 text-xs text-text-secondary">{preset.description}</div>
+            </button>
+          ))}
+        </div>
+      </div>
 
       <div className="mb-6 rounded-xl border border-border bg-surface p-4">
         <h2 className="mb-3 text-sm font-medium">添加 MCP Server</h2>
