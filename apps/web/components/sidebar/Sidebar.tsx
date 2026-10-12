@@ -7,6 +7,7 @@ import { SidebarHeader } from "./SidebarHeader";
 import { SearchModal } from "@/components/search/SearchModal";
 import {
   BeakerIcon,
+  BrainIcon,
   ChartBarIcon,
   PlugIcon,
   PuzzleIcon,
@@ -95,6 +96,10 @@ export function Sidebar({ collapsed, mobileOpen, onToggleCollapse, onCloseMobile
         <Link href="/mcp" onClick={onCloseMobile} className={navLinkCls}>
           <PlugIcon />
           MCP
+        </Link>
+        <Link href="/memory" onClick={onCloseMobile} className={navLinkCls}>
+          <BrainIcon />
+          记忆
         </Link>
         <hr className="my-3 border-border" />
         <TaskList />
