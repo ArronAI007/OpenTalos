@@ -9,6 +9,7 @@ import pytest
 from core.protocol import Completion, ToolCompletion, ToolInvocation
 from core.model import ModelClient
 from db import ChatStore
+from memory import EmbeddingClient
 from runtime import ChatRuntime
 from tool.outcome import FailureCode, ToolOutcome
 from tool.registry import ToolRegistry
@@ -1060,9 +1061,16 @@ async def test_done_event_carries_turn_usage_and_cost(store, scripted_client, tm
     assert done["usage"]["cost"] == pytest.approx(15 / 1_000_000)
 
 
-async def test_recall_injects_relevant_memories_into_the_prompt(store, scripted_client, tmp_path) -> None:
-    store.remember_memory("用户在做一个数据看板项目")
-    store.remember_memory("用户喜欢用中文")
+async def test_recall_injects_relevant_memories_into_the_prompt(scripted_client, tmp_path) -> None:
+    embedder = EmbeddingClient()
+
+    async def fake_embed(text: str) -> list[float]:
+        return [1.0, 0.0] if "数据看板项目" in text else [0.0, 1.0]
+
+    embedder.embed = fake_embed  # type: ignore[method-assign]
+    store = ChatStore(tmp_path / "chat.db", embedder=embedder)
+    await store.long_term.remember("用户在做一个数据看板项目")
+    await store.long_term.remember("用户喜欢用中文")
     seen: list[list[dict]] = []
     client = scripted_client(tool_completions=[])
 
@@ -1083,7 +1091,14 @@ async def test_recall_injects_relevant_memories_into_the_prompt(store, scripted_
     assert any(m["role"] == "system" and "数据看板项目" in m["content"] for m in seen[-1])
 
 
-async def test_completed_turn_extracts_and_saves_a_memory(store, scripted_client, tmp_path) -> None:
+async def test_completed_turn_extracts_and_saves_a_memory(scripted_client, tmp_path) -> None:
+    embedder = EmbeddingClient()
+
+    async def fake_embed(text: str) -> list[float]:
+        return [1.0]
+
+    embedder.embed = fake_embed  # type: ignore[method-assign]
+    store = ChatStore(tmp_path / "chat.db", embedder=embedder)
     client = scripted_client(tool_completions=[ToolCompletion(text="你好张三", requested_tools=[], model_id="mock-model")])
 
     async def routed_acomplete(messages, **kwargs):
@@ -1098,7 +1113,7 @@ async def test_completed_turn_extracts_and_saves_a_memory(store, scripted_client
 
     await _collect(runtime, task["id"], "我叫张三")
 
-    assert [m["content"] for m in store.list_memories()] == ["用户叫张三"]
+    assert [m["content"] for m in store.long_term.list_memories()] == ["用户叫张三"]
 
 
 def test_steer_without_active_run_returns_false(store) -> None:
