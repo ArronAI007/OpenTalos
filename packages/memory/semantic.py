@@ -16,7 +16,8 @@ CREATE TABLE IF NOT EXISTS memories (
   content TEXT NOT NULL UNIQUE,  -- 一条跨会话的稳定用户信息；同内容去重
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  embedding TEXT                 -- JSON 序列化的 float 数组；升级前的旧行为 NULL，recall 时懒补齐
+  embedding TEXT,                 -- JSON 序列化的 float 数组；升级前的旧行为 NULL，recall 时懒补齐
+  importance REAL NOT NULL DEFAULT 0.5  -- 0.0-1.0，模型提取时顺带打分；旧行迁移后统一是默认值 0.5
 );
 """
 
@@ -41,28 +42,36 @@ class SemanticMemory:
         self._embedder = embedder
         with self._connect() as conn:
             conn.executescript(_SCHEMA)
+            self._migrate(conn)
+
+    @staticmethod
+    def _migrate(conn: sqlite3.Connection) -> None:
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(memories)")}
+        if "importance" not in columns:
+            conn.execute("ALTER TABLE memories ADD COLUMN importance REAL NOT NULL DEFAULT 0.5")
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._path)
         conn.row_factory = sqlite3.Row
         return conn
 
-    def _insert_or_touch(self, content: str, embedding: list[float]) -> dict:
+    def _insert_or_touch(self, content: str, embedding: list[float], importance: float) -> dict:
         now = _now()
         embedding_json = json.dumps(embedding)
         with self._connect() as conn:
             conn.execute(
-                "INSERT INTO memories (content, created_at, updated_at, embedding) VALUES (?, ?, ?, ?) "
-                "ON CONFLICT(content) DO UPDATE SET updated_at = excluded.updated_at, embedding = excluded.embedding",
-                (content, now, now, embedding_json),
+                "INSERT INTO memories (content, created_at, updated_at, embedding, importance) VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(content) DO UPDATE SET "
+                "updated_at = excluded.updated_at, embedding = excluded.embedding, importance = excluded.importance",
+                (content, now, now, embedding_json, importance),
             )
             row = conn.execute("SELECT * FROM memories WHERE content = ?", (content,)).fetchone()
         return dict(row)
 
-    async def remember(self, content: str) -> dict:
-        # 同内容 upsert：重复提取不叠加，只刷新 updated_at（和旧的 remember_memory 行为一致）。
+    async def remember(self, content: str, importance: float = 0.5) -> dict:
+        # 同内容 upsert：重复提取不叠加，只刷新 updated_at/importance（和旧的 remember_memory 行为一致）。
         embedding = await self._embedder.embed(content)
-        return await asyncio.to_thread(self._insert_or_touch, content, embedding)
+        return await asyncio.to_thread(self._insert_or_touch, content, embedding, importance)
 
     def list_memories(self) -> list[dict]:
         # 新在前：召回同分时优先保留更新的记忆。纯同步——不涉及 embedding 调用，供 recall()
@@ -70,6 +79,34 @@ class SemanticMemory:
         with self._connect() as conn:
             rows = conn.execute("SELECT * FROM memories ORDER BY updated_at DESC, id DESC").fetchall()
         return [dict(row) for row in rows]
+
+    def forget(
+        self, strategy: str, *, threshold: float = 0.3, max_age_days: int = 30, max_count: int = 1000
+    ) -> int:
+        """按策略删除记忆，返回被删除的条数。"""
+        with self._connect() as conn:
+            if strategy == "importance_based":
+                cursor = conn.execute("DELETE FROM memories WHERE importance < ?", (threshold,))
+            elif strategy == "time_based":
+                cutoff = (
+                    datetime.datetime.now() - datetime.timedelta(days=max_age_days)
+                ).strftime("%Y-%m-%dT%H:%M:%S.%f")
+                cursor = conn.execute("DELETE FROM memories WHERE updated_at < ?", (cutoff,))
+            elif strategy == "capacity_based":
+                cursor = conn.execute(
+                    "DELETE FROM memories WHERE id NOT IN ("
+                    "  SELECT id FROM memories ORDER BY importance DESC, updated_at DESC LIMIT ?"
+                    ")",
+                    (max_count,),
+                )
+            else:
+                raise ValueError(f"unknown forget strategy: {strategy}")
+            return cursor.rowcount
+
+    def delete_memory(self, memory_id: int) -> bool:
+        with self._connect() as conn:
+            cursor = conn.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
+            return cursor.rowcount > 0
 
     def _save_embedding(self, memory_id: int, embedding: list[float]) -> None:
         with self._connect() as conn:
