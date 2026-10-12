@@ -1069,8 +1069,8 @@ async def test_recall_injects_relevant_memories_into_the_prompt(scripted_client,
 
     embedder.embed = fake_embed  # type: ignore[method-assign]
     store = ChatStore(tmp_path / "chat.db", embedder=embedder)
-    await store.long_term.remember("用户在做一个数据看板项目")
-    await store.long_term.remember("用户喜欢用中文")
+    await store.semantic.remember("用户在做一个数据看板项目")
+    await store.semantic.remember("用户喜欢用中文")
     seen: list[list[dict]] = []
     client = scripted_client(tool_completions=[])
 
@@ -1113,7 +1113,7 @@ async def test_completed_turn_extracts_and_saves_a_memory(scripted_client, tmp_p
 
     await _collect(runtime, task["id"], "我叫张三")
 
-    assert [m["content"] for m in store.long_term.list_memories()] == ["用户叫张三"]
+    assert [m["content"] for m in store.semantic.list_memories()] == ["用户叫张三"]
 
 
 def test_steer_without_active_run_returns_false(store) -> None:

@@ -440,7 +440,7 @@ class ChatRuntime:
         if not self._memory_enabled:
             return []
         try:
-            return await self._store.long_term.recall(query)
+            return await self._store.semantic.recall(query)
         except Exception:  # noqa: BLE001 - 召回失败不影响对话主流程（embedding 调用可能因为网络/配置问题失败）
             return []
 
@@ -450,7 +450,7 @@ class ChatRuntime:
             completion = await self._client().acomplete(build_extraction_messages(user_text, assistant_text))
             content = parse_extraction(completion.text)
             if content:
-                await self._store.long_term.remember(content)
+                await self._store.semantic.remember(content)
         except Exception:  # noqa: BLE001 - 提取失败不影响本轮
             pass
 

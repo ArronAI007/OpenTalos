@@ -34,7 +34,7 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
     return dot / (norm_a * norm_b)
 
 
-class LongTermMemory:
+class SemanticMemory:
     def __init__(self, path: Path, embedder: EmbeddingClient) -> None:
         self._path = Path(path)
         self._path.parent.mkdir(parents=True, exist_ok=True)

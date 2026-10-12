@@ -1,4 +1,4 @@
-"""长期记忆的 embedding 客户端：把文本转成向量，供 LongTermMemory 做语义检索。
+"""语义记忆的 embedding 客户端：把文本转成向量，供 SemanticMemory 做语义检索。
 
 复用 openai SDK（和 core/model.py 的 OpenAICompatibleBackend 同构，只是调 embeddings 而非
 chat completions）。构造时**不**校验配置是否齐全——ChatStore 任何时候都会无条件构造一个

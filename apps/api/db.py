@@ -1,5 +1,5 @@
 """SQLite 会话仓储（任务/Agent/项目/评估/DeepResearch/MCP server）。消息（情景记忆）和跨会话
-记忆（长期记忆）的真实存储已经搬到 packages/memory，这里只持有它们的实例。同步实现——FastAPI
+记忆（语义记忆）的真实存储已经搬到 packages/memory，这里只持有它们的实例。同步实现——FastAPI
 的 def/async 端点内用 asyncio.to_thread 或直接调用（操作均为毫秒级）；不引第三方 ORM。"""
 import datetime
 import json
@@ -7,7 +7,7 @@ import sqlite3
 import uuid
 from pathlib import Path
 
-from memory import EmbeddingClient, EpisodicMemory, LongTermMemory
+from memory import EmbeddingClient, EpisodicMemory, SemanticMemory
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS tasks (
@@ -75,7 +75,7 @@ class ChatStore:
             conn.executescript(_SCHEMA)
             self._migrate(conn)
         self.episodic = EpisodicMemory(self._path)
-        self.long_term = LongTermMemory(self._path, embedder or EmbeddingClient())
+        self.semantic = SemanticMemory(self._path, embedder or EmbeddingClient())
 
     # 轻量迁移清单：CREATE TABLE IF NOT EXISTS 不会改造既有表，旧库缺列时逐条 ALTER 补上。
     # 仅列级变更需要登记在此；新表（如 projects）由 _SCHEMA 的 CREATE TABLE IF NOT EXISTS
