@@ -129,51 +129,48 @@ constructed and injected into `core.Agent` — so unlike `core` itself, it does 
 |---|---|
 | `packages/agents` | `ReActAgent` (step-budgeted reason+act loop with an explicit `finish` tool) and `build_agent`, which constructs it and can append extra text (skills list, a custom agent's persona) to its system prompt. |
 
-### Request-to-Response Flow
-
-One chat turn, from the frontend's POST to the SSE events it streams back:
+### System Diagram
 
 ```mermaid
-flowchart TD
-    A["POST /api/tasks/{id}/messages"] --> B["ChatRuntime.stream_reply()"]
-    B --> C["persist user message"]
-    C --> D["_get_agent(): fetch/build ReActAgent\n(packages/agents/builder.py injects\nWorkingMemory/ToolRegistry/RunRecorder/metrics/TokenBudget)"]
-    D --> E["Agent.arespond_with_callbacks()"]
-    E --> F["begin_trace(): new RunRecorder, log session_start"]
-    F --> G["ReActAgent.arespond()"]
-    G --> H["build_messages(): system prompt + history + input"]
-    H --> I["record user message to history"]
-    I --> J["assemble tool schemas: finish + registered tools"]
-    J --> K["for step in 1..max_steps"]
-    K --> L["execute_model_step()"]
-    L --> M{"steer queue has\npending messages?"}
-    M -->|yes| N["drain + inject as user messages,\nclear interrupt flag"]
-    M -->|no| O["call the model\n(acomplete_with_tools / astream_with_tools)"]
-    N --> O
-    O --> P["record usage/cost/metrics,\nlog model_output trace event"]
-    P --> Q{"tool calls\nrequested?"}
-    Q -->|no, plain text| R["this step's text is the answer"]
-    Q -->|yes| S["append assistant tool_calls message"]
-    S --> T["resolve_tool_call() concurrently per call"]
-    T --> U["approval gate\n(fail-closed if required & no channel)"]
-    U --> V["tool_registry.acall(): real execution"]
-    V --> W["trim oversized output /\nwrap untrusted output"]
-    W --> X["append result as a tool message"]
-    X --> Y{"was it the\nfinish tool?"}
-    Y -->|yes| R
-    Y -->|no| K
-    R --> Z["record final answer to history"]
-    Z --> AA["end_trace(): log session_end,\nwrite HTML stats footer"]
-    AA --> AB["persist assistant reply + usage"]
-    AB --> AC["flush remaining SSE events"]
-    AC --> AD["frontend renders streamed text /\ntool-call bubbles"]
+flowchart TB
+    subgraph Leaves["leaf packages (no deps on each other)"]
+        TOOL[tool]
+        CTX[context]
+        OBS[observability]
+        MEM[memory]
+    end
+
+    CORE["core\n(zero packages/* deps — only the LLM call)"]
+    AGENTS[agents]
+    SKILL[skill]
+    API["apps/api :8400"]
+    WEB["apps/web :3010"]
+    AGENTRL["agentrl :8420"]
+    A2A["a2apeer :8430"]
+
+    TOOL --> AGENTS
+    CTX --> AGENTS
+    OBS --> AGENTS
+    MEM --> AGENTS
+    CORE --> AGENTS
+    TOOL --> SKILL
+    CTX --> SKILL
+
+    AGENTS --> API
+    SKILL --> API
+    API --> WEB
+
+    AGENTRL -. "no import relationship, called over HTTP" .-> WEB
+    A2A -. "no import relationship, called over HTTP" .-> API
 ```
 
-A few things run alongside this straight-line path rather than inside it: **steering** can
-interrupt an in-flight model call mid-step with a correction message (the diamond above); long
-conversations get **compressed** into a summary turn once the token budget is exceeded, after the
-turn finishes; and every event along the way is written to that turn's trace file, viewable later
-at `/runs`.
+`core` sits next to the leaves, not above them — it depends on none of them. `agents` is where
+everything actually gets wired together: it constructs the real `WorkingMemory`/`ToolRegistry`/
+`RunRecorder`/`metrics`/`TokenBudget`/`OutputTrimmer` instances and injects them into `core.Agent`
+via the `typing.Protocol`s it declares (`HistoryStore`, `ToolExecutor`, `TraceRecorder`,
+`MetricsSink`, `TokenEstimator`, `OutputTrimmerLike`, `SteerQueue`) — no inheritance required,
+just a matching shape. `agentrl` and `a2apeer` are solid boxes with dotted arrows: real services
+with their own process/port, reached over HTTP rather than imported.
 
 And `apps/` is what you actually run:
 
