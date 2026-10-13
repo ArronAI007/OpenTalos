@@ -185,11 +185,11 @@ description: "Task list for feature implementation"
 
 > **先写这些测试，并确认它们按预期失败，再开始下面的 Implementation**
 
-- [ ] T016 [P] [US2] 创建 `tests/test_check_core_boundary.py`：第一个测试用例调用
+- [X] T016 [P] [US2] 创建 `tests/test_check_core_boundary.py`：第一个测试用例调用
       `check_core_boundary.find_boundary_violations(Path("packages/core"))`，断言返回类型是
       `list[Violation]` 且（在 User Story 1 已完成的前提下）结果为空列表。预期：报
       `ModuleNotFoundError`，测试失败。
-- [ ] T017 [P] [US2] 在同一个测试文件里新增第二个用例：用 `tmp_path` 构造一个临时的假
+- [X] T017 [P] [US2] 在同一个测试文件里新增第二个用例：用 `tmp_path` 构造一个临时的假
       "`packages/core`" 目录，其中一个 `.py` 文件里写一行 `from tool.registry import
       ToolRegistry`，断言 `find_boundary_violations` 返回恰好一个 `Violation`，且其 `file`/
       `line`/`imported_package` 字段分别对应那个临时文件路径、对应行号、`"tool"`。预期：同样因为
@@ -197,7 +197,7 @@ description: "Task list for feature implementation"
 
 ### Implementation for User Story 2
 
-- [ ] T018 [US2] 创建 `scripts/check_core_boundary.py`：定义 `Violation`（`file: Path`,
+- [X] T018 [US2] 创建 `scripts/check_core_boundary.py`：定义 `Violation`（`file: Path`,
       `line: int`, `imported_package: str`）和 `find_boundary_violations(package_dir: Path) ->
       list[Violation]`——用标准库 `ast` 解析 `package_dir` 下每个 `.py` 文件的
       `ast.Import`/`ast.ImportFrom` 节点，提取顶层包名，凡是不等于 `"core"`、不在
@@ -206,9 +206,9 @@ description: "Task list for feature implementation"
       `packages/core`，校验路径存在且是目录，不存在就退出码 `2` 并打印 `ERROR: ...`），按
       `contracts/boundary-check-cli.md` 的退出码表（0=干净，1=发现违规，输出每条违规一行）打印结
       果（depends on: T016, T017 已写好、确认先失败）
-- [ ] T019 [US2] 跑 `.venv/bin/pytest tests/test_check_core_boundary.py -v`，确认全部通过
+- [X] T019 [US2] 跑 `.venv/bin/pytest tests/test_check_core_boundary.py -v`，确认全部通过
       （depends on: T018）
-- [ ] T020 [US2] 运行 `.venv/bin/python scripts/check_core_boundary.py`，确认（在 User Story 1 已
+- [X] T020 [US2] 运行 `.venv/bin/python scripts/check_core_boundary.py`，确认（在 User Story 1 已
       完成的前提下）退出码为 `0`、输出 `OK: packages/core 未依赖任何其他 packages/* 目录`
       （depends on: T018, 以及 User Story 1 的 T015 已完成）
 
