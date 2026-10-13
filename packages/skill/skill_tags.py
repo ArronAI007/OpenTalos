@@ -1,13 +1,10 @@
-import json
 from pathlib import Path
 
-_ENCODING = "utf-8"
+from .json_store import load_json_store
 
 
 def load_tags(store_path: Path) -> dict[str, list[str]]:
-    if not store_path.is_file():
-        return {}
-    return json.loads(store_path.read_text(encoding=_ENCODING))
+    return load_json_store(store_path)
 
 
 def get_tags(store_path: Path, name: str) -> list[str]:
