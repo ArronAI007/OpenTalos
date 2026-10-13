@@ -68,6 +68,23 @@ class WorkingMemory:
     def restore(self, data: dict) -> None:
         self._transcript.restore(data)
 
+    def assemble(
+        self,
+        user_query: str,
+        *,
+        transcript: list[Any],
+        system_instructions: str | None = None,
+        extra_slices: list[Any] | None = None,
+    ) -> str:
+        """薄透传给 `self.assembler.assemble(...)`——供调用方（如 `packages/core`）在不感知
+        `ContextAssembler`/`ContextSlice` 这些 `context` 包类型的前提下组装上下文。"""
+        return self.assembler.assemble(
+            user_query,
+            transcript=transcript,
+            system_instructions=system_instructions,
+            extra_slices=extra_slices,
+        )
+
     def build_messages(self, system_prompt: str | None, user_text: str) -> list[dict]:
         # 检索式选轮：最近若干轮保证保留，更早的轮次按与 user_text 的相关性择优补入预算。
         selected = self.assembler.select_relevant_turns(

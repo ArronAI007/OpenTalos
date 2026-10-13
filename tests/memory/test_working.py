@@ -133,3 +133,16 @@ def test_build_messages_truncates_history_via_token_budget():
     # 预算很小：不应该把全部 20 条历史都塞进去，但至少保留了最新一轮（倒数第二、第三条）
     assert len(messages) < 21
     assert messages[-2] == {"role": "assistant", "content": "answer 9" * 20}
+
+
+def test_assemble_forwards_to_the_assembler_and_includes_history_and_query():
+    memory = WorkingMemory()
+    memory.append(ChatMessage(content="hi", role="user"))
+    memory.append(ChatMessage(content="hello there", role="assistant"))
+
+    context = memory.assemble(
+        "hi again", transcript=memory.messages(), system_instructions="Be concise."
+    )
+
+    assert "Be concise." in context
+    assert "hi again" in context
