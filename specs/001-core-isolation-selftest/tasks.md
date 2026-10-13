@@ -260,11 +260,14 @@ T009 已经改完的函数签名，实际执行顺序上放在 User Story 1 之�
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
-- [ ] T024 [P] 跑一遍完整回归：`.venv/bin/python scripts/check_core_boundary.py` +
+- [X] T024 [P] 跑一遍完整回归：`.venv/bin/python scripts/check_core_boundary.py` +
       `.venv/bin/pytest tests/ -v`，确认边界检查退出码 `0`、全量测试通过数不低于 T001 的基线
-- [ ] T025 按 `quickstart.md` 列出的 7 个验证场景逐条手动过一遍，确认每一条的实际结果都和文档里写
+      —— 实际：边界检查退出码 0；732 passed / 4 skipped（基线 714，净增 18，0 回归）
+- [X] T025 按 `quickstart.md` 列出的 7 个验证场景逐条手动过一遍，确认每一条的实际结果都和文档里写
       的预期一致（场景 6 如果当前环境没有真实凭据，按 T023 的方式记录为环境限制）
-- [ ] T026 [P] 按本仓库既有习惯更新项目 memory（`project_opentalos_python_rebuild.md` 追加这次
+      —— 实际：7 个场景全部按文档预期通过；本机 `.env` 已有真实凭据，场景 5/6 都验证了（无凭据
+      降级 skip + 有凭据真实通过两条路径）
+- [X] T026 [P] 按本仓库既有习惯更新项目 memory（`project_opentalos_python_rebuild.md` 追加这次
       core 边界隔离重构的记录 + `MEMORY.md` 索引行），记录这次改动涉及的文件范围和真机验证结果
 
 ---
