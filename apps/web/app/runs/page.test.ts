@@ -14,6 +14,10 @@ describe("statusLabel", () => {
     expect(statusLabel("running")).toBe("进行中");
   });
 
+  test("renders Chinese text for cancelled runs", () => {
+    expect(statusLabel("cancelled")).toBe("已取消");
+  });
+
   test("falls back to the raw status for anything else", () => {
     expect(statusLabel("weird")).toBe("weird");
   });

@@ -9,6 +9,7 @@ export function statusLabel(status: string): string {
   if (status === "completed") return "✓";
   if (status === "failed") return "✗";
   if (status === "running") return "进行中";
+  if (status === "cancelled") return "已取消";
   return status;
 }
 
