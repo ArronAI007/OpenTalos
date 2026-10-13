@@ -228,7 +228,7 @@ T009 已经改完的函数签名，实际执行顺序上放在 User Story 1 之�
 
 ### Tests for User Story 3 ⚠️
 
-- [ ] T021 [US3] 创建 `tests/core/test_real_model_selftest.py`：
+- [X] T021 [US3] 创建 `tests/core/test_real_model_selftest.py`：
       - 定义一个满足 `ToolExecutor`/`ToolInfo`/`ToolCallResult` Protocol 的最小假对象（只认一个固
         定的工具名，比如 `"get_current_time"`，`acall` 直接返回一个成功的假结果，不依赖真实
         `tool` 包）；
@@ -243,13 +243,16 @@ T009 已经改完的函数签名，实际执行顺序上放在 User Story 1 之�
         `core.agent_loop.run_tool_turn(...)`（同样包 60 秒超时→skip），断言假工具确实被调用了一次
         （验证 core 正确识别并转发了模型的工具调用意图），而不对模型的最终文本内容做强断言（模型
         输出本身不是确定性的）
-- [ ] T022 [US3] 跑 `.venv/bin/pytest tests/core/test_real_model_selftest.py -v`（确保当前 shell
+- [X] T022 [US3] 跑 `.venv/bin/pytest tests/core/test_real_model_selftest.py -v`（确保当前 shell
       没有设置 `MODEL_API_KEY`），确认两个测试都显示 `SKIPPED`，且跳过原因文案清晰可读
       （depends on: T021）
-- [ ] T023 [US3] 在已配置好 `.env` 里 `MODEL_PROVIDER`/`MODEL_API_KEY`/`MODEL_NAME` 的前提下，跑
+- [X] T023 [US3] 在已配置好 `.env` 里 `MODEL_PROVIDER`/`MODEL_API_KEY`/`MODEL_NAME` 的前提下，跑
       `.venv/bin/pytest tests/core/test_real_model_selftest.py -v -s`，确认两个测试都
       `PASSED`，且在 60 秒预算内完成，`-s` 输出里能看到真实的模型回复内容（depends on: T021；如果
       当前开发环境确实没有可用凭据，这一步记录为"环境限制，留给有凭据的环境执行"，不算任务失败）
+      —— 实际：本机 `.env` 已配置真实凭据（kimi-k3），两个测试均 PASSED，13.36s 完成（预算 60s）；
+      纯文本往返真实回复 `'pong'`；工具调用往返真实识别并转发了 `get_current_time` 调用，模型基于
+      假结果回复 `'The current time is 2026-01-01 00:00:00.'`
 
 **Checkpoint**：三条 User Story 全部可以独立验证通过。
 
