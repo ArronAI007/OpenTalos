@@ -3,11 +3,14 @@ import json
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from core.agent import Agent, AssemblyConfig, OutputTrimmer, RuntimeSettings
+from context import AssemblyConfig, OutputTrimmer, TokenBudget
+from core.agent import Agent, RuntimeSettings
 from core.agent_loop import ModelInterrupted, execute_model_step, resolve_tool_call
 from core.cancellation import CancellationToken
 from core.protocol import ChatMessage, ToolInvocation
 from core.model import ModelClient
+from memory import WorkingMemory
+from observability import RunRecorder, metrics
 from tool.registry import ToolRegistry
 
 FINISH_TOOL_NAME = "finish"
@@ -37,6 +40,41 @@ DEFAULT_SYSTEM_PROMPT = (
 STEP_LIMIT_MESSAGE = "Reached the step limit without a final answer."
 
 
+class _ReActSteerQueue:
+    """把 `arespond(drain_steer=..., steer_event=...)` 这两个旧参数包成一个满足
+    `core.protocols.SteerQueue` 形状的小适配器，交给 `execute_model_step` 统一处理排队/打断。
+    `drain()` 过滤空白消息、并把接受的消息记进 Agent 自己的 transcript（`execute_model_step`
+    只会把它们追加进这一次请求的 messages 列表，不知道、也不需要知道 Agent 的持久历史）。
+    """
+
+    def __init__(
+        self,
+        agent: "ReActAgent",
+        drain_steer: Callable[[], list[str]] | None,
+        steer_event: asyncio.Event | None,
+    ) -> None:
+        self._agent = agent
+        self._drain_steer = drain_steer
+        self._event = steer_event or asyncio.Event()
+
+    def drain(self) -> list[str]:
+        if self._drain_steer is None:
+            return []
+        accepted = []
+        for text in self._drain_steer():
+            if text.strip():
+                self._agent.record_message(ChatMessage(content=text, role="user"))
+                accepted.append(text)
+        return accepted
+
+    def clear_interrupt(self) -> None:
+        self._event.clear()
+
+    @property
+    def interrupt_event(self) -> asyncio.Event:
+        return self._event
+
+
 class ReActAgent(Agent):
     """ReAct 风格：一步步推理 + 调用工具，直到模型主动调用内置 finish 工具或用光步数。"""
 
@@ -59,15 +97,18 @@ class ReActAgent(Agent):
         super().__init__(
             name,
             model_client,
-            system_prompt or DEFAULT_SYSTEM_PROMPT,
-            settings,
-            context_config,
-            min_retain_turns,
-            trace_dir,
-            trace_metadata,
-            compaction_token_limit,
-            output_trimmer,
-            approval_gate,
+            history=WorkingMemory(
+                min_retain_turns=min_retain_turns, message_type=ChatMessage, context_config=context_config
+            ),
+            token_estimator=TokenBudget(),
+            system_prompt=system_prompt or DEFAULT_SYSTEM_PROMPT,
+            settings=settings,
+            trace_recorder_factory=(lambda: RunRecorder(output_dir=trace_dir)) if trace_dir else None,
+            trace_metadata=trace_metadata,
+            metrics=metrics,
+            compaction_token_limit=compaction_token_limit,
+            output_trimmer=output_trimmer,
+            approval_gate=approval_gate,
         )
         self.tool_registry = tool_registry
         self.max_steps = max_steps
@@ -79,12 +120,13 @@ class ReActAgent(Agent):
     async def arespond(self, input_text: str, **kwargs: object) -> str:
         cancellation: CancellationToken | None = kwargs.pop("cancellation", None)
         on_text_delta: Callable[[str], Awaitable[None]] | None = kwargs.pop("on_text_delta", None)
-        # 运行中的"打断纠偏"：每步开头排空待注入的用户消息；steer_event 用于打断在飞的模型调用。
+        # 运行中的"打断纠偏"：排队/打断统一交给 execute_model_step 经 SteerQueue 处理。
         drain_steer: Callable[[], list[str]] | None = kwargs.pop("drain_steer", None)
         steer_event: asyncio.Event | None = kwargs.pop("steer_event", None)
         on_steer_interrupt = kwargs.pop("on_steer_interrupt", None)
         recalled: list[str] | None = kwargs.pop("recalled", None)
         on_usage = kwargs.pop("on_usage", None)
+        steer = _ReActSteerQueue(self, drain_steer, steer_event) if (drain_steer or steer_event) else None
         messages = self.build_messages(input_text)
         # 召回的相关长期记忆作为一条 system 注入（在系统提示之后、历史之前）。
         if recalled:
@@ -97,23 +139,12 @@ class ReActAgent(Agent):
         tools = self._tool_schemas()
         answer: str | None = None
 
-        def inject_steer() -> None:
-            if drain_steer is None:
-                return
-            for steer in drain_steer():
-                if steer.strip():
-                    messages.append({"role": "user", "content": steer})
-                    self.record_message(ChatMessage(content=steer, role="user"))
-
         for step in range(1, self.max_steps + 1):
-            inject_steer()
 
             async def handle_invocation(invocation: ToolInvocation, step: int = step) -> dict[str, str]:
                 return await self._handle(invocation, step)
 
             while True:
-                if steer_event is not None:
-                    steer_event.clear()
                 try:
                     completion = await execute_model_step(
                         self.model_client,
@@ -125,15 +156,16 @@ class ReActAgent(Agent):
                         cancellation=cancellation,
                         handle_invocation=handle_invocation,
                         on_tool_result=self.record_tool_result,
-                        interrupt=steer_event,
                         on_usage=on_usage,
+                        metrics=self.metrics,
+                        steer=steer,
                         **kwargs,
                     )
                 except ModelInterrupted:
-                    # 生成中被 steer 打断：通知前端丢弃被打断的流式内容，注入后重跑该步。
+                    # 生成中被 steer 打断：通知前端丢弃被打断的流式内容，execute_model_step 下
+                    # 一次调用会自己重新 drain 并注入，这里只需要重试。
                     if on_steer_interrupt is not None:
                         await on_steer_interrupt()
-                    inject_steer()
                     continue
                 break
 
@@ -166,6 +198,7 @@ class ReActAgent(Agent):
             self.tool_registry, invocation, self.recorder, step, self.output_trimmer,
             on_tool_result=self.record_tool_result,
             approve=self.approval_gate,
+            metrics=self.metrics,
         )
 
 
