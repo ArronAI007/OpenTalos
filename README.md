@@ -106,20 +106,74 @@ leaf packages — none of them import each other or anything else in this repo:
 | `packages/context` | Context engineering: `TokenBudget` (cached token estimation), `TranscriptStore` (turn-based history with summary compression), `ContextAssembler` (Gather-Select-Structure-Compress pipeline, with MMR-based diverse selection), `OutputTrimmer` (head/tail truncation of large tool output). |
 | `packages/observability` | `RunRecorder`: records a run's events as streaming JSONL plus an incrementally-rendered HTML report, with secret redaction and summary stats. |
 
-`packages/core` and `packages/skill` build on the leaves above — `core`'s `Agent` base class
-composes a `TranscriptStore`/`ContextAssembler` pair unconditionally, and a `RunRecorder` when
-constructed with `trace_dir`; `skill`'s agent-facing tools implement the `tool.Tool` interface:
+`packages/core` imports *nothing* from the leaves above, or from any other `packages/*`
+directory — its only external dependency is the LLM call itself. `core`'s `Agent`/`agent_loop`
+instead declare a handful of `typing.Protocol`s (`HistoryStore`, `ToolExecutor`, `TraceRecorder`,
+`MetricsSink`, `TokenEstimator`, `OutputTrimmerLike`, `SteerQueue`) describing the shape of
+collaborator it needs; `packages/agents` constructs the real `WorkingMemory`/`ToolRegistry`/
+`RunRecorder`/`metrics`/`TokenBudget`/`OutputTrimmer` instances and injects them — no explicit
+inheritance required, Python's structural typing just checks the shape matches. `packages/skill`
+builds on the tool/context leaves directly; its agent-facing tools implement the `tool.Tool`
+interface:
 
 | Package | Responsibility |
 |---|---|
 | `packages/core` | `Agent` (abstract base: history, context assembly, tracing, phase callbacks), `ModelClient` (async, provider-agnostic: Anthropic / OpenAI-compatible / mock), `ChatMessage`, `Completion`/`ToolCompletion` types. |
 | `packages/skill` | pi-style skills: skills are plain filesystem directories (`skills/*/SKILL.md`), discovered in-process and advertised to the model by name + description + absolute `<location>`. The agent gets generic `read` (open the SKILL.md) and `bash` (run the skill's bundled scripts, approval-gated, cwd restricted to the skill tree) tools. Plus `discover_skills` / `list_skill_files` / frontmatter parsing, and the `my_skills`/tags/usage stores backing the marketplace. No separate service. |
 
-`packages/agents` sits on top, depending only on `core` and `tool`:
+`packages/agents` sits on top, and is where the Protocol-conforming instances above actually get
+constructed and injected into `core.Agent` — so unlike `core` itself, it does depend on `tool`,
+`context`, `memory`, and `observability`:
 
 | Package | Responsibility |
 |---|---|
 | `packages/agents` | `ReActAgent` (step-budgeted reason+act loop with an explicit `finish` tool) and `build_agent`, which constructs it and can append extra text (skills list, a custom agent's persona) to its system prompt. |
+
+### Request-to-Response Flow
+
+One chat turn, from the frontend's POST to the SSE events it streams back:
+
+```mermaid
+flowchart TD
+    A["POST /api/tasks/{id}/messages"] --> B["ChatRuntime.stream_reply()"]
+    B --> C["persist user message"]
+    C --> D["_get_agent(): fetch/build ReActAgent\n(packages/agents/builder.py injects\nWorkingMemory/ToolRegistry/RunRecorder/metrics/TokenBudget)"]
+    D --> E["Agent.arespond_with_callbacks()"]
+    E --> F["begin_trace(): new RunRecorder, log session_start"]
+    F --> G["ReActAgent.arespond()"]
+    G --> H["build_messages(): system prompt + history + input"]
+    H --> I["record user message to history"]
+    I --> J["assemble tool schemas: finish + registered tools"]
+    J --> K["for step in 1..max_steps"]
+    K --> L["execute_model_step()"]
+    L --> M{"steer queue has\npending messages?"}
+    M -->|yes| N["drain + inject as user messages,\nclear interrupt flag"]
+    M -->|no| O["call the model\n(acomplete_with_tools / astream_with_tools)"]
+    N --> O
+    O --> P["record usage/cost/metrics,\nlog model_output trace event"]
+    P --> Q{"tool calls\nrequested?"}
+    Q -->|no, plain text| R["this step's text is the answer"]
+    Q -->|yes| S["append assistant tool_calls message"]
+    S --> T["resolve_tool_call() concurrently per call"]
+    T --> U["approval gate\n(fail-closed if required & no channel)"]
+    U --> V["tool_registry.acall(): real execution"]
+    V --> W["trim oversized output /\nwrap untrusted output"]
+    W --> X["append result as a tool message"]
+    X --> Y{"was it the\nfinish tool?"}
+    Y -->|yes| R
+    Y -->|no| K
+    R --> Z["record final answer to history"]
+    Z --> AA["end_trace(): log session_end,\nwrite HTML stats footer"]
+    AA --> AB["persist assistant reply + usage"]
+    AB --> AC["flush remaining SSE events"]
+    AC --> AD["frontend renders streamed text /\ntool-call bubbles"]
+```
+
+A few things run alongside this straight-line path rather than inside it: **steering** can
+interrupt an in-flight model call mid-step with a correction message (the diamond above); long
+conversations get **compressed** into a summary turn once the token budget is exceeded, after the
+turn finishes; and every event along the way is written to that turn's trace file, viewable later
+at `/runs`.
 
 And `apps/` is what you actually run:
 
