@@ -3,9 +3,12 @@ import json
 
 import pytest
 
+from context import TokenBudget
 from core.agent import Agent, AgentPhase, PhaseSignal, RuntimeSettings
 from core.protocol import ChatMessage, Completion
 from core.model import FakeModelBackend, ModelClient
+from memory import WorkingMemory
+from observability import RunRecorder
 
 
 class _EchoAgent(Agent):
@@ -18,13 +21,28 @@ class _FailingAgent(Agent):
         raise ValueError("boom")
 
 
+def _make_agent(cls, name="echo", *, model_client, min_retain_turns=10, trace_dir=None, **kwargs):
+    """测试本地的构造 helper：补齐 Agent 现在要求的 history/token_estimator（core 不再内置默认实
+    现，这两个是必填项），trace_dir 转成 trace_recorder_factory，保持测试调用点简洁。"""
+    history = WorkingMemory(min_retain_turns=min_retain_turns, message_type=ChatMessage)
+    trace_recorder_factory = (lambda: RunRecorder(output_dir=trace_dir)) if trace_dir else None
+    return cls(
+        name,
+        model_client,
+        history=history,
+        token_estimator=TokenBudget(),
+        trace_recorder_factory=trace_recorder_factory,
+        **kwargs,
+    )
+
+
 @pytest.fixture
 def model_client() -> ModelClient:
     return ModelClient(provider="mock")
 
 
 async def test_arespond_with_callbacks_returns_arespond_result(model_client):
-    agent = _EchoAgent(name="echo", model_client=model_client)
+    agent = _make_agent(_EchoAgent, model_client=model_client)
     result = await agent.arespond_with_callbacks("hi")
     assert result == "echo: hi"
 
@@ -35,7 +53,7 @@ async def test_arespond_with_callbacks_calls_on_start_and_on_finish(model_client
     async def record(signal: PhaseSignal) -> None:
         signals.append(signal)
 
-    agent = _EchoAgent(name="echo", model_client=model_client)
+    agent = _make_agent(_EchoAgent, model_client=model_client)
     await agent.arespond_with_callbacks("hi", on_start=record, on_finish=record)
 
     assert [s.phase.value for s in signals] == ["started", "finished"]
@@ -47,7 +65,7 @@ async def test_arespond_with_callbacks_calls_on_error_and_reraises(model_client)
     async def record(signal: PhaseSignal) -> None:
         signals.append(signal)
 
-    agent = _FailingAgent(name="failing", model_client=model_client)
+    agent = _make_agent(_FailingAgent, "failing", model_client=model_client)
 
     with pytest.raises(ValueError, match="boom"):
         await agent.arespond_with_callbacks("hi", on_error=record)
@@ -61,7 +79,7 @@ async def test_arespond_with_callbacks_ignores_callback_exceptions(model_client)
     async def broken_callback(signal: PhaseSignal) -> None:
         raise RuntimeError("callback broke")
 
-    agent = _EchoAgent(name="echo", model_client=model_client)
+    agent = _make_agent(_EchoAgent, model_client=model_client)
     result = await agent.arespond_with_callbacks("hi", on_start=broken_callback)
     assert result == "echo: hi"
 
@@ -71,13 +89,13 @@ async def test_arespond_with_callbacks_ignores_callback_timeout(model_client):
         await asyncio.sleep(1)
 
     settings = RuntimeSettings(callback_timeout_seconds=0.01)
-    agent = _EchoAgent(name="echo", model_client=model_client, settings=settings)
+    agent = _make_agent(_EchoAgent, model_client=model_client, settings=settings)
     result = await agent.arespond_with_callbacks("hi", on_start=slow_callback)
     assert result == "echo: hi"
 
 
 def test_record_message_history_snapshot_reset_history(model_client):
-    agent = _EchoAgent(name="echo", model_client=model_client)
+    agent = _make_agent(_EchoAgent, model_client=model_client)
     agent.record_message(ChatMessage(content="hi", role="user"))
     agent.record_message(ChatMessage(content="hello", role="assistant"))
 
@@ -89,7 +107,7 @@ def test_record_message_history_snapshot_reset_history(model_client):
 
 
 def test_history_snapshot_returns_a_copy(model_client):
-    agent = _EchoAgent(name="echo", model_client=model_client)
+    agent = _make_agent(_EchoAgent, model_client=model_client)
     agent.record_message(ChatMessage(content="hi", role="user"))
     history = agent.history_snapshot()
     history.append(ChatMessage(content="not stored", role="user"))
@@ -97,7 +115,7 @@ def test_history_snapshot_returns_a_copy(model_client):
 
 
 def test_build_context_includes_system_prompt_history_and_query(model_client):
-    agent = _EchoAgent(name="echo", model_client=model_client, system_prompt="Be concise.")
+    agent = _make_agent(_EchoAgent, model_client=model_client, system_prompt="Be concise.")
     agent.record_message(ChatMessage(content="hi", role="user"))
     agent.record_message(ChatMessage(content="hello there", role="assistant"))
 
@@ -109,7 +127,7 @@ def test_build_context_includes_system_prompt_history_and_query(model_client):
 
 
 def test_compress_history_folds_old_turns_and_produces_chat_messages(model_client):
-    agent = _EchoAgent(name="echo", model_client=model_client, min_retain_turns=1)
+    agent = _make_agent(_EchoAgent, model_client=model_client, min_retain_turns=1)
     for i in range(4):
         agent.record_message(ChatMessage(content=f"question {i}", role="user"))
         agent.record_message(ChatMessage(content=f"answer {i}", role="assistant"))
@@ -124,7 +142,7 @@ def test_compress_history_folds_old_turns_and_produces_chat_messages(model_clien
 
 
 def test_compress_history_is_a_noop_below_the_retain_threshold(model_client):
-    agent = _EchoAgent(name="echo", model_client=model_client, min_retain_turns=10)
+    agent = _make_agent(_EchoAgent, model_client=model_client, min_retain_turns=10)
     agent.record_message(ChatMessage(content="hi", role="user"))
 
     assert agent.compress_history("summary") is False
@@ -132,12 +150,12 @@ def test_compress_history_is_a_noop_below_the_retain_threshold(model_client):
 
 
 def test_recorder_is_none_by_default(model_client):
-    agent = _EchoAgent(name="echo", model_client=model_client)
+    agent = _make_agent(_EchoAgent, model_client=model_client)
     assert agent.recorder is None
 
 
 def test_recorder_is_created_per_turn_and_finalized(model_client, tmp_path):
-    agent = _EchoAgent(name="echo", model_client=model_client, trace_dir=str(tmp_path))
+    agent = _make_agent(_EchoAgent, model_client=model_client, trace_dir=str(tmp_path))
     assert agent.recorder is None  # 一轮一份：轮与轮之间不持有 recorder
 
     asyncio.run(agent.arespond_with_callbacks("hi"))
@@ -155,15 +173,15 @@ def test_recorder_is_created_per_turn_and_finalized(model_client, tmp_path):
 
 
 def test_each_turn_produces_its_own_trace(model_client, tmp_path):
-    agent = _EchoAgent(name="echo", model_client=model_client, trace_dir=str(tmp_path))
+    agent = _make_agent(_EchoAgent, model_client=model_client, trace_dir=str(tmp_path))
     asyncio.run(agent.arespond_with_callbacks("one"))
     asyncio.run(agent.arespond_with_callbacks("two"))
     assert len(list(tmp_path.glob("run-*.jsonl"))) == 2
 
 
 def test_trace_metadata_lands_in_session_start(model_client, tmp_path):
-    agent = _EchoAgent(
-        name="echo", model_client=model_client, trace_dir=str(tmp_path), trace_metadata={"task_id": "t-1"}
+    agent = _make_agent(
+        _EchoAgent, model_client=model_client, trace_dir=str(tmp_path), trace_metadata={"task_id": "t-1"}
     )
     asyncio.run(agent.arespond_with_callbacks("hi"))
     first = next(tmp_path.glob("run-*.jsonl")).read_text(encoding="utf-8").splitlines()[0]
@@ -171,7 +189,7 @@ def test_trace_metadata_lands_in_session_start(model_client, tmp_path):
 
 
 async def test_maybe_compress_history_is_a_noop_when_compaction_is_disabled(model_client):
-    agent = _EchoAgent(name="echo", model_client=model_client, min_retain_turns=1)
+    agent = _make_agent(_EchoAgent, model_client=model_client, min_retain_turns=1)
     for i in range(4):
         agent.record_message(ChatMessage(content=f"question {i}", role="user"))
         agent.record_message(ChatMessage(content=f"answer {i}", role="assistant"))
@@ -183,7 +201,9 @@ async def test_maybe_compress_history_is_a_noop_when_compaction_is_disabled(mode
 
 
 async def test_maybe_compress_history_is_a_noop_below_the_token_limit(model_client):
-    agent = _EchoAgent(name="echo", model_client=model_client, min_retain_turns=1, compaction_token_limit=100_000)
+    agent = _make_agent(
+        _EchoAgent, model_client=model_client, min_retain_turns=1, compaction_token_limit=100_000
+    )
     agent.record_message(ChatMessage(content="hi", role="user"))
     agent.record_message(ChatMessage(content="hello", role="assistant"))
 
@@ -198,7 +218,7 @@ async def test_maybe_compress_history_summarizes_and_folds_history_once_over_the
     client._backend = FakeModelBackend(
         model_name="mock-model", response=Completion(text="condensed summary", model_id="mock-model")
     )
-    agent = _EchoAgent(name="echo", model_client=client, min_retain_turns=1, compaction_token_limit=5)
+    agent = _make_agent(_EchoAgent, model_client=client, min_retain_turns=1, compaction_token_limit=5)
     for i in range(4):
         agent.record_message(ChatMessage(content=f"question {i}", role="user"))
         agent.record_message(ChatMessage(content=f"answer {i}", role="assistant"))
@@ -216,7 +236,7 @@ async def test_maybe_compress_history_notifies_on_compression_when_folded():
     client._backend = FakeModelBackend(
         model_name="mock-model", response=Completion(text="condensed summary", model_id="mock-model")
     )
-    agent = _EchoAgent(name="echo", model_client=client, min_retain_turns=1, compaction_token_limit=5)
+    agent = _make_agent(_EchoAgent, model_client=client, min_retain_turns=1, compaction_token_limit=5)
     for i in range(4):
         agent.record_message(ChatMessage(content=f"question {i}", role="user"))
         agent.record_message(ChatMessage(content=f"answer {i}", role="assistant"))
@@ -235,14 +255,14 @@ async def test_maybe_compress_history_notifies_on_compression_when_folded():
 
 
 def test_snapshot_and_restore_history_round_trip(model_client):
-    agent = _EchoAgent(name="echo", model_client=model_client)
+    agent = _make_agent(_EchoAgent, model_client=model_client)
     agent.record_message(ChatMessage(content="hi", role="user"))
     agent.record_message(ChatMessage(content="hello", role="assistant"))
 
     data = agent.snapshot_history()
     assert [m["content"] for m in data["messages"]] == ["hi", "hello"]
 
-    other = _EchoAgent(name="other", model_client=model_client)
+    other = _make_agent(_EchoAgent, "other", model_client=model_client)
     other.restore_history(data)
     assert [m.content for m in other.history_snapshot()] == ["hi", "hello"]
 

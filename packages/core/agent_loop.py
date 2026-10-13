@@ -8,15 +8,12 @@ import json
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from context import OutputTrimmer
-from observability import RunRecorder, metrics
-from tool.registry import ToolRegistry
-
 from .cancellation import CancellationToken
 from .errors import AgentRuntimeError, EmptyModelResponse, OutputLimitError
 from .pricing import estimate_cost
 from .protocol import Completion, ToolCompletion, ToolInvocation
 from .model import ModelClient
+from .protocols import MetricsSink, NullMetricsSink, OutputTrimmerLike, SteerQueue, ToolExecutor, TraceRecorder
 
 ToolInvocationHandler = Callable[[ToolInvocation], Awaitable[dict[str, str]]]
 ApprovalGate = Callable[[ToolInvocation], Awaitable[bool]]
@@ -97,7 +94,7 @@ def build_reply_message(text: str | None, requested_tools: list[ToolInvocation])
     }
 
 
-def _trim_output(trimmer: OutputTrimmer | None, tool_name: str, output: str) -> str:
+def _trim_output(trimmer: OutputTrimmerLike | None, tool_name: str, output: str) -> str:
     """工具输出过长时只把预览回填给模型，并告诉它完整输出落在哪个文件里。"""
     if trimmer is None:
         return output
@@ -113,13 +110,14 @@ def _trim_output(trimmer: OutputTrimmer | None, tool_name: str, output: str) -> 
 
 
 async def resolve_tool_call(
-    tool_registry: ToolRegistry,
+    tool_registry: ToolExecutor,
     invocation: ToolInvocation,
-    recorder: RunRecorder | None = None,
+    recorder: TraceRecorder | None = None,
     step: int | None = None,
-    trimmer: OutputTrimmer | None = None,
+    trimmer: OutputTrimmerLike | None = None,
     on_tool_result: Callable[[str, str, str, str], None] | None = None,
     approve: ApprovalGate | None = None,
+    metrics: MetricsSink = NullMetricsSink(),
 ) -> dict[str, str]:
     if recorder:
         recorder.log_event("tool_call", {"tool_name": invocation.tool_name, "arguments": invocation.arguments_json}, step=step)
@@ -177,7 +175,7 @@ async def _complete_text(
     on_text_delta: Callable[[str], Awaitable[None]] | None,
     **kwargs: Any,
 ) -> Completion:
-    """纯文本补全（不带工具schema）。on_text_delta 为空时走原来的 acomplete；给了回调就换成
+    """纯文本补全（不带工具schema）。on_text_delta 为空时走原来的 acomplete，给了回调就换成
     astream 逐块转发，再拼回完整文本并附上 last_stream_summary 的统计。两条路径对调用方都返回
     同样的 Completion。"""
     if on_text_delta is None:
@@ -240,7 +238,7 @@ async def execute_model_step(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]],
     *,
-    recorder: RunRecorder | None = None,
+    recorder: TraceRecorder | None = None,
     step: int | None = None,
     on_text_delta: Callable[[str], Awaitable[None]] | None = None,
     on_reasoning_delta: Callable[[str], Awaitable[None]] | None = None,
@@ -249,6 +247,8 @@ async def execute_model_step(
     on_tool_result: Callable[[str, str, str, str], None] | None = None,
     interrupt: asyncio.Event | None = None,
     on_usage: Callable[[dict[str, Any]], None] | None = None,
+    metrics: MetricsSink = NullMetricsSink(),
+    steer: SteerQueue | None = None,
     **kwargs: Any,
 ) -> ToolCompletion:
     """带工具 schema 的单步：调一次模型 -> 有工具请求就并行执行并把结果追加回 messages。
@@ -261,9 +261,19 @@ async def execute_model_step(
     每次拿到模型响应都会把它的 token_usage 喂给 cancellation.record_tokens——如果 token 传的
     是带 timeout_seconds/token_budget 的 CancellationToken，下一次检查点就会因为超时/超预算
     而自然终止整个循环，不需要调用方另外传参数。
+
+    steer 不为空时，在发起这次模型调用之前先把排队的纠偏/后续消息掏空并追加进 messages，清掉
+    打断标记，并把这次调用的 interrupt 换成 steer.interrupt_event——排队（drain）和打断
+    （interrupt）统一由同一个 SteerQueue 驱动。
     """
     if cancellation is not None:
         cancellation.raise_if_cancelled()
+
+    if steer is not None:
+        for pending in steer.drain():
+            messages.append({"role": "user", "content": pending})
+        steer.clear_interrupt()
+        interrupt = steer.interrupt_event
 
     if recorder:
         # 输入侧审计：记录模型当次看到的上下文（脱敏后），出问题时能回放"当时给了什么历史/提示词"。
@@ -332,16 +342,18 @@ async def execute_model_step(
 async def run_tool_turn(
     model_client: ModelClient,
     messages: list[dict[str, Any]],
-    tool_registry: ToolRegistry | None,
+    tool_registry: ToolExecutor | None,
     max_iterations: int,
-    recorder: RunRecorder | None = None,
+    recorder: TraceRecorder | None = None,
     on_text_delta: Callable[[str], Awaitable[None]] | None = None,
     on_reasoning_delta: Callable[[str], Awaitable[None]] | None = None,
     cancellation: CancellationToken | None = None,
-    trimmer: OutputTrimmer | None = None,
+    trimmer: OutputTrimmerLike | None = None,
     on_tool_result: Callable[[str, str, str, str], None] | None = None,
     approve: ApprovalGate | None = None,
     on_usage: Callable[[dict[str, Any]], None] | None = None,
+    metrics: MetricsSink = NullMetricsSink(),
+    steer: SteerQueue | None = None,
     **kwargs: Any,
 ) -> str:
     """调用 LLM -> 按需执行工具 -> 把结果喂回去，直到模型不再请求工具或用光 max_iterations。
@@ -365,7 +377,7 @@ async def run_tool_turn(
     tools = tool_registry.function_schemas()
 
     async def handle_invocation(invocation: ToolInvocation) -> dict[str, str]:
-        return await resolve_tool_call(tool_registry, invocation, recorder, step, trimmer, on_tool_result, approve)
+        return await resolve_tool_call(tool_registry, invocation, recorder, step, trimmer, on_tool_result, approve, metrics)
 
     for step in range(1, max_iterations + 1):
         completion = await execute_model_step(
@@ -380,6 +392,8 @@ async def run_tool_turn(
             handle_invocation=handle_invocation,
             on_tool_result=on_tool_result,
             on_usage=on_usage,
+            metrics=metrics,
+            steer=steer,
             **kwargs,
         )
         if not completion.requested_tools:

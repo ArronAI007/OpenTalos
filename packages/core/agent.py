@@ -6,14 +6,19 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from context import AssemblyConfig, ContextSlice, OutputTrimmer, TokenBudget
-from observability import RunRecorder
 from pydantic import BaseModel
 
 from .compaction import summarize_history
 from .model import ModelClient
 from .protocol import ChatMessage, ToolInvocation
-from memory import WorkingMemory
+from .protocols import (
+    HistoryStore,
+    MetricsSink,
+    NullMetricsSink,
+    OutputTrimmerLike,
+    TokenEstimator,
+    TraceRecorder,
+)
 
 
 class RuntimeSettings(BaseModel):
@@ -53,35 +58,36 @@ class Agent(ABC):
         self,
         name: str,
         model_client: ModelClient,
+        *,
+        history: HistoryStore,
+        token_estimator: TokenEstimator,
         system_prompt: str | None = None,
         settings: RuntimeSettings | None = None,
-        context_config: AssemblyConfig | None = None,
-        min_retain_turns: int = 10,
-        trace_dir: str | None = None,
+        trace_recorder_factory: Callable[[], TraceRecorder] | None = None,
         trace_metadata: dict[str, Any] | None = None,
+        metrics: MetricsSink = NullMetricsSink(),
         compaction_token_limit: int | None = None,
-        output_trimmer: OutputTrimmer | None = None,
+        output_trimmer: OutputTrimmerLike | None = None,
         approval_gate: Callable[[ToolInvocation], Awaitable[bool]] | None = None,
     ) -> None:
         self.name = name
         self.model_client = model_client
         self.system_prompt = system_prompt
         self.settings = settings or RuntimeSettings()
-        self._short_term = WorkingMemory(
-            min_retain_turns=min_retain_turns, message_type=ChatMessage, context_config=context_config
-        )
-        self.recorder: RunRecorder | None = None
+        self._short_term = history
+        self.recorder: TraceRecorder | None = None
         # 一轮运行一份 trace：recorder 在 begin_trace()（arespond_with_callbacks 入口）创建、
         # end_trace() finalize；轮与轮之间为 None。trace_metadata 会写进 session_start，
         # 供按 HTTP 请求/task 关联 trace。
-        self._trace_dir = trace_dir
+        self._trace_recorder_factory = trace_recorder_factory
         self._trace_metadata = trace_metadata or {}
+        self.metrics = metrics
         # 副作用工具的审批回调：返回 True 才执行（None 时危险工具 fail-closed 拒绝）。由应用注入。
         self.approval_gate = approval_gate
         self.compaction_token_limit = compaction_token_limit
         # 不为空时，工具输出超限会被截断、完整内容落盘（OutputTrimmer 构造即建目录，所以默认不建）。
         self.output_trimmer = output_trimmer
-        self._tokens = TokenBudget()
+        self._tokens = token_estimator
         # 压缩成功后触发的无参回调（供 runtime 落库快照）；压缩本身是纯 Surface 操作，不该在
         # 这里耦合任何持久化逻辑，所以回调由外部按需注入，None 时静默跳过。
         self.on_compression: Callable[[], Awaitable[None]] | None = None
@@ -90,10 +96,10 @@ class Agent(ABC):
     async def arespond(self, input_text: str, **kwargs: object) -> str: ...
 
     def begin_trace(self) -> None:
-        """一轮运行开始：新建一份 trace（JSONL+HTML）并记录 session_start。未配置 trace_dir 时 no-op。"""
-        if self._trace_dir is None:
+        """一轮运行开始：新建一份 trace 并记录 session_start。未配置 trace_recorder_factory 时 no-op。"""
+        if self._trace_recorder_factory is None:
             return
-        self.recorder = RunRecorder(output_dir=self._trace_dir)
+        self.recorder = self._trace_recorder_factory()
         self.recorder.log_event(
             "session_start",
             {"agent_name": self.name, "agent_type": type(self).__name__, **self._trace_metadata},
@@ -195,9 +201,9 @@ class Agent(ABC):
         """用一份快照覆盖当前 transcript，用于重启后从 summary 检查点恢复而非全量重放。"""
         self._short_term.restore(data)
 
-    def build_context(self, user_query: str, extra_slices: list[ContextSlice] | None = None) -> str:
+    def build_context(self, user_query: str, extra_slices: list[Any] | None = None) -> str:
         """跑一遍 GSSC 流水线，把 system_prompt + 历史 + user_query 组装成结构化上下文。"""
-        return self._short_term.assembler.assemble(
+        return self._short_term.assemble(
             user_query,
             transcript=self.history_snapshot(),
             system_instructions=self.system_prompt,

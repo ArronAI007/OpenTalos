@@ -964,6 +964,7 @@ async def test_execute_model_step_records_model_metrics():
         [{"role": "user", "content": "hi"}],
         [],
         handle_invocation=handle_invocation,
+        metrics=metrics,
     )
 
     snapshot = metrics.snapshot()
@@ -975,6 +976,31 @@ async def test_execute_model_step_records_model_metrics():
     assert snapshot["counters"].get("opentalos_model_tokens_total") == 42
 
 
+async def test_execute_model_step_does_not_report_metrics_when_no_sink_is_given():
+    # 不传 metrics 时默认是 NullMetricsSink：不报错、也不往真实的 observability.metrics 单例里写。
+    from observability import metrics
+
+    metrics.reset()
+    client = ModelClient(provider="mock")
+
+    async def fake(messages, tools, tool_choice="auto", **kwargs):
+        return ToolCompletion(text="hi", requested_tools=[], model_id="mock")
+
+    client.acomplete_with_tools = fake  # type: ignore[method-assign]
+
+    async def handle_invocation(invocation):
+        raise AssertionError("should not be called")
+
+    await execute_model_step(
+        client,
+        [{"role": "user", "content": "hi"}],
+        [],
+        handle_invocation=handle_invocation,
+    )
+
+    assert metrics.snapshot()["counters"] == {}
+
+
 async def test_resolve_tool_call_records_tool_metrics(echo_tool_registry):
     from observability import metrics
 
@@ -983,7 +1009,7 @@ async def test_resolve_tool_call_records_tool_metrics(echo_tool_registry):
         call_id="c1", tool_name="echo", arguments_json='{"text": "hi"}'
     )
 
-    await resolve_tool_call(echo_tool_registry, invocation)
+    await resolve_tool_call(echo_tool_registry, invocation, metrics=metrics)
 
     assert (
         metrics.snapshot()["counters"].get(
@@ -991,3 +1017,61 @@ async def test_resolve_tool_call_records_tool_metrics(echo_tool_registry):
         )
         == 1
     )
+
+
+# ==================== SteerQueue：steering/follow-up 的排队与打断下沉进 core ====================
+
+
+class _FakeSteerQueue:
+    def __init__(self, pending: list[str] | None = None) -> None:
+        self._pending = list(pending or [])
+        self.clear_interrupt_calls = 0
+        self._event = asyncio.Event()
+
+    def drain(self) -> list[str]:
+        pending, self._pending = self._pending, []
+        return pending
+
+    def clear_interrupt(self) -> None:
+        self.clear_interrupt_calls += 1
+        self._event.clear()
+
+    @property
+    def interrupt_event(self) -> asyncio.Event:
+        return self._event
+
+
+async def test_execute_model_step_drains_and_injects_steer_queue_messages(scripted_client):
+    client = scripted_client(
+        tool_completions=[ToolCompletion(text="done", requested_tools=[], model_id="mock")]
+    )
+    messages: list[dict] = [{"role": "user", "content": "hi"}]
+    steer = _FakeSteerQueue(pending=["纠偏消息"])
+
+    async def handle_invocation(invocation):
+        raise AssertionError("should not be called")
+
+    await execute_model_step(
+        client, messages, [], handle_invocation=handle_invocation, steer=steer
+    )
+
+    assert {"role": "user", "content": "纠偏消息"} in messages
+    assert steer.clear_interrupt_calls == 1
+
+
+async def test_execute_model_step_is_a_noop_when_steer_has_nothing_pending(scripted_client):
+    client = scripted_client(
+        tool_completions=[ToolCompletion(text="done", requested_tools=[], model_id="mock")]
+    )
+    messages: list[dict] = [{"role": "user", "content": "hi"}]
+    steer = _FakeSteerQueue(pending=[])
+
+    async def handle_invocation(invocation):
+        raise AssertionError("should not be called")
+
+    await execute_model_step(
+        client, messages, [], handle_invocation=handle_invocation, steer=steer
+    )
+
+    assert messages == [{"role": "user", "content": "hi"}]
+    assert steer.clear_interrupt_calls == 1
