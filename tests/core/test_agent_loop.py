@@ -4,23 +4,39 @@ import pytest
 
 from context import OutputTrimmer
 from core.cancellation import CancellationToken
-from core.protocol import ChatMessage, Completion, ToolCompletion, ToolInvocation
-from core.errors import AgentRuntimeError, EmptyModelResponse, OperationCancelled, OutputLimitError
+from core.protocol import Completion, ToolCompletion, ToolInvocation
+from core.errors import (
+    AgentRuntimeError,
+    EmptyModelResponse,
+    OperationCancelled,
+    OutputLimitError,
+)
 from core.model import FakeModelBackend, ModelClient
 from tool.outcome import ToolOutcome
 from tool.registry import ToolRegistry
 from tool.tool import Tool, ToolParameter
-from core.agent_loop import build_reply_message, execute_model_step, resolve_tool_call, run_tool_turn
+from core.agent_loop import (
+    build_reply_message,
+    execute_model_step,
+    resolve_tool_call,
+    run_tool_turn,
+)
 
 
 def test_build_reply_message_shapes_tool_calls_for_the_wire():
-    invocation = ToolInvocation(call_id="call_1", tool_name="echo", arguments_json='{"text": "hi"}')
+    invocation = ToolInvocation(
+        call_id="call_1", tool_name="echo", arguments_json='{"text": "hi"}'
+    )
     message = build_reply_message("thinking...", [invocation])
 
     assert message["role"] == "assistant"
     assert message["content"] == "thinking..."
     assert message["tool_calls"] == [
-        {"id": "call_1", "type": "function", "function": {"name": "echo", "arguments": '{"text": "hi"}'}}
+        {
+            "id": "call_1",
+            "type": "function",
+            "function": {"name": "echo", "arguments": '{"text": "hi"}'},
+        }
     ]
 
 
@@ -30,12 +46,18 @@ async def test_run_tool_turn_without_registry_just_completes(scripted_client):
     assert answer == "hi there"
 
 
-async def test_run_tool_turn_executes_a_tool_then_returns_final_text(scripted_client, echo_tool_registry):
+async def test_run_tool_turn_executes_a_tool_then_returns_final_text(
+    scripted_client, echo_tool_registry
+):
     client = scripted_client(
         tool_completions=[
             ToolCompletion(
                 text=None,
-                requested_tools=[ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text": "hi"}')],
+                requested_tools=[
+                    ToolInvocation(
+                        call_id="c1", tool_name="echo", arguments_json='{"text": "hi"}'
+                    )
+                ],
                 model_id="mock",
             ),
             ToolCompletion(text="done", requested_tools=[], model_id="mock"),
@@ -48,13 +70,23 @@ async def test_run_tool_turn_executes_a_tool_then_returns_final_text(scripted_cl
     assert answer == "done"
     # assistant tool-call message + tool result message got appended
     assert messages[-2]["role"] == "assistant"
-    assert messages[-1] == {"role": "tool", "tool_call_id": "c1", "content": "echoed: hi"}
+    assert messages[-1] == {
+        "role": "tool",
+        "tool_call_id": "c1",
+        "content": "echoed: hi",
+    }
 
 
-async def test_run_tool_turn_falls_back_to_plain_complete_after_exhausting_iterations(scripted_client, echo_tool_registry):
+async def test_run_tool_turn_falls_back_to_plain_complete_after_exhausting_iterations(
+    scripted_client, echo_tool_registry
+):
     looping_tool_call = ToolCompletion(
         text=None,
-        requested_tools=[ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text": "hi"}')],
+        requested_tools=[
+            ToolInvocation(
+                call_id="c1", tool_name="echo", arguments_json='{"text": "hi"}'
+            )
+        ],
         model_id="mock",
     )
     client = scripted_client(
@@ -62,17 +94,25 @@ async def test_run_tool_turn_falls_back_to_plain_complete_after_exhausting_itera
         tool_completions=[looping_tool_call, looping_tool_call],
     )
 
-    answer = await run_tool_turn(client, [{"role": "user", "content": "loop forever"}], echo_tool_registry, 2)
+    answer = await run_tool_turn(
+        client, [{"role": "user", "content": "loop forever"}], echo_tool_registry, 2
+    )
 
     assert answer == "giving up"
 
 
-async def test_run_tool_turn_reports_invalid_tool_arguments(scripted_client, echo_tool_registry):
+async def test_run_tool_turn_reports_invalid_tool_arguments(
+    scripted_client, echo_tool_registry
+):
     client = scripted_client(
         tool_completions=[
             ToolCompletion(
                 text=None,
-                requested_tools=[ToolInvocation(call_id="c1", tool_name="echo", arguments_json="not json")],
+                requested_tools=[
+                    ToolInvocation(
+                        call_id="c1", tool_name="echo", arguments_json="not json"
+                    )
+                ],
                 model_id="mock",
             ),
             ToolCompletion(text="done", requested_tools=[], model_id="mock"),
@@ -107,14 +147,18 @@ def _one_long_tool_call() -> list[ToolCompletion]:
     return [
         ToolCompletion(
             text=None,
-            requested_tools=[ToolInvocation(call_id="c1", tool_name="long", arguments_json="{}")],
+            requested_tools=[
+                ToolInvocation(call_id="c1", tool_name="long", arguments_json="{}")
+            ],
             model_id="mock",
         ),
         ToolCompletion(text="done", requested_tools=[], model_id="mock"),
     ]
 
 
-async def test_run_tool_turn_feeds_back_the_full_tool_output_without_a_trimmer(scripted_client):
+async def test_run_tool_turn_feeds_back_the_full_tool_output_without_a_trimmer(
+    scripted_client,
+):
     client = scripted_client(tool_completions=_one_long_tool_call())
     messages: list[dict] = [{"role": "user", "content": "go"}]
 
@@ -125,7 +169,9 @@ async def test_run_tool_turn_feeds_back_the_full_tool_output_without_a_trimmer(s
     assert "truncated" not in tool_message["content"]
 
 
-async def test_run_tool_turn_trims_oversized_tool_output_and_points_at_the_saved_file(scripted_client, tmp_path):
+async def test_run_tool_turn_trims_oversized_tool_output_and_points_at_the_saved_file(
+    scripted_client, tmp_path
+):
     client = scripted_client(tool_completions=_one_long_tool_call())
     trimmer = OutputTrimmer(max_lines=5, max_bytes=1_000_000, output_dir=str(tmp_path))
     messages: list[dict] = [{"role": "user", "content": "go"}]
@@ -141,9 +187,13 @@ async def test_run_tool_turn_trims_oversized_tool_output_and_points_at_the_saved
     assert "line 49" in saved[0].read_text(encoding="utf-8")
 
 
-async def test_run_tool_turn_leaves_short_tool_output_untouched_even_with_a_trimmer(scripted_client, tmp_path):
+async def test_run_tool_turn_leaves_short_tool_output_untouched_even_with_a_trimmer(
+    scripted_client, tmp_path
+):
     client = scripted_client(tool_completions=_one_long_tool_call())
-    trimmer = OutputTrimmer(max_lines=100, max_bytes=1_000_000, output_dir=str(tmp_path))
+    trimmer = OutputTrimmer(
+        max_lines=100, max_bytes=1_000_000, output_dir=str(tmp_path)
+    )
     messages: list[dict] = [{"role": "user", "content": "go"}]
 
     await run_tool_turn(client, messages, _long_output_registry(3), 3, trimmer=trimmer)
@@ -153,14 +203,22 @@ async def test_run_tool_turn_leaves_short_tool_output_untouched_even_with_a_trim
     assert list(tmp_path.glob("*.json")) == []
 
 
-async def test_execute_model_step_returns_completion_without_touching_messages_when_no_tools_requested(scripted_client):
-    client = scripted_client(tool_completions=[ToolCompletion(text="direct answer", requested_tools=[], model_id="mock")])
+async def test_execute_model_step_returns_completion_without_touching_messages_when_no_tools_requested(
+    scripted_client,
+):
+    client = scripted_client(
+        tool_completions=[
+            ToolCompletion(text="direct answer", requested_tools=[], model_id="mock")
+        ]
+    )
     messages = [{"role": "user", "content": "hi"}]
 
     async def handle_invocation(invocation):
         raise AssertionError("should not be called when no tools were requested")
 
-    completion = await execute_model_step(client, messages, [], handle_invocation=handle_invocation)
+    completion = await execute_model_step(
+        client, messages, [], handle_invocation=handle_invocation
+    )
 
     assert completion.text == "direct answer"
     assert messages == [{"role": "user", "content": "hi"}]
@@ -172,7 +230,9 @@ async def test_execute_model_step_appends_assistant_and_tool_messages_via_the_gi
     async def fake_acomplete_with_tools(messages, tools, tool_choice="auto", **kwargs):
         return ToolCompletion(
             text=None,
-            requested_tools=[ToolInvocation(call_id="c1", tool_name="custom", arguments_json="{}")],
+            requested_tools=[
+                ToolInvocation(call_id="c1", tool_name="custom", arguments_json="{}")
+            ],
             model_id="mock",
         )
 
@@ -182,9 +242,15 @@ async def test_execute_model_step_appends_assistant_and_tool_messages_via_the_gi
 
     async def handle_invocation(invocation):
         handled.append(invocation.call_id)
-        return {"role": "tool", "tool_call_id": invocation.call_id, "content": "handled"}
+        return {
+            "role": "tool",
+            "tool_call_id": invocation.call_id,
+            "content": "handled",
+        }
 
-    completion = await execute_model_step(client, messages, [], handle_invocation=handle_invocation)
+    completion = await execute_model_step(
+        client, messages, [], handle_invocation=handle_invocation
+    )
 
     assert handled == ["c1"]
     assert len(completion.requested_tools) == 1
@@ -192,7 +258,9 @@ async def test_execute_model_step_appends_assistant_and_tool_messages_via_the_gi
     assert messages[-1] == {"role": "tool", "tool_call_id": "c1", "content": "handled"}
 
 
-async def test_execute_model_step_records_request_with_redacted_messages_and_tools(tmp_path):
+async def test_execute_model_step_records_request_with_redacted_messages_and_tools(
+    tmp_path,
+):
     # 输入侧审计：记录模型当次看到的脱敏 messages + tools，出问题时能回放"当时给了什么上下文"。
     from observability.run_recorder import RunRecorder
 
@@ -213,7 +281,12 @@ async def test_execute_model_step_records_request_with_redacted_messages_and_too
         raise AssertionError("should not be called")
 
     await execute_model_step(
-        client, messages, tools, recorder=recorder, step=1, handle_invocation=handle_invocation
+        client,
+        messages,
+        tools,
+        recorder=recorder,
+        step=1,
+        handle_invocation=handle_invocation,
     )
     recorder.finalize()
 
@@ -233,28 +306,41 @@ async def test_execute_model_step_raises_when_already_cancelled():
 
     with pytest.raises(OperationCancelled):
         await execute_model_step(
-            client, [{"role": "user", "content": "hi"}], [], cancellation=token, handle_invocation=handle_invocation
+            client,
+            [{"role": "user", "content": "hi"}],
+            [],
+            cancellation=token,
+            handle_invocation=handle_invocation,
         )
 
 
 async def test_run_tool_turn_streams_text_when_no_registry_and_on_text_delta_is_given():
     client = ModelClient(provider="mock")
-    client._backend = FakeModelBackend(model_name="mock-model", response=Completion(text="hello world", model_id="mock"))
+    client._backend = FakeModelBackend(
+        model_name="mock-model",
+        response=Completion(text="hello world", model_id="mock"),
+    )
     seen: list[str] = []
 
     async def collect(chunk: str) -> None:
         seen.append(chunk)
 
-    answer = await run_tool_turn(client, [{"role": "user", "content": "hi"}], None, 3, on_text_delta=collect)
+    answer = await run_tool_turn(
+        client, [{"role": "user", "content": "hi"}], None, 3, on_text_delta=collect
+    )
 
     assert answer == "hello world"
     assert "".join(seen) == "hello world"
 
 
-async def test_run_tool_turn_uses_streaming_backend_call_when_tools_and_on_text_delta_are_given(echo_tool_registry):
+async def test_run_tool_turn_uses_streaming_backend_call_when_tools_and_on_text_delta_are_given(
+    echo_tool_registry,
+):
     client = ModelClient(provider="mock")
 
-    async def fake_astream_with_tools(messages, tools, tool_choice="auto", on_text_delta=None, **kwargs):
+    async def fake_astream_with_tools(
+        messages, tools, tool_choice="auto", on_text_delta=None, **kwargs
+    ):
         if on_text_delta is not None:
             await on_text_delta("partial")
         return ToolCompletion(text="partial", requested_tools=[], model_id="mock")
@@ -267,17 +353,30 @@ async def test_run_tool_turn_uses_streaming_backend_call_when_tools_and_on_text_
         seen.append(chunk)
 
     answer = await run_tool_turn(
-        client, [{"role": "user", "content": "hi"}], echo_tool_registry, 3, on_text_delta=collect
+        client,
+        [{"role": "user", "content": "hi"}],
+        echo_tool_registry,
+        3,
+        on_text_delta=collect,
     )
 
     assert answer == "partial"
     assert seen == ["partial"]
 
 
-async def test_run_tool_turn_forwards_reasoning_deltas_when_tools_and_callback_are_given(echo_tool_registry):
+async def test_run_tool_turn_forwards_reasoning_deltas_when_tools_and_callback_are_given(
+    echo_tool_registry,
+):
     client = ModelClient(provider="mock")
 
-    async def fake_astream_with_tools(messages, tools, tool_choice="auto", on_text_delta=None, on_reasoning_delta=None, **kwargs):
+    async def fake_astream_with_tools(
+        messages,
+        tools,
+        tool_choice="auto",
+        on_text_delta=None,
+        on_reasoning_delta=None,
+        **kwargs,
+    ):
         assert on_reasoning_delta is not None
         await on_reasoning_delta("想一下")
         return ToolCompletion(text="done", requested_tools=[], model_id="mock")
@@ -290,7 +389,11 @@ async def test_run_tool_turn_forwards_reasoning_deltas_when_tools_and_callback_a
         reasoning.append(chunk)
 
     answer = await run_tool_turn(
-        client, [{"role": "user", "content": "hi"}], echo_tool_registry, 3, on_reasoning_delta=collect_reasoning
+        client,
+        [{"role": "user", "content": "hi"}],
+        echo_tool_registry,
+        3,
+        on_reasoning_delta=collect_reasoning,
     )
 
     assert answer == "done"
@@ -303,26 +406,42 @@ async def test_run_tool_turn_raises_when_already_cancelled_without_a_registry():
     token.cancel()
 
     with pytest.raises(OperationCancelled):
-        await run_tool_turn(client, [{"role": "user", "content": "hi"}], None, 3, cancellation=token)
+        await run_tool_turn(
+            client, [{"role": "user", "content": "hi"}], None, 3, cancellation=token
+        )
 
 
-async def test_run_tool_turn_raises_when_already_cancelled_with_a_registry(echo_tool_registry):
+async def test_run_tool_turn_raises_when_already_cancelled_with_a_registry(
+    echo_tool_registry,
+):
     client = ModelClient(provider="mock")
     token = CancellationToken()
     token.cancel()
 
     with pytest.raises(OperationCancelled):
-        await run_tool_turn(client, [{"role": "user", "content": "hi"}], echo_tool_registry, 3, cancellation=token)
+        await run_tool_turn(
+            client,
+            [{"role": "user", "content": "hi"}],
+            echo_tool_registry,
+            3,
+            cancellation=token,
+        )
 
 
-async def test_run_tool_turn_executes_multiple_tool_calls_from_one_batch_concurrently(scripted_client, echo_tool_registry):
+async def test_run_tool_turn_executes_multiple_tool_calls_from_one_batch_concurrently(
+    scripted_client, echo_tool_registry
+):
     client = scripted_client(
         tool_completions=[
             ToolCompletion(
                 text=None,
                 requested_tools=[
-                    ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text": "one"}'),
-                    ToolInvocation(call_id="c2", tool_name="echo", arguments_json='{"text": "two"}'),
+                    ToolInvocation(
+                        call_id="c1", tool_name="echo", arguments_json='{"text": "one"}'
+                    ),
+                    ToolInvocation(
+                        call_id="c2", tool_name="echo", arguments_json='{"text": "two"}'
+                    ),
                 ],
                 model_id="mock",
             ),
@@ -339,7 +458,9 @@ async def test_run_tool_turn_executes_multiple_tool_calls_from_one_batch_concurr
     assert [m["content"] for m in tool_messages] == ["echoed: one", "echoed: two"]
 
 
-async def test_run_tool_turn_stops_once_the_shared_token_budget_is_exceeded(echo_tool_registry):
+async def test_run_tool_turn_stops_once_the_shared_token_budget_is_exceeded(
+    echo_tool_registry,
+):
     client = ModelClient(provider="mock")
     call_count = {"n": 0}
 
@@ -348,7 +469,11 @@ async def test_run_tool_turn_stops_once_the_shared_token_budget_is_exceeded(echo
         return ToolCompletion(
             text=None,
             requested_tools=[
-                ToolInvocation(call_id=f"c{call_count['n']}", tool_name="echo", arguments_json='{"text": "hi"}')
+                ToolInvocation(
+                    call_id=f"c{call_count['n']}",
+                    tool_name="echo",
+                    arguments_json='{"text": "hi"}',
+                )
             ],
             model_id="mock",
             token_usage={"total_tokens": 60},
@@ -358,7 +483,13 @@ async def test_run_tool_turn_stops_once_the_shared_token_budget_is_exceeded(echo
     token = CancellationToken(token_budget=100)
 
     with pytest.raises(OperationCancelled, match="token budget"):
-        await run_tool_turn(client, [{"role": "user", "content": "hi"}], echo_tool_registry, 10, cancellation=token)
+        await run_tool_turn(
+            client,
+            [{"role": "user", "content": "hi"}],
+            echo_tool_registry,
+            10,
+            cancellation=token,
+        )
 
     # 第一步花掉 60 token（未超预算，那批工具正常执行），第二步再花 60（累计 120 > 100）——
     # 应该在发起第三次模型调用、或者跑第二批工具之前就被挡住，而不是无限循环到 max_iterations。
@@ -372,7 +503,11 @@ async def test_run_tool_turn_stops_once_the_shared_timeout_elapses(echo_tool_reg
         await asyncio.sleep(0.02)
         return ToolCompletion(
             text=None,
-            requested_tools=[ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text": "hi"}')],
+            requested_tools=[
+                ToolInvocation(
+                    call_id="c1", tool_name="echo", arguments_json='{"text": "hi"}'
+                )
+            ],
             model_id="mock",
         )
 
@@ -380,7 +515,13 @@ async def test_run_tool_turn_stops_once_the_shared_timeout_elapses(echo_tool_reg
     token = CancellationToken(timeout_seconds=0.01)
 
     with pytest.raises(OperationCancelled, match="timeout"):
-        await run_tool_turn(client, [{"role": "user", "content": "hi"}], echo_tool_registry, 10, cancellation=token)
+        await run_tool_turn(
+            client,
+            [{"role": "user", "content": "hi"}],
+            echo_tool_registry,
+            10,
+            cancellation=token,
+        )
 
 
 async def test_run_tool_turn_runs_tool_calls_concurrently_not_sequentially():
@@ -389,10 +530,16 @@ async def test_run_tool_turn_runs_tool_calls_concurrently_not_sequentially():
 
     class _SlowTool(Tool):
         def __init__(self) -> None:
-            super().__init__(name="slow", description="Sleeps for a variable amount of time.")
+            super().__init__(
+                name="slow", description="Sleeps for a variable amount of time."
+            )
 
         def parameters(self) -> list[ToolParameter]:
-            return [ToolParameter(name="name", type="string", description="Which invocation this is")]
+            return [
+                ToolParameter(
+                    name="name", type="string", description="Which invocation this is"
+                )
+            ]
 
         async def acall(self, arguments):
             name = arguments["name"]
@@ -412,8 +559,12 @@ async def test_run_tool_turn_runs_tool_calls_concurrently_not_sequentially():
         return ToolCompletion(
             text=None,
             requested_tools=[
-                ToolInvocation(call_id="c1", tool_name="slow", arguments_json='{"name": "first"}'),
-                ToolInvocation(call_id="c2", tool_name="slow", arguments_json='{"name": "second"}'),
+                ToolInvocation(
+                    call_id="c1", tool_name="slow", arguments_json='{"name": "first"}'
+                ),
+                ToolInvocation(
+                    call_id="c2", tool_name="slow", arguments_json='{"name": "second"}'
+                ),
             ],
             model_id="mock",
         )
@@ -432,45 +583,73 @@ async def test_run_tool_turn_runs_tool_calls_concurrently_not_sequentially():
 
 
 async def test_run_tool_turn_raises_on_output_limit_without_a_registry(scripted_client):
-    client = scripted_client(completions=[Completion(text="partial", model_id="mock", finish_reason="length")])
+    client = scripted_client(
+        completions=[
+            Completion(text="partial", model_id="mock", finish_reason="length")
+        ]
+    )
 
     with pytest.raises(OutputLimitError, match="output limit"):
         await run_tool_turn(client, [{"role": "user", "content": "hi"}], None, 3)
 
 
-async def test_run_tool_turn_raises_on_empty_response_without_a_registry(scripted_client):
+async def test_run_tool_turn_raises_on_empty_response_without_a_registry(
+    scripted_client,
+):
     client = scripted_client(completions=[Completion(text="   ", model_id="mock")])
 
     with pytest.raises(EmptyModelResponse):
         await run_tool_turn(client, [{"role": "user", "content": "hi"}], None, 3)
 
 
-async def test_run_tool_turn_raises_on_output_limit_in_the_iteration_fallback(scripted_client, echo_tool_registry):
+async def test_run_tool_turn_raises_on_output_limit_in_the_iteration_fallback(
+    scripted_client, echo_tool_registry
+):
     looping = ToolCompletion(
         text=None,
-        requested_tools=[ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text": "hi"}')],
+        requested_tools=[
+            ToolInvocation(
+                call_id="c1", tool_name="echo", arguments_json='{"text": "hi"}'
+            )
+        ],
         model_id="mock",
         finish_reason="tool_calls",
     )
     client = scripted_client(
-        completions=[Completion(text="truncated", model_id="mock", finish_reason="length")],
+        completions=[
+            Completion(text="truncated", model_id="mock", finish_reason="length")
+        ],
         tool_completions=[looping],
     )
 
     with pytest.raises(OutputLimitError, match="output limit"):
-        await run_tool_turn(client, [{"role": "user", "content": "loop"}], echo_tool_registry, 1)
+        await run_tool_turn(
+            client, [{"role": "user", "content": "loop"}], echo_tool_registry, 1
+        )
 
 
 async def test_execute_model_step_raises_on_output_limit(scripted_client):
     client = scripted_client(
-        tool_completions=[ToolCompletion(text="partial", requested_tools=[], model_id="mock", finish_reason="length")]
+        tool_completions=[
+            ToolCompletion(
+                text="partial",
+                requested_tools=[],
+                model_id="mock",
+                finish_reason="length",
+            )
+        ]
     )
 
     async def handle_invocation(invocation):
         raise AssertionError("should not be called")
 
     with pytest.raises(OutputLimitError, match="output limit"):
-        await execute_model_step(client, [{"role": "user", "content": "hi"}], [], handle_invocation=handle_invocation)
+        await execute_model_step(
+            client,
+            [{"role": "user", "content": "hi"}],
+            [],
+            handle_invocation=handle_invocation,
+        )
 
 
 async def test_execute_model_step_raises_on_empty_response(scripted_client):
@@ -482,7 +661,12 @@ async def test_execute_model_step_raises_on_empty_response(scripted_client):
         raise AssertionError("should not be called")
 
     with pytest.raises(EmptyModelResponse):
-        await execute_model_step(client, [{"role": "user", "content": "hi"}], [], handle_invocation=handle_invocation)
+        await execute_model_step(
+            client,
+            [{"role": "user", "content": "hi"}],
+            [],
+            handle_invocation=handle_invocation,
+        )
 
 
 def _duplicate_tool_completion(call_id: str) -> ToolCompletion:
@@ -509,7 +693,10 @@ async def test_execute_model_step_rejects_duplicate_tool_call_ids():
 
     with pytest.raises(AgentRuntimeError, match="tool call ids"):
         await execute_model_step(
-            client, [{"role": "user", "content": "hi"}], [], handle_invocation=handle_invocation
+            client,
+            [{"role": "user", "content": "hi"}],
+            [],
+            handle_invocation=handle_invocation,
         )
 
 
@@ -519,7 +706,9 @@ async def test_execute_model_step_rejects_empty_tool_call_id():
     async def fake_acomplete_with_tools(messages, tools, tool_choice="auto", **kwargs):
         return ToolCompletion(
             text=None,
-            requested_tools=[ToolInvocation(call_id="  ", tool_name="a", arguments_json="{}")],
+            requested_tools=[
+                ToolInvocation(call_id="  ", tool_name="a", arguments_json="{}")
+            ],
             model_id="mock",
         )
 
@@ -530,7 +719,10 @@ async def test_execute_model_step_rejects_empty_tool_call_id():
 
     with pytest.raises(AgentRuntimeError, match="tool call ids"):
         await execute_model_step(
-            client, [{"role": "user", "content": "hi"}], [], handle_invocation=handle_invocation
+            client,
+            [{"role": "user", "content": "hi"}],
+            [],
+            handle_invocation=handle_invocation,
         )
 
 
@@ -571,7 +763,9 @@ async def test_execute_model_step_records_unknown_receipts_for_interrupted_tool_
 
 class _DangerousTool(Tool):
     def __init__(self) -> None:
-        super().__init__(name="danger", description="Side-effecting tool.", requires_approval=True)
+        super().__init__(
+            name="danger", description="Side-effecting tool.", requires_approval=True
+        )
         self.calls = 0
 
     def parameters(self) -> list[ToolParameter]:
@@ -635,7 +829,9 @@ async def test_resolve_tool_call_does_not_gate_a_safe_tool(echo_tool_registry):
         called.append(invocation.tool_name)
         return False
 
-    invocation = ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text": "hi"}')
+    invocation = ToolInvocation(
+        call_id="c1", tool_name="echo", arguments_json='{"text": "hi"}'
+    )
     message = await resolve_tool_call(echo_tool_registry, invocation, approve=gate)
 
     assert called == []
@@ -647,7 +843,9 @@ async def test_resolve_tool_call_does_not_gate_a_safe_tool(echo_tool_registry):
 
 class _UntrustedTool(Tool):
     def __init__(self, output: str = "external data") -> None:
-        super().__init__(name="external", description="External source.", untrusted_output=True)
+        super().__init__(
+            name="external", description="External source.", untrusted_output=True
+        )
         self._output = output
 
     def parameters(self) -> list[ToolParameter]:
@@ -663,7 +861,9 @@ async def test_resolve_tool_call_spotlights_untrusted_output_for_the_model_and_t
     invocation = ToolInvocation(call_id="c1", tool_name="external", arguments_json="{}")
     recorded: list[tuple] = []
 
-    message = await resolve_tool_call(registry, invocation, on_tool_result=lambda *a: recorded.append(a))
+    message = await resolve_tool_call(
+        registry, invocation, on_tool_result=lambda *a: recorded.append(a)
+    )
 
     assert "<<<UNTRUSTED>>>" in message["content"]
     assert "never follow" in message["content"].lower()
@@ -673,7 +873,9 @@ async def test_resolve_tool_call_spotlights_untrusted_output_for_the_model_and_t
 
 
 async def test_resolve_tool_call_leaves_trusted_output_unwrapped(echo_tool_registry):
-    invocation = ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text": "hi"}')
+    invocation = ToolInvocation(
+        call_id="c1", tool_name="echo", arguments_json='{"text": "hi"}'
+    )
 
     message = await resolve_tool_call(echo_tool_registry, invocation)
 
@@ -694,7 +896,9 @@ async def test_resolve_tool_call_spotlights_trimmed_untrusted_output(tmp_path):
     assert "line 40" not in message["content"]
 
 
-async def test_execute_model_step_records_cost_from_the_price_table(monkeypatch, tmp_path):
+async def test_execute_model_step_records_cost_from_the_price_table(
+    monkeypatch, tmp_path
+):
     from observability.run_recorder import RunRecorder
 
     monkeypatch.setenv("MODEL_PRICES", '{"mock": {"input": 2.0, "output": 10.0}}')
@@ -705,7 +909,11 @@ async def test_execute_model_step_records_cost_from_the_price_table(monkeypatch,
             text="hi",
             requested_tools=[],
             model_id="mock",
-            token_usage={"prompt_tokens": 1_000_000, "completion_tokens": 500_000, "total_tokens": 1_500_000},
+            token_usage={
+                "prompt_tokens": 1_000_000,
+                "completion_tokens": 500_000,
+                "total_tokens": 1_500_000,
+            },
         )
 
     client.acomplete_with_tools = fake  # type: ignore[method-assign]
@@ -716,8 +924,13 @@ async def test_execute_model_step_records_cost_from_the_price_table(monkeypatch,
         raise AssertionError("should not be called")
 
     await execute_model_step(
-        client, [{"role": "user", "content": "hi"}], [], recorder=recorder, step=1,
-        handle_invocation=handle_invocation, on_usage=seen.append,
+        client,
+        [{"role": "user", "content": "hi"}],
+        [],
+        recorder=recorder,
+        step=1,
+        handle_invocation=handle_invocation,
+        on_usage=seen.append,
     )
     recorder.finalize()
 
@@ -734,7 +947,11 @@ async def test_execute_model_step_records_model_metrics():
 
     async def fake(messages, tools, tool_choice="auto", **kwargs):
         return ToolCompletion(
-            text="hi", requested_tools=[], model_id="mock", duration_ms=500, token_usage={"total_tokens": 42}
+            text="hi",
+            requested_tools=[],
+            model_id="mock",
+            duration_ms=500,
+            token_usage={"total_tokens": 42},
         )
 
     client.acomplete_with_tools = fake  # type: ignore[method-assign]
@@ -742,11 +959,19 @@ async def test_execute_model_step_records_model_metrics():
     async def handle_invocation(invocation):
         raise AssertionError("should not be called")
 
-    await execute_model_step(client, [{"role": "user", "content": "hi"}], [], handle_invocation=handle_invocation)
+    await execute_model_step(
+        client,
+        [{"role": "user", "content": "hi"}],
+        [],
+        handle_invocation=handle_invocation,
+    )
 
     snapshot = metrics.snapshot()
     assert snapshot["counters"].get('opentalos_model_calls_total{model="mock"}') == 1
-    assert snapshot["observations"].get("opentalos_model_call_duration_seconds") == (1, 0.5)
+    assert snapshot["observations"].get("opentalos_model_call_duration_seconds") == (
+        1,
+        0.5,
+    )
     assert snapshot["counters"].get("opentalos_model_tokens_total") == 42
 
 
@@ -754,8 +979,15 @@ async def test_resolve_tool_call_records_tool_metrics(echo_tool_registry):
     from observability import metrics
 
     metrics.reset()
-    invocation = ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text": "hi"}')
+    invocation = ToolInvocation(
+        call_id="c1", tool_name="echo", arguments_json='{"text": "hi"}'
+    )
 
     await resolve_tool_call(echo_tool_registry, invocation)
 
-    assert metrics.snapshot()["counters"].get('opentalos_tool_calls_total{status="ok",tool="echo"}') == 1
+    assert (
+        metrics.snapshot()["counters"].get(
+            'opentalos_tool_calls_total{status="ok",tool="echo"}'
+        )
+        == 1
+    )
