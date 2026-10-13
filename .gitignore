@@ -33,3 +33,8 @@ traces/
 
 # Runtime data (SQLite chat DB, traces)
 .data/
+
+# speckit 工具自身的脚手架（scripts/templates/workflows/integrations 等），本地可用即可，
+# 不需要进版本库。.specify/memory/constitution.md 是例外——它已经被显式提交过（项目治理文档），
+# 已跟踪文件不受这条规则影响，继续正常被 git 追踪。
+.specify/
