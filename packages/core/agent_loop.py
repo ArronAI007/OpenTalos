@@ -11,12 +11,20 @@ from typing import Any
 from .cancellation import CancellationToken
 from .errors import AgentRuntimeError, EmptyModelResponse, OutputLimitError
 from .pricing import estimate_cost
-from .protocol import Completion, ToolCompletion, ToolInvocation
+from .protocol import AgentEvent, Completion, EventKind, ToolCompletion, ToolInvocation
 from .model import ModelClient
 from .protocols import MetricsSink, NullMetricsSink, OutputTrimmerLike, SteerQueue, ToolExecutor, TraceRecorder
 
 ToolInvocationHandler = Callable[[ToolInvocation], Awaitable[dict[str, str]]]
 ApprovalGate = Callable[[ToolInvocation], Awaitable[bool]]
+EventEmitter = Callable[[AgentEvent], Awaitable[None]]
+
+
+async def _emit(emit: EventEmitter | None, kind: EventKind, agent_name: str, **data: Any) -> None:
+    """emit 为 None 时 no-op——没有订阅者，事件总线不产生任何开销。"""
+    if emit is None:
+        return
+    await emit(AgentEvent.emit(kind, agent_name, **data))
 
 # 拒绝时回给模型的文案：模型据此不再重试，转而换方案或询问用户。
 _DENIED_MESSAGE = (
@@ -249,6 +257,9 @@ async def execute_model_step(
     on_usage: Callable[[dict[str, Any]], None] | None = None,
     metrics: MetricsSink = NullMetricsSink(),
     steer: SteerQueue | None = None,
+    emit: EventEmitter | None = None,
+    agent_name: str = "",
+    stream: bool = False,
     **kwargs: Any,
 ) -> ToolCompletion:
     """带工具 schema 的单步：调一次模型 -> 有工具请求就并行执行并把结果追加回 messages。
@@ -272,6 +283,8 @@ async def execute_model_step(
     if steer is not None:
         for pending in steer.drain():
             messages.append({"role": "user", "content": pending})
+            await _emit(emit, EventKind.MESSAGE_START, agent_name, role="user", content=pending)
+            await _emit(emit, EventKind.MESSAGE_END, agent_name, role="user", content=pending)
         steer.clear_interrupt()
         interrupt = steer.interrupt_event
 
@@ -279,15 +292,35 @@ async def execute_model_step(
         # 输入侧审计：记录模型当次看到的上下文（脱敏后），出问题时能回放"当时给了什么历史/提示词"。
         recorder.log_event("request", {"messages": messages, "tools": tools}, step=step)
 
+    await _emit(emit, EventKind.MESSAGE_START, agent_name, role="assistant")
+
+    # 是否走流式由显式的 stream 参数或调用方本来就提供的 on_text_delta/on_reasoning_delta 决定，
+    # 不能仅仅因为有人订阅了事件总线（emit 不为 None）就强行把 acomplete_with_tools 换成
+    # astream_with_tools——那会悄悄改变实际发起的请求路径，对只打了 acomplete_with_tools 补丁的
+    # 调用方是破坏性的。`stream=True` 是明确表达"我要走流式、增量只经事件总线下发"的信号（供
+    # apps/api 这类只想订阅事件总线、不需要原始 on_text_delta 回调的调用方使用）。
+    want_stream = stream or on_text_delta is not None or on_reasoning_delta is not None
+
+    async def _emit_text_delta(chunk: str) -> None:
+        await _emit(emit, EventKind.MESSAGE_UPDATE, agent_name, role="assistant", delta=chunk, delta_kind="text")
+        if on_text_delta is not None:
+            await on_text_delta(chunk)
+
+    async def _emit_reasoning_delta(chunk: str) -> None:
+        await _emit(emit, EventKind.MESSAGE_UPDATE, agent_name, role="assistant", delta=chunk, delta_kind="reasoning")
+        if on_reasoning_delta is not None:
+            await on_reasoning_delta(chunk)
+
     completion = await _call_model(
         model_client,
         messages,
         tools,
         interrupt=interrupt,
-        on_text_delta=on_text_delta,
-        on_reasoning_delta=on_reasoning_delta,
+        on_text_delta=_emit_text_delta if want_stream else None,
+        on_reasoning_delta=_emit_reasoning_delta if want_stream else None,
         kwargs=kwargs,
     )
+    await _emit(emit, EventKind.MESSAGE_END, agent_name, role="assistant", content=completion.text)
     _record_usage(cancellation, completion.token_usage)
     # 成本：从 token 用量 × 价目表估算；未知模型/无价目时不填（不展示假值）。
     usage: dict[str, Any] = dict(completion.token_usage)
@@ -323,16 +356,35 @@ async def execute_model_step(
         cancellation.raise_if_cancelled()
 
     async def run_one(invocation: ToolInvocation) -> dict[str, str]:
+        await _emit(
+            emit, EventKind.TOOL_EXECUTION_START, agent_name,
+            call_id=invocation.call_id, tool_name=invocation.tool_name, arguments_json=invocation.arguments_json,
+        )
         # 任何中断（取消/异常）都为未完成的调用补一条"执行状态未知"的回执，避免 transcript
         # 里出现"模型请求了工具但没有任何回执"的悬空回合。
         try:
-            return await handle_invocation(invocation)
+            result = await handle_invocation(invocation)
         except BaseException:
             receipt = _unknown_execution_receipt(invocation)
             messages.append(receipt)
             if on_tool_result is not None:
                 on_tool_result(invocation.call_id, invocation.tool_name, invocation.arguments_json, receipt["content"])
+            await _emit(
+                emit, EventKind.TOOL_EXECUTION_END, agent_name,
+                call_id=invocation.call_id, tool_name=invocation.tool_name, result=receipt["content"], is_error=True,
+            )
             raise
+        await _emit(
+            emit, EventKind.MESSAGE_START, agent_name, role="tool", call_id=invocation.call_id, content=result["content"],
+        )
+        await _emit(
+            emit, EventKind.MESSAGE_END, agent_name, role="tool", call_id=invocation.call_id, content=result["content"],
+        )
+        await _emit(
+            emit, EventKind.TOOL_EXECUTION_END, agent_name,
+            call_id=invocation.call_id, tool_name=invocation.tool_name, result=result["content"], is_error=False,
+        )
+        return result
 
     results = await asyncio.gather(*(run_one(invocation) for invocation in completion.requested_tools))
     messages.extend(results)
@@ -354,6 +406,9 @@ async def run_tool_turn(
     on_usage: Callable[[dict[str, Any]], None] | None = None,
     metrics: MetricsSink = NullMetricsSink(),
     steer: SteerQueue | None = None,
+    emit: EventEmitter | None = None,
+    agent_name: str = "",
+    stream: bool = False,
     **kwargs: Any,
 ) -> str:
     """调用 LLM -> 按需执行工具 -> 把结果喂回去，直到模型不再请求工具或用光 max_iterations。
@@ -380,6 +435,7 @@ async def run_tool_turn(
         return await resolve_tool_call(tool_registry, invocation, recorder, step, trimmer, on_tool_result, approve, metrics)
 
     for step in range(1, max_iterations + 1):
+        await _emit(emit, EventKind.TURN_START, agent_name, step=step)
         completion = await execute_model_step(
             model_client,
             messages,
@@ -394,8 +450,12 @@ async def run_tool_turn(
             on_usage=on_usage,
             metrics=metrics,
             steer=steer,
+            emit=emit,
+            agent_name=agent_name,
+            stream=stream,
             **kwargs,
         )
+        await _emit(emit, EventKind.TURN_END, agent_name, step=step)
         if not completion.requested_tools:
             return completion.text or ""
 

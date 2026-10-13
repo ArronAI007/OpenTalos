@@ -1,16 +1,13 @@
 import asyncio
-import time
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
-from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel
 
 from .compaction import summarize_history
 from .model import ModelClient
-from .protocol import ChatMessage, ToolInvocation
+from .protocol import AgentEvent, ChatMessage, EventKind, ToolInvocation
 from .protocols import (
     HistoryStore,
     MetricsSink,
@@ -29,28 +26,10 @@ class RuntimeSettings(BaseModel):
     callback_timeout_seconds: float = 5.0
 
 
-class AgentPhase(Enum):
-    STARTED = "started"
-    FINISHED = "finished"
-    FAILED = "failed"
-
-
-@dataclass
-class PhaseSignal:
-    phase: AgentPhase
-    timestamp: float
-    agent_name: str
-    data: dict[str, Any] = field(default_factory=dict)
-
-    @classmethod
-    def emit(cls, phase: AgentPhase, agent_name: str, **data: Any) -> "PhaseSignal":
-        return cls(phase=phase, timestamp=time.time(), agent_name=agent_name, data=data)
-
-    def to_dict(self) -> dict[str, Any]:
-        return {"phase": self.phase.value, "timestamp": self.timestamp, "agent_name": self.agent_name, "data": self.data}
-
-
-PhaseCallback = Callable[[PhaseSignal], Awaitable[None]] | None
+EventListener = Callable[[AgentEvent], Awaitable[None]]
+# 向后兼容别名：arespond_with_callbacks 的 on_start/on_finish/on_error 参数类型，现在携带的是
+# AgentEvent 而不是旧的 PhaseSignal（事件总线泛化见 EventKind/AgentEvent，packages/core/protocol.py）。
+PhaseCallback = EventListener | None
 
 
 class Agent(ABC):
@@ -91,6 +70,7 @@ class Agent(ABC):
         # 压缩成功后触发的无参回调（供 runtime 落库快照）；压缩本身是纯 Surface 操作，不该在
         # 这里耦合任何持久化逻辑，所以回调由外部按需注入，None 时静默跳过。
         self.on_compression: Callable[[], Awaitable[None]] | None = None
+        self._listeners: list[EventListener] = []
 
     @abstractmethod
     async def arespond(self, input_text: str, **kwargs: object) -> str: ...
@@ -114,6 +94,26 @@ class Agent(ABC):
         self.recorder = None
         return stats
 
+    def subscribe(self, listener: EventListener) -> Callable[[], None]:
+        """注册一个事件监听器，按注册顺序被依次 await；返回取消订阅函数。"""
+        self._listeners.append(listener)
+
+        def _unsubscribe() -> None:
+            if listener in self._listeners:
+                self._listeners.remove(listener)
+
+        return _unsubscribe
+
+    async def _emit(self, event: AgentEvent) -> None:
+        """按注册顺序依次 await 每个监听器；单个监听器异常被吞掉，不打断其余监听器或主流程。不
+        设超时——FR-003 要求 RUN_END 必须等全部监听器跑完才算运行真正空闲，加超时会和这条要求冲突
+        （超时相关的向后兼容语义保留在 `_call_legacy_callback` 这一层，不在这里）。"""
+        for listener in list(self._listeners):
+            try:
+                await listener(event)
+            except Exception:
+                pass
+
     async def arespond_with_callbacks(
         self,
         input_text: str,
@@ -122,32 +122,61 @@ class Agent(ABC):
         on_error: PhaseCallback = None,
         **kwargs: object,
     ) -> str:
+        """向后兼容的三段式包装：内部订阅一个临时监听器，把 RUN_START/RUN_END 事件转发成
+        on_start/on_finish/on_error。新代码应直接用 subscribe() 接事件总线（见
+        contracts/event-bus.md），这层包装只是为了不破坏已有调用方的签名。"""
+        unsubscribe: Callable[[], None] | None = None
+        if on_start is not None or on_finish is not None or on_error is not None:
+            unsubscribe = self.subscribe(self._make_legacy_bridge(on_start, on_finish, on_error))
+
         self.begin_trace()
         status, error_text = "completed", None
         try:
-            await self._notify(AgentPhase.STARTED, on_start, input_text=input_text)
+            await self._emit(AgentEvent.emit(EventKind.RUN_START, self.name, input_text=input_text))
             try:
                 result = await self.arespond(input_text, **kwargs)
             except asyncio.CancelledError:
                 status = "cancelled"
+                await self._emit(AgentEvent.emit(EventKind.RUN_END, self.name, status="cancelled"))
                 raise
             except Exception as error:
                 status, error_text = "failed", str(error)
-                await self._notify(AgentPhase.FAILED, on_error, error=error_text, error_type=type(error).__name__)
+                await self._emit(
+                    AgentEvent.emit(
+                        EventKind.RUN_END, self.name, status="failed", error=error_text, error_type=type(error).__name__
+                    )
+                )
                 raise
-            await self._notify(AgentPhase.FINISHED, on_finish, result=result)
+            await self._emit(AgentEvent.emit(EventKind.RUN_END, self.name, status="completed", result=result))
             return result
         finally:
+            if unsubscribe is not None:
+                unsubscribe()
             self.end_trace(status=status, error=error_text)
 
-    async def _notify(self, phase: AgentPhase, callback: PhaseCallback, **data: object) -> None:
+    def _make_legacy_bridge(
+        self, on_start: PhaseCallback, on_finish: PhaseCallback, on_error: PhaseCallback
+    ) -> EventListener:
+        async def _bridge(event: AgentEvent) -> None:
+            if event.kind == EventKind.RUN_START:
+                await self._call_legacy_callback(on_start, event)
+            elif event.kind == EventKind.RUN_END:
+                status = event.data.get("status")
+                if status == "completed":
+                    await self._call_legacy_callback(on_finish, event)
+                elif status == "failed":
+                    await self._call_legacy_callback(on_error, event)
+                # status == "cancelled"：旧三段式从不在这种情况下回调任何一个，维持原行为不变
+
+        return _bridge
+
+    async def _call_legacy_callback(self, callback: PhaseCallback, event: AgentEvent) -> None:
         if callback is None:
             return
-        signal = PhaseSignal.emit(phase, self.name, **data)
         try:
-            await asyncio.wait_for(callback(signal), timeout=self.settings.callback_timeout_seconds)
+            await asyncio.wait_for(callback(event), timeout=self.settings.callback_timeout_seconds)
         except Exception:
-            # 回调超时或回调自身抛异常都不应打断 Agent 主流程（设计如此）。
+            # 回调超时或回调自身抛异常都不应打断 Agent 主流程（设计如此，沿用旧 _notify 行为）。
             pass
 
     def record_message(self, message: ChatMessage) -> None:

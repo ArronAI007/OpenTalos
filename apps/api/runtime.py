@@ -18,7 +18,7 @@ from agents.subagent_tool import DispatchSubagentTool
 from core.agent import Agent
 from core.cancellation import CancellationToken
 from core.model import ModelClient
-from core.protocol import ChatMessage, ToolInvocation
+from core.protocol import AgentEvent, ChatMessage, EventKind, ToolInvocation
 from memory import build_consolidation_messages, build_extraction_messages, parse_consolidation, parse_extraction
 from observability import metrics
 from skill.discovery import discover_skills
@@ -565,14 +565,25 @@ class ChatRuntime:
             if "cost" in usage:
                 turn_usage["cost"] = turn_usage.get("cost", 0.0) + usage["cost"]
 
+        async def handle_event(event: AgentEvent) -> None:
+            # 事件总线取代 on_text_delta=/on_reasoning_delta= 两个专用回调：MESSAGE_UPDATE 按
+            # delta_kind 换算回原有的两种 SSE 事件类型，其余事件种类这里暂不转发（tool_call/
+            # tool_result 已经由 EventToolRegistry.sink 独立处理，不走这条路径）。
+            if event.kind == EventKind.MESSAGE_UPDATE:
+                delta_kind = event.data.get("delta_kind")
+                if delta_kind == "text":
+                    await emit({"type": "delta", "text": event.data["delta"]})
+                elif delta_kind == "reasoning":
+                    await emit({"type": "reasoning", "text": event.data["delta"]})
+
         async def produce() -> None:
             nonlocal error, reply
+            unsubscribe = agent.subscribe(handle_event)
             try:
                 recalled = await self._recall_memories(content)
                 reply = await agent.arespond_with_callbacks(
                     content,
-                    on_text_delta=lambda chunk: emit({"type": "delta", "text": chunk}),
-                    on_reasoning_delta=lambda chunk: emit({"type": "reasoning", "text": chunk}),
+                    stream=True,
                     cancellation=cancellation,
                     drain_steer=lambda: _drain_queue(run.steer),
                     steer_event=run.steer_event,
@@ -583,6 +594,7 @@ class ChatRuntime:
             except Exception as exc:  # noqa: BLE001 - 转成 error 事件交给前端
                 error = str(exc)
             finally:
+                unsubscribe()
                 await queue.put(None)
 
         producer = asyncio.create_task(produce())

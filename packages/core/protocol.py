@@ -2,8 +2,10 @@
 都是无行为的数据载体，不含任何模型调用/循环逻辑。
 """
 
+import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
+from enum import Enum
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -73,3 +75,35 @@ class StreamSummary:
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+
+class EventKind(Enum):
+    """一次运行里能观察到的事件种类（泛化自原来的 AgentPhase 三段式）。"""
+
+    RUN_START = "run_start"
+    RUN_END = "run_end"
+    TURN_START = "turn_start"
+    TURN_END = "turn_end"
+    MESSAGE_START = "message_start"
+    MESSAGE_UPDATE = "message_update"
+    MESSAGE_END = "message_end"
+    TOOL_EXECUTION_START = "tool_execution_start"
+    TOOL_EXECUTION_UPDATE = "tool_execution_update"
+    TOOL_EXECUTION_END = "tool_execution_end"
+
+
+@dataclass
+class AgentEvent:
+    """一次运行里发生的一件具体事情的不可变快照（泛化自原来的 PhaseSignal）。"""
+
+    kind: EventKind
+    timestamp: float
+    agent_name: str
+    data: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def emit(cls, kind: EventKind, agent_name: str, **data: Any) -> "AgentEvent":
+        return cls(kind=kind, timestamp=time.time(), agent_name=agent_name, data=data)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"kind": self.kind.value, "timestamp": self.timestamp, "agent_name": self.agent_name, "data": self.data}

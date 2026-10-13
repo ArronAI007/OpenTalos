@@ -3,7 +3,7 @@ import asyncio
 import pytest
 
 from core.cancellation import CancellationToken
-from core.protocol import ToolCompletion, ToolInvocation
+from core.protocol import AgentEvent, EventKind, ToolCompletion, ToolInvocation
 from core.errors import EmptyModelResponse, OperationCancelled, OutputLimitError
 from core.model import ModelClient
 from tool.outcome import ToolOutcome
@@ -340,3 +340,67 @@ async def test_steering_interrupts_an_in_flight_model_call_and_retries():
     assert interrupts["n"] == 1  # 打断了一次
     assert calls["n"] == 2  # 第一步重跑了一次
     assert any(m.get("content") == "改用中文" for m in seen[1])  # 重跑时已带上 steer
+
+
+async def test_react_agent_subscribers_see_full_event_sequence_for_a_tool_call_run(scripted_client, echo_tool_registry):
+    client = scripted_client(
+        tool_completions=[
+            ToolCompletion(
+                text=None,
+                requested_tools=[ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text": "hi"}')],
+                model_id="mock",
+            ),
+            ToolCompletion(
+                text=None,
+                requested_tools=[
+                    ToolInvocation(call_id="c2", tool_name=FINISH_TOOL_NAME, arguments_json='{"final_answer": "hi echoed"}')
+                ],
+                model_id="mock",
+            ),
+        ]
+    )
+    agent = ReActAgent(name="bot", model_client=client, tool_registry=echo_tool_registry, max_steps=5)
+
+    events: list[AgentEvent] = []
+
+    async def listener(event: AgentEvent) -> None:
+        events.append(event)
+
+    agent.subscribe(listener)
+
+    answer = await agent.arespond_with_callbacks("echo hi then finish")
+
+    assert answer == "hi echoed"
+    kinds = [e.kind for e in events]
+    assert kinds[0] == EventKind.RUN_START
+    assert kinds[-1] == EventKind.RUN_END
+    assert EventKind.TURN_START in kinds and EventKind.TURN_END in kinds
+    tool_events = [e for e in events if e.kind in (EventKind.TOOL_EXECUTION_START, EventKind.TOOL_EXECUTION_END)]
+    # 两次工具调用（echo + finish 本身也走同一套工具调用事件路径）各有一对 START/END。
+    assert [e.kind for e in tool_events] == [
+        EventKind.TOOL_EXECUTION_START, EventKind.TOOL_EXECUTION_END,
+        EventKind.TOOL_EXECUTION_START, EventKind.TOOL_EXECUTION_END,
+    ]
+    assert tool_events[0].data["tool_name"] == "echo"
+    assert tool_events[2].data["tool_name"] == FINISH_TOOL_NAME
+
+
+async def test_react_agent_subscribers_see_plain_event_sequence_for_a_no_tool_call_run(scripted_client):
+    client = scripted_client(tool_completions=[ToolCompletion(text="direct answer", requested_tools=[], model_id="mock")])
+    agent = ReActAgent(name="bot", model_client=client)
+
+    events: list[AgentEvent] = []
+
+    async def listener(event: AgentEvent) -> None:
+        events.append(event)
+
+    agent.subscribe(listener)
+
+    answer = await agent.arespond_with_callbacks("what's 2+2")
+
+    assert answer == "direct answer"
+    kinds = [e.kind for e in events]
+    assert kinds[0] == EventKind.RUN_START
+    assert kinds[-1] == EventKind.RUN_END
+    assert EventKind.MESSAGE_START in kinds and EventKind.MESSAGE_END in kinds
+    assert not any(e.kind in (EventKind.TOOL_EXECUTION_START, EventKind.TOOL_EXECUTION_END) for e in events)

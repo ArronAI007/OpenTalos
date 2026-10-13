@@ -4,7 +4,7 @@ import pytest
 
 from context import OutputTrimmer
 from core.cancellation import CancellationToken
-from core.protocol import Completion, ToolCompletion, ToolInvocation
+from core.protocol import AgentEvent, Completion, EventKind, ToolCompletion, ToolInvocation
 from core.errors import (
     AgentRuntimeError,
     EmptyModelResponse,
@@ -1075,3 +1075,127 @@ async def test_execute_model_step_is_a_noop_when_steer_has_nothing_pending(scrip
 
     assert messages == [{"role": "user", "content": "hi"}]
     assert steer.clear_interrupt_calls == 1
+
+
+# ==================== 事件总线：execute_model_step/run_tool_turn 的 emit 参数 ====================
+
+
+async def test_execute_model_step_emits_assistant_message_events_without_tool_calls(scripted_client):
+    client = scripted_client(
+        tool_completions=[ToolCompletion(text="direct answer", requested_tools=[], model_id="mock")]
+    )
+    messages: list[dict] = [{"role": "user", "content": "hi"}]
+    events: list[AgentEvent] = []
+
+    async def emit(event: AgentEvent) -> None:
+        events.append(event)
+
+    async def handle_invocation(invocation):
+        raise AssertionError("should not be called")
+
+    await execute_model_step(
+        client, messages, [], handle_invocation=handle_invocation, emit=emit, agent_name="bot"
+    )
+
+    kinds = [e.kind for e in events]
+    assert kinds[0] == EventKind.MESSAGE_START
+    assert kinds[-1] == EventKind.MESSAGE_END
+    assert all(k in (EventKind.MESSAGE_START, EventKind.MESSAGE_UPDATE, EventKind.MESSAGE_END) for k in kinds)
+    assert all(e.data.get("role") == "assistant" for e in events)
+    assert all(e.agent_name == "bot" for e in events)
+    assert events[-1].data["content"] == "direct answer"
+
+
+async def test_execute_model_step_emits_tool_execution_and_message_events_for_a_tool_call(
+    scripted_client, echo_tool_registry
+):
+    client = scripted_client(
+        tool_completions=[
+            ToolCompletion(
+                text=None,
+                requested_tools=[ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text": "hi"}')],
+                model_id="mock",
+            )
+        ]
+    )
+    messages: list[dict] = [{"role": "user", "content": "hi"}]
+    events: list[AgentEvent] = []
+
+    async def emit(event: AgentEvent) -> None:
+        events.append(event)
+
+    async def handle_invocation(invocation):
+        return await resolve_tool_call(echo_tool_registry, invocation)
+
+    await execute_model_step(client, messages, [], handle_invocation=handle_invocation, emit=emit)
+
+    tool_events = [e for e in events if e.kind in (EventKind.TOOL_EXECUTION_START, EventKind.TOOL_EXECUTION_END)]
+    assert [e.kind for e in tool_events] == [EventKind.TOOL_EXECUTION_START, EventKind.TOOL_EXECUTION_END]
+    assert all(e.data["call_id"] == "c1" and e.data["tool_name"] == "echo" for e in tool_events)
+    assert tool_events[1].data["is_error"] is False
+
+    tool_message_events = [e for e in events if e.kind in (EventKind.MESSAGE_START, EventKind.MESSAGE_END) and e.data.get("role") == "tool"]
+    assert len(tool_message_events) == 2
+    assert all(e.data["call_id"] == "c1" for e in tool_message_events)
+
+
+async def test_execute_model_step_stream_true_emits_message_update_without_a_raw_callback(scripted_client):
+    client = scripted_client(
+        tool_completions=[ToolCompletion(text="hi", requested_tools=[], model_id="mock")]
+    )
+    events: list[AgentEvent] = []
+
+    async def emit(event: AgentEvent) -> None:
+        events.append(event)
+
+    async def handle_invocation(invocation):
+        raise AssertionError("should not be called")
+
+    await execute_model_step(
+        client, [{"role": "user", "content": "hi"}], [], handle_invocation=handle_invocation, emit=emit, stream=True
+    )
+
+    update_events = [e for e in events if e.kind == EventKind.MESSAGE_UPDATE]
+    assert len(update_events) > 0  # 走了流式路径，逐字符产生了增量事件
+    assert "".join(e.data["delta"] for e in update_events) == "hi"
+
+
+async def test_execute_model_step_emit_is_a_noop_when_not_provided(scripted_client):
+    client = scripted_client(
+        tool_completions=[ToolCompletion(text="direct answer", requested_tools=[], model_id="mock")]
+    )
+
+    async def handle_invocation(invocation):
+        raise AssertionError("should not be called")
+
+    # 不传 emit 时不应该因为任何事件相关代码报错——这是现状行为的回归保护。
+    completion = await execute_model_step(
+        client, [{"role": "user", "content": "hi"}], [], handle_invocation=handle_invocation
+    )
+    assert completion.text == "direct answer"
+
+
+async def test_run_tool_turn_emits_turn_start_and_turn_end_per_step(scripted_client, echo_tool_registry):
+    client = scripted_client(
+        tool_completions=[
+            ToolCompletion(
+                text=None,
+                requested_tools=[ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text": "hi"}')],
+                model_id="mock",
+            ),
+            ToolCompletion(text="done", requested_tools=[], model_id="mock"),
+        ]
+    )
+    events: list[AgentEvent] = []
+
+    async def emit(event: AgentEvent) -> None:
+        events.append(event)
+
+    answer = await run_tool_turn(client, [{"role": "user", "content": "hi"}], echo_tool_registry, 3, emit=emit)
+
+    assert answer == "done"
+    turn_events = [(e.kind, e.data["step"]) for e in events if e.kind in (EventKind.TURN_START, EventKind.TURN_END)]
+    assert turn_events == [
+        (EventKind.TURN_START, 1), (EventKind.TURN_END, 1),
+        (EventKind.TURN_START, 2), (EventKind.TURN_END, 2),
+    ]

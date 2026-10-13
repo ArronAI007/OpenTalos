@@ -4,8 +4,8 @@ import json
 import pytest
 
 from context import TokenBudget
-from core.agent import Agent, AgentPhase, PhaseSignal, RuntimeSettings
-from core.protocol import ChatMessage, Completion
+from core.agent import Agent, RuntimeSettings
+from core.protocol import AgentEvent, ChatMessage, Completion, EventKind
 from core.model import FakeModelBackend, ModelClient
 from memory import WorkingMemory
 from observability import RunRecorder
@@ -48,35 +48,37 @@ async def test_arespond_with_callbacks_returns_arespond_result(model_client):
 
 
 async def test_arespond_with_callbacks_calls_on_start_and_on_finish(model_client):
-    signals: list[PhaseSignal] = []
+    events: list[AgentEvent] = []
 
-    async def record(signal: PhaseSignal) -> None:
-        signals.append(signal)
+    async def record(event: AgentEvent) -> None:
+        events.append(event)
 
     agent = _make_agent(_EchoAgent, model_client=model_client)
     await agent.arespond_with_callbacks("hi", on_start=record, on_finish=record)
 
-    assert [s.phase.value for s in signals] == ["started", "finished"]
+    assert [e.kind for e in events] == [EventKind.RUN_START, EventKind.RUN_END]
+    assert events[1].data["status"] == "completed"
 
 
 async def test_arespond_with_callbacks_calls_on_error_and_reraises(model_client):
-    signals: list[PhaseSignal] = []
+    events: list[AgentEvent] = []
 
-    async def record(signal: PhaseSignal) -> None:
-        signals.append(signal)
+    async def record(event: AgentEvent) -> None:
+        events.append(event)
 
     agent = _make_agent(_FailingAgent, "failing", model_client=model_client)
 
     with pytest.raises(ValueError, match="boom"):
         await agent.arespond_with_callbacks("hi", on_error=record)
 
-    assert len(signals) == 1
-    assert signals[0].phase.value == "failed"
-    assert signals[0].data["error"] == "boom"
+    assert len(events) == 1
+    assert events[0].kind == EventKind.RUN_END
+    assert events[0].data["status"] == "failed"
+    assert events[0].data["error"] == "boom"
 
 
 async def test_arespond_with_callbacks_ignores_callback_exceptions(model_client):
-    async def broken_callback(signal: PhaseSignal) -> None:
+    async def broken_callback(event: AgentEvent) -> None:
         raise RuntimeError("callback broke")
 
     agent = _make_agent(_EchoAgent, model_client=model_client)
@@ -85,7 +87,7 @@ async def test_arespond_with_callbacks_ignores_callback_exceptions(model_client)
 
 
 async def test_arespond_with_callbacks_ignores_callback_timeout(model_client):
-    async def slow_callback(signal: PhaseSignal) -> None:
+    async def slow_callback(event: AgentEvent) -> None:
         await asyncio.sleep(1)
 
     settings = RuntimeSettings(callback_timeout_seconds=0.01)
@@ -286,23 +288,102 @@ def test_runtime_settings_accepts_overrides():
     assert settings.log_level == "DEBUG"
     assert settings.callback_timeout_seconds == 1.0
 
-def test_phase_signal_emit_sets_timestamp_and_data():
-    signal = PhaseSignal.emit(AgentPhase.STARTED, "my-agent", input_text="hi")
-    assert signal.phase == AgentPhase.STARTED
-    assert signal.agent_name == "my-agent"
-    assert signal.data == {"input_text": "hi"}
-    assert signal.timestamp > 0
+def test_agent_event_emit_sets_timestamp_and_data():
+    event = AgentEvent.emit(EventKind.RUN_START, "my-agent", input_text="hi")
+    assert event.kind == EventKind.RUN_START
+    assert event.agent_name == "my-agent"
+    assert event.data == {"input_text": "hi"}
+    assert event.timestamp > 0
 
 
-def test_phase_signal_to_dict_uses_phase_value():
-    signal = PhaseSignal.emit(AgentPhase.FINISHED, "my-agent", result="done")
-    data = signal.to_dict()
+def test_agent_event_to_dict_uses_kind_value():
+    event = AgentEvent.emit(EventKind.RUN_END, "my-agent", result="done")
+    data = event.to_dict()
     assert data == {
-        "phase": "finished",
-        "timestamp": signal.timestamp,
+        "kind": "run_end",
+        "timestamp": event.timestamp,
         "agent_name": "my-agent",
         "data": {"result": "done"},
     }
+
+
+async def test_subscribe_notifies_multiple_listeners_in_registration_order(model_client):
+    order: list[str] = []
+
+    async def first(event: AgentEvent) -> None:
+        order.append("first-start")
+        await asyncio.sleep(0.02)
+        order.append("first-end")
+
+    async def second(event: AgentEvent) -> None:
+        order.append("second-start")
+        order.append("second-end")
+
+    agent = _make_agent(_EchoAgent, model_client=model_client)
+    agent.subscribe(first)
+    agent.subscribe(second)
+
+    await agent.arespond_with_callbacks("hi")
+
+    # 两个监听器各自对 RUN_START 和 RUN_END 都要被按注册顺序依次 await，first 在 second 开始之前
+    # 必须已经完全跑完（而不是两者交错）。
+    assert order == [
+        "first-start", "first-end", "second-start", "second-end",
+        "first-start", "first-end", "second-start", "second-end",
+    ]
+
+
+async def test_subscribe_listener_exception_does_not_stop_other_listeners_or_main_flow(model_client):
+    order: list[str] = []
+
+    async def broken(event: AgentEvent) -> None:
+        order.append("broken")
+        raise RuntimeError("listener broke")
+
+    async def healthy(event: AgentEvent) -> None:
+        order.append("healthy")
+
+    agent = _make_agent(_EchoAgent, model_client=model_client)
+    agent.subscribe(broken)
+    agent.subscribe(healthy)
+
+    result = await agent.arespond_with_callbacks("hi")
+
+    assert result == "echo: hi"
+    assert order.count("broken") == 2  # RUN_START + RUN_END
+    assert order.count("healthy") == 2
+
+
+async def test_run_end_listeners_finish_before_arespond_with_callbacks_returns(model_client):
+    finished_before_return = False
+
+    async def slow_listener(event: AgentEvent) -> None:
+        nonlocal finished_before_return
+        if event.kind == EventKind.RUN_END:
+            await asyncio.sleep(0.05)
+            finished_before_return = True
+
+    agent = _make_agent(_EchoAgent, model_client=model_client)
+    agent.subscribe(slow_listener)
+
+    await agent.arespond_with_callbacks("hi")
+
+    assert finished_before_return is True
+
+
+async def test_subscribe_returns_an_unsubscribe_function(model_client):
+    received: list[AgentEvent] = []
+
+    async def listener(event: AgentEvent) -> None:
+        received.append(event)
+
+    agent = _make_agent(_EchoAgent, model_client=model_client)
+    unsubscribe = agent.subscribe(listener)
+    unsubscribe()
+
+    await agent.arespond_with_callbacks("hi")
+
+    assert received == []
 
 
 def test_scripted_client_streams_tool_completion_via_astream(scripted_client):

@@ -7,7 +7,7 @@ from context import AssemblyConfig, OutputTrimmer, TokenBudget
 from core.agent import Agent, RuntimeSettings
 from core.agent_loop import ModelInterrupted, execute_model_step, resolve_tool_call
 from core.cancellation import CancellationToken
-from core.protocol import ChatMessage, ToolInvocation
+from core.protocol import AgentEvent, ChatMessage, EventKind, ToolInvocation
 from core.model import ModelClient
 from memory import WorkingMemory
 from observability import RunRecorder, metrics
@@ -126,6 +126,9 @@ class ReActAgent(Agent):
         on_steer_interrupt = kwargs.pop("on_steer_interrupt", None)
         recalled: list[str] | None = kwargs.pop("recalled", None)
         on_usage = kwargs.pop("on_usage", None)
+        # 显式请求走流式（增量只经事件总线下发），独立于是否提供了原始 on_text_delta 回调——
+        # 供只想订阅事件总线、不需要专用回调的调用方（如 apps/api）使用。
+        stream: bool = bool(kwargs.pop("stream", False))
         steer = _ReActSteerQueue(self, drain_steer, steer_event) if (drain_steer or steer_event) else None
         messages = self.build_messages(input_text)
         # 召回的相关长期记忆作为一条 system 注入（在系统提示之后、历史之前）。
@@ -144,6 +147,7 @@ class ReActAgent(Agent):
             async def handle_invocation(invocation: ToolInvocation, step: int = step) -> dict[str, str]:
                 return await self._handle(invocation, step)
 
+            await self._emit_event(EventKind.TURN_START, step=step)
             while True:
                 try:
                     completion = await execute_model_step(
@@ -159,6 +163,9 @@ class ReActAgent(Agent):
                         on_usage=on_usage,
                         metrics=self.metrics,
                         steer=steer,
+                        emit=self._emit,
+                        agent_name=self.name,
+                        stream=stream,
                         **kwargs,
                     )
                 except ModelInterrupted:
@@ -168,6 +175,7 @@ class ReActAgent(Agent):
                         await on_steer_interrupt()
                     continue
                 break
+            await self._emit_event(EventKind.TURN_END, step=step)
 
             if not completion.requested_tools:
                 answer = completion.text or ""
@@ -185,6 +193,11 @@ class ReActAgent(Agent):
 
         self.record_message(ChatMessage(content=answer, role="assistant"))
         return answer
+
+    async def _emit_event(self, kind: EventKind, **data: object) -> None:
+        """`execute_model_step` 只知道 TURN_START/TURN_END 以外的事件（它自己发）；`ReActAgent`
+        没有复用 `run_tool_turn`，所以回合边界事件要自己发一次，经同一个 `Agent._emit` 总线。"""
+        await self._emit(AgentEvent.emit(kind, self.name, **data))
 
     async def _handle(self, invocation: ToolInvocation, step: int) -> dict[str, str]:
         if invocation.tool_name == FINISH_TOOL_NAME:
