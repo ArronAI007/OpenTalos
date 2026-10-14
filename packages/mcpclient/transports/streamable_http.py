@@ -105,29 +105,18 @@ class StreamableHttpTransport(TransportEventsMixin):
             headers.update(extra)
         return headers
 
-    async def _authorized_request(self, method: str, **kwargs: Any) -> httpx.Response:
-        token = await self._auth_provider.token() if self._auth_provider is not None else None
-        headers = kwargs.pop("headers", {})
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
-        response = await self._client.request(method, self._url, headers=headers, **kwargs)
-        needs_reauth = response.status_code == 401 or (
-            response.status_code == 403 and "insufficient_scope" in response.text
-        )
-        if needs_reauth and self._auth_provider is not None:
-            await response.aclose()
-            await self._auth_provider.on_unauthorized()
+    async def _apply_auth_header(self, headers: dict[str, str]) -> None:
+        if self._auth_provider is not None:
             token = await self._auth_provider.token()
             if token:
                 headers["Authorization"] = f"Bearer {token}"
-            response = await self._client.request(method, self._url, headers=headers, **kwargs)
-        return response
 
     async def start(self) -> None:
         return None
 
     async def send(self, message: dict[str, Any]) -> None:
         headers = self._request_headers(accept="application/json, text/event-stream")
+        await self._apply_auth_header(headers)
         request = self._client.build_request("POST", self._url, json=message, headers=headers)
         response = await self._client.send(request, stream=True)
         await self._handle_authorized_response(response, method="POST", json=message, headers=headers)
@@ -135,15 +124,14 @@ class StreamableHttpTransport(TransportEventsMixin):
     async def _handle_authorized_response(
         self, response: httpx.Response, *, method: str, json: dict[str, Any] | None, headers: dict[str, str]
     ) -> None:
-        if response.status_code in (401, 403):
-            await response.aread()
+        if response.status_code == 401 or response.status_code == 403:
+            body = await response.aread()
             await response.aclose()
-            if self._auth_provider is None:
-                raise McpHttpError(f"HTTP {response.status_code} and no AuthProvider configured")
+            needs_reauth = response.status_code == 401 or b"insufficient_scope" in body
+            if not needs_reauth or self._auth_provider is None:
+                raise McpHttpError(f"HTTP {response.status_code}: {body!r}")
             await self._auth_provider.on_unauthorized()
-            token = await self._auth_provider.token()
-            if token:
-                headers["Authorization"] = f"Bearer {token}"
+            await self._apply_auth_header(headers)
             retry_request = self._client.build_request(method, self._url, json=json, headers=headers)
             response = await self._client.send(retry_request, stream=True)
         session_id = response.headers.get("Mcp-Session-Id")

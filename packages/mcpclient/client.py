@@ -7,6 +7,7 @@ import itertools
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from .oauth.errors import OAuthError
 from .protocol.content import CallToolResult
 from .protocol.jsonrpc import (
     JSON_RPC_ERROR_CODES,
@@ -167,7 +168,9 @@ class MCPClient:
                 "clientInfo": {"name": self._client_info.name, "version": self._client_info.version},
             }
             result = await self._request("initialize", params, timeout_seconds=self._default_timeout_seconds)
-        except MCPConnectionError:
+        except (MCPConnectionError, OAuthError):
+            # MCPOAuthAuthorizationRequiredError（OAuthError 的子类）必须原样冒泡给调用方
+            # （FR-011 Acceptance Scenario 1），不能被下面的兜底分支吞成普通连接失败。
             raise
         except Exception as exc:  # noqa: BLE001 — 握手窗口期的任何失败都统一包成 MCPConnectionError
             raise MCPConnectionError(f"{type(exc).__name__}: {exc}") from exc

@@ -193,23 +193,23 @@ call_tool+客户端发起的取消+服务端发起的 ping，不需要真实子�
 
 ### Tests for User Story 5 ⚠️ 先写，确认失败，再实现
 
-- [ ] T056 [P] [US5] 失败测试：第一次连接一个要求 OAuth 的服务器且本地无凭据时，抛出 `MCPOAuthAuthorizationRequiredError`（携带授权 URL），而不是普通连接失败，写入 `tests/mcpclient/test_oauth.py`
-- [ ] T057 [P] [US5] 失败测试：对假的发现元数据/token 端点跑通完整 PKCE 授权码换 token 流程，写入 `tests/mcpclient/test_oauth.py`
-- [ ] T058 [P] [US5] 失败测试：5 个并发请求同时收到 401，底层只发出一次真正的刷新请求，其余请求共享同一次结果（用计数器 mock token 端点验证），写入 `tests/mcpclient/test_oauth.py`
-- [ ] T059 [P] [US5] 失败测试：服务端返回 `insufficient_scope` 时触发一次 step-up 授权流程，而不是把错误原样抛给调用方，写入 `tests/mcpclient/test_oauth.py`
-- [ ] T060 [P] [US5] 失败测试：`issuer` 不匹配的发现响应抛 `OAuthIssuerMismatchError`；`authorization_endpoint` 等 URL 字段是 `javascript:`/`data:`/`vbscript:` scheme 时被拒绝，写入 `tests/mcpclient/test_oauth.py`
+- [X] T056 [P] [US5] 失败测试：第一次连接一个要求 OAuth 的服务器且本地无凭据时，抛出 `MCPOAuthAuthorizationRequiredError`（携带授权 URL），而不是普通连接失败，写入 `tests/mcpclient/test_oauth.py`
+- [X] T057 [P] [US5] 失败测试：对假的发现元数据/token 端点跑通完整 PKCE 授权码换 token 流程，写入 `tests/mcpclient/test_oauth.py`
+- [X] T058 [P] [US5] 失败测试：5 个并发请求同时收到 401，底层只发出一次真正的刷新请求，其余请求共享同一次结果（用计数器 mock token 端点验证），写入 `tests/mcpclient/test_oauth.py`
+- [X] T059 [P] [US5] 失败测试：服务端返回 `insufficient_scope` 时触发一次 step-up 授权流程，而不是把错误原样抛给调用方，写入 `tests/mcpclient/test_oauth.py`
+- [X] T060 [P] [US5] 失败测试：`issuer` 不匹配的发现响应抛 `OAuthIssuerMismatchError`；`authorization_endpoint` 等 URL 字段是 `javascript:`/`data:`/`vbscript:` scheme 时被拒绝，写入 `tests/mcpclient/test_oauth.py`
 
 ### Implementation for User Story 5
 
-- [ ] T061 [US5] 实现 `oauth/types.py`：`OAuthTokens`/`OAuthClientInformation`/`OAuthProtectedResourceMetadata`/`AuthorizationServerMetadata` 等 dataclass + `parse_oauth_tokens`/`parse_client_information`/`parse_protected_resource_metadata`/`parse_authorization_server_metadata` 结构校验函数（含 URL scheme 安全检查），写入 `packages/mcpclient/oauth/types.py`
-- [ ] T062 [US5] 实现 `oauth/errors.py`：`OAuthError`/`OAuthIssuerMismatchError`/`OAuthInsecureEndpointError`/`OAuthRegistrationError`/`MCPOAuthAuthorizationRequiredError`，写入 `packages/mcpclient/oauth/errors.py`
-- [ ] T063 [US5] 实现 `oauth/discovery.py`：`parse_www_authenticate`、`discover_protected_resource_metadata`（路径特定→根路径两级尝试）、`discover_authorization_server_metadata`（含 `issuer` 校验，默认不跳过）、`discover_oauth_server_info`，写入 `packages/mcpclient/oauth/discovery.py`（依赖 T061、T062）
-- [ ] T064 [US5] 实现 `oauth/flow.py`：PKCE（`hashlib.sha256`+`secrets.token_urlsafe`）、`start_authorization()`（构造授权 URL）、`token_request()`/`exchange_authorization_code()`/`refresh_authorization()`（表单编码 POST）、客户端鉴权方式选择、`register_client()`（动态客户端注册）、`step_up_scope()`（已授予∪服务端要求的 scope 并集），写入 `packages/mcpclient/oauth/flow.py`（依赖 T061-T063）
-- [ ] T065 [US5] 实现并发 401 去重的刷新适配器（把一个 `OAuthClientProvider`-等价对象包装成 `AuthProvider`，`on_unauthorized()` 用一个作用域内的"进行中刷新" `asyncio.Future` 共享结果），写入 `packages/mcpclient/oauth/flow.py`（依赖 T064）
-- [ ] T066 [US5] 实现 `oauth/provider.py`：`MCPOAuthProvider`（绑定单个 `server_url`）、`OAuthStateStore`（`typing.Protocol`：`load()`/`save()`）、`MemoryOAuthStateStore`（供测试/默认行为），写入 `packages/mcpclient/oauth/provider.py`（依赖 T064）
-- [ ] T067 [US5] 实现 `oauth/callback.py`：`PendingCallbackRegistry.register(state) -> asyncio.Future[dict]` / `resolve(state, params) -> bool`，写入 `packages/mcpclient/oauth/callback.py`
-- [ ] T068 [US5] 在 `apps/api/main.py` 新增一个 OAuth 回调 HTTP 路由（例如 `GET /api/mcp/oauth/callback`），内部调用 `PendingCallbackRegistry.resolve(state, dict(request.query_params))`，复用现有 `_pending_approvals` 的 pending-Future 模式（依赖 T067）
-- [ ] T069 [US5] 运行 `.venv/bin/pytest tests/mcpclient/test_oauth.py -v`，确认全部通过（GREEN checkpoint）
+- [X] T061 [US5] 实现 `oauth/types.py`：`OAuthTokens`/`OAuthClientInformation`/`OAuthProtectedResourceMetadata`/`AuthorizationServerMetadata` 等 dataclass + `parse_oauth_tokens`/`parse_client_information`/`parse_protected_resource_metadata`/`parse_authorization_server_metadata` 结构校验函数（含 URL scheme 安全检查），写入 `packages/mcpclient/oauth/types.py`
+- [X] T062 [US5] 实现 `oauth/errors.py`：`OAuthError`/`OAuthIssuerMismatchError`/`OAuthInsecureEndpointError`/`OAuthRegistrationError`/`MCPOAuthAuthorizationRequiredError`，写入 `packages/mcpclient/oauth/errors.py`
+- [X] T063 [US5] 实现 `oauth/discovery.py`：`parse_www_authenticate`、`discover_protected_resource_metadata`（路径特定→根路径两级尝试）、`discover_authorization_server_metadata`（含 `issuer` 校验，默认不跳过）、`discover_oauth_server_info`，写入 `packages/mcpclient/oauth/discovery.py`（依赖 T061、T062）
+- [X] T064 [US5] 实现 `oauth/flow.py`：PKCE（`hashlib.sha256`+`secrets.token_urlsafe`）、`start_authorization()`（构造授权 URL）、`token_request()`/`exchange_authorization_code()`/`refresh_authorization()`（表单编码 POST）、客户端鉴权方式选择、`register_client()`（动态客户端注册）、`step_up_scope()`（已授予∪服务端要求的 scope 并集），写入 `packages/mcpclient/oauth/flow.py`（依赖 T061-T063）
+- [X] T065 [US5] 实现并发 401 去重的刷新适配器（把一个 `OAuthClientProvider`-等价对象包装成 `AuthProvider`，`on_unauthorized()` 用一个作用域内的"进行中刷新" `asyncio.Future` 共享结果），写入 `packages/mcpclient/oauth/flow.py`（依赖 T064）
+- [X] T066 [US5] 实现 `oauth/provider.py`：`MCPOAuthProvider`（绑定单个 `server_url`）、`OAuthStateStore`（`typing.Protocol`：`load()`/`save()`）、`MemoryOAuthStateStore`（供测试/默认行为），写入 `packages/mcpclient/oauth/provider.py`（依赖 T064）
+- [X] T067 [US5] 实现 `oauth/callback.py`：`PendingCallbackRegistry.register(state) -> asyncio.Future[dict]` / `resolve(state, params) -> bool`，写入 `packages/mcpclient/oauth/callback.py`
+- [X] T068 [US5] 在 `apps/api/main.py` 新增一个 OAuth 回调 HTTP 路由（例如 `GET /api/mcp/oauth/callback`），内部调用 `PendingCallbackRegistry.resolve(state, dict(request.query_params))`，复用现有 `_pending_approvals` 的 pending-Future 模式（依赖 T067）
+- [X] T069 [US5] 运行 `.venv/bin/pytest tests/mcpclient/test_oauth.py -v`，确认全部通过（GREEN checkpoint）
 
 **Checkpoint**：全部 5 个 User Story 独立可用。
 

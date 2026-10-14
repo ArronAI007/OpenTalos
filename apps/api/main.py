@@ -8,7 +8,7 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query, UploadFile
+from fastapi import FastAPI, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel
@@ -22,6 +22,7 @@ from agentgen import AgentGenerationError, generate_agent_spec  # noqa: E402
 from db import ChatStore  # noqa: E402
 from deepresearch import run_research, start_live_run, stream_run_events  # noqa: E402
 from mcpclient.client import MCPClient, MCPConnectionError, MCPServerConfig  # noqa: E402
+from mcpclient.oauth.callback import PendingCallbackRegistry  # noqa: E402
 from evaluation import (  # noqa: E402
     EVAL_AGENT_TYPES,
     add_eval_case,
@@ -215,6 +216,7 @@ def create_app(runtime: ChatRuntime | None = None, eval_cases_path: Path | None 
         allow_methods=["*"], allow_headers=["*"],
     )
     store = runtime.store
+    mcp_oauth_callbacks = PendingCallbackRegistry()
 
     @app.get("/health")
     async def health() -> dict:
@@ -647,6 +649,17 @@ def create_app(runtime: ChatRuntime | None = None, eval_cases_path: Path | None 
     async def delete_mcp_server_route(server_id: str) -> None:
         if not store.delete_mcp_server(server_id):
             raise HTTPException(404, "server not found")
+
+    @app.get("/api/mcp/oauth/callback")
+    async def mcp_oauth_callback_route(oauth_request: Request, state: str) -> dict:
+        # 浏览器完成 OAuth 授权后重定向到这里；只负责解析挂起的 Future，不自己监听独立端口
+        # （见 specs/003-pi-mcp-client-alignment/research.md Decision 6）。本仓库目前没有任
+        # 何配置场景需要 OAuth（FR-011 收尾半句），这条路由先就位，等第一个真实 OAuth 服务器
+        # 接入时才会有东西真正调用 register()。
+        params = dict(oauth_request.query_params)
+        if not mcp_oauth_callbacks.resolve(state, params):
+            raise HTTPException(404, "unknown or already-resolved OAuth callback state")
+        return {"ok": True}
 
     @app.get("/api/memories")
     async def list_memories_route() -> dict:

@@ -788,6 +788,13 @@ async def test_delete_missing_mcp_server_returns_404(api) -> None:
     assert resp.status_code == 404
 
 
+async def test_mcp_oauth_callback_rejects_an_unknown_state(api) -> None:
+    """FR-011/研究决策 6：真正接收浏览器重定向的路由只负责解析挂起的 Future；未登记的
+    state（没有服务器调用过 register()）必须明确 404，不能假装成功。"""
+    resp = await api.get("/api/mcp/oauth/callback", params={"state": "no-such-state", "code": "xyz"})
+    assert resp.status_code == 404
+
+
 async def test_app_lifespan_closes_the_runtime_model_client(tmp_path) -> None:
     client = ModelClient(provider="mock")
     closed = {"count": 0}
