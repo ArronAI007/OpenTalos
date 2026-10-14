@@ -11,7 +11,17 @@ from typing import Any
 from .cancellation import CancellationToken
 from .errors import AgentRuntimeError, EmptyModelResponse, OutputLimitError
 from .pricing import estimate_cost
-from .protocol import AfterCallResult, AgentEvent, BeforeCallResult, Completion, EventKind, ToolCompletion, ToolInvocation
+from .protocol import (
+    AfterCallResult,
+    AgentEvent,
+    BeforeCallResult,
+    Completion,
+    EventKind,
+    ToolCompletion,
+    ToolInvocation,
+    TurnContext,
+    TurnDecision,
+)
 from .model import ModelClient
 from .protocols import (
     MetricsSink,
@@ -28,6 +38,7 @@ ApprovalGate = Callable[[ToolInvocation], Awaitable[bool]]
 EventEmitter = Callable[[AgentEvent], Awaitable[None]]
 BeforeToolCallHook = Callable[[ToolInvocation], Awaitable[BeforeCallResult]]
 AfterToolCallHook = Callable[[ToolInvocation, str], Awaitable[AfterCallResult]]
+FinishTurnHook = Callable[[TurnContext], Awaitable[TurnDecision]]
 
 
 async def _emit(emit: EventEmitter | None, kind: EventKind, agent_name: str, **data: Any) -> None:
@@ -265,6 +276,7 @@ async def execute_model_step(
     tool_execution_mode: ToolExecutionMode = "parallel",
     before_tool_call: BeforeToolCallHook | None = None,
     after_tool_call: AfterToolCallHook | None = None,
+    finish_turn: FinishTurnHook | None = None,
     **kwargs: Any,
 ) -> ToolCompletion:
     """带工具 schema 的单步：调一次模型 -> 有工具请求就并行执行并把结果追加回 messages。
@@ -348,6 +360,20 @@ async def execute_model_step(
         raise OutputLimitError(
             f"Model stopped at the output limit (finish_reason={completion.finish_reason!r}); the reply is truncated."
         )
+    async def _apply_finish_turn(tool_results: list[dict[str, str]]) -> ToolCompletion:
+        # 工具批次 terminate 已经强制停止时，不再征询 finishTurn（见 run_one 的批次级聚合）；
+        # 否则调用 finish_turn（若提供），其返回值覆盖已有的默认调度（包括 follow-up 注入的
+        # should_continue=True）。error/aborted 响应在走到这里之前已经 raise，天然不会被
+        # finish_turn 覆盖。
+        if finish_turn is None or completion.should_continue is False:
+            return completion
+        decision = await finish_turn(TurnContext(step=step or 0, completion=completion, tool_results=tool_results))
+        if decision == "end":
+            completion.should_continue = False
+        elif decision == "continue":
+            completion.should_continue = True
+        return completion
+
     if not completion.requested_tools:
         if not (completion.text or "").strip():
             raise EmptyModelResponse("Model returned neither visible text nor a tool request.")
@@ -359,7 +385,7 @@ async def execute_model_step(
                     await _emit(emit, EventKind.MESSAGE_START, agent_name, role="user", content=msg)
                     await _emit(emit, EventKind.MESSAGE_END, agent_name, role="user", content=msg)
                 completion.should_continue = True
-        return completion
+        return await _apply_finish_turn([])
 
     _validate_tool_call_ids(completion.requested_tools)
     messages.append(build_reply_message(completion.text, completion.requested_tools))
@@ -455,12 +481,13 @@ async def execute_model_step(
     else:
         outcomes = await asyncio.gather(*(run_one(invocation) for invocation in completion.requested_tools))
 
-    messages.extend(message for message, _ in outcomes)
+    tool_result_messages = [message for message, _ in outcomes]
+    messages.extend(tool_result_messages)
     # 批次级 terminate：当且仅当这一批非空且每一个调用都标记了 terminate，才建议提前结束整个运行
     # （在 finishTurn 钩子被征询之前就生效，见 contracts/queues-and-finish-turn.md）。
     if outcomes and all(terminate for _, terminate in outcomes):
         completion.should_continue = False
-    return completion
+    return await _apply_finish_turn(tool_result_messages)
 
 
 async def run_tool_turn(
@@ -485,6 +512,7 @@ async def run_tool_turn(
     tool_execution_mode: ToolExecutionMode = "parallel",
     before_tool_call: BeforeToolCallHook | None = None,
     after_tool_call: AfterToolCallHook | None = None,
+    finish_turn: FinishTurnHook | None = None,
     **kwargs: Any,
 ) -> str:
     """调用 LLM -> 按需执行工具 -> 把结果喂回去，直到模型不再请求工具或用光 max_iterations。
@@ -534,6 +562,7 @@ async def run_tool_turn(
             tool_execution_mode=tool_execution_mode,
             before_tool_call=before_tool_call,
             after_tool_call=after_tool_call,
+            finish_turn=finish_turn,
             **kwargs,
         )
         await _emit(emit, EventKind.TURN_END, agent_name, step=step)

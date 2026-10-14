@@ -331,31 +331,31 @@ description: "Task list for feature implementation"
 
 ### Tests for User Story 4 ⚠️
 
-- [ ] T040 [P] [US4] 在 `tests/core/test_agent_loop.py` 新增：`finish_turn` 返回 `"end"` 时断言
+- [X] T040 [P] [US4] 在 `tests/core/test_agent_loop.py` 新增：`finish_turn` 返回 `"end"` 时断言
       `run_tool_turn`/外层循环在这一轮之后立即停止，不再发起下一次模型调用（哪怕
       `completion.requested_tools` 非空）；返回 `"continue"` 且这一轮没有工具调用/排队消息时，断
       言确实又发起了恰好一次模型调用；返回 `None` 时断言维持现有调度（有工具调用就继续、没有就
       停）；一轮因 `OutputLimitError`/`EmptyModelResponse` 结束时断言 `finish_turn` 完全没有被调
       用。预期：`run_tool_turn` 还没有 `finish_turn` 参数，`TypeError`，测试失败。
-- [ ] T041 [US4] 跑 `.venv/bin/pytest tests/core/test_agent_loop.py -v`，确认按预期原因失败
+- [X] T041 [US4] 跑 `.venv/bin/pytest tests/core/test_agent_loop.py -v`，确认按预期原因失败
       （depends on: T040）
 
 ### Implementation for User Story 4
 
-- [ ] T042 [US4] 在 `packages/core/protocol.py` 新增 `TurnDecision = Literal["continue", "end"] |
+- [X] T042 [US4] 在 `packages/core/protocol.py` 新增 `TurnDecision = Literal["continue", "end"] |
       None` 类型别名和 `TurnContext` dataclass（`step: int`, `completion: ToolCompletion`,
       `tool_results: list[dict[str, str]]`）
-- [ ] T043 [US4] 修改 `packages/core/agent_loop.py`：`run_tool_turn` 新增
+- [X] T043 [US4] 修改 `packages/core/agent_loop.py`：`run_tool_turn` 新增
       `finish_turn: Callable[[TurnContext], Awaitable[TurnDecision]] | None = None` 参数——每一步
       `execute_model_step` 返回之后（在原有的"`requested_tools` 为空就 `return`"判断之前）调用
       `finish_turn`（`None` 时跳过）；返回 `"end"` 立即 `return`；返回 `"continue"` 强制再跑一步
       （即使 `requested_tools` 为空且 follow-up 为空）；返回 `None` 维持原判断（depends on: T042）
-- [ ] T044 [US4] 跑 `.venv/bin/pytest tests/core/test_agent_loop.py -v`，确认全部通过（depends on:
+- [X] T044 [US4] 跑 `.venv/bin/pytest tests/core/test_agent_loop.py -v`，确认全部通过（depends on:
       T043）
 
 ### Tests for User Story 4 (ReActAgent 接入) ⚠️
 
-- [ ] T045 [US4] 在 `tests/agents/test_react_agent.py`：删除
+- [X] T045 [US4] 在 `tests/agents/test_react_agent.py`：删除
       `test_finish_tool_is_offered_even_without_a_tool_registry`（`finish` 工具本身被移除，这条测
       试断言的前提不再成立）；重写 `test_arespond_uses_a_tool_then_finishes`/
       `test_arespond_falls_back_to_the_step_limit_message`/
@@ -368,19 +368,19 @@ description: "Task list for feature implementation"
 
 ### Implementation (ReActAgent 接入)
 
-- [ ] T046 [US4] 修改 `packages/agents/react_agent.py`：删除 `FINISH_TOOL_NAME`/
+- [X] T046 [US4] 修改 `packages/agents/react_agent.py`：删除 `FINISH_TOOL_NAME`/
       `FINISH_TOOL_SCHEMA`/`_read_final_answer`/`_tool_schemas()` 里拼 `FINISH_TOOL_SCHEMA` 那部
       分/`_handle()` 里对 `FINISH_TOOL_NAME` 的特判/`arespond()` 里 `finish_calls` 拦截整段；
       `arespond()` 的循环改成：没有 `requested_tools` 时直接 `answer = completion.text; break`（现
       有分支已经这样做，只是现在这是唯一的"正常结束"路径）；新增 `finish_turn` 构造参数并透传给
       每次 `execute_model_step(...)` 调用；`DEFAULT_SYSTEM_PROMPT` 删除"调用 `finish` 工具"的措
       辞，改成单纯描述"推理+工具调用交替，给出最终回复"（depends on: T043, T045）
-- [ ] T047 [US4] 修改 `packages/agents/builder.py`：`_append_suffix()` 上方的注释"追加（而不是替
+- [X] T047 [US4] 修改 `packages/agents/builder.py`：`_append_suffix()` 上方的注释"追加（而不是替
       换）是为了保住 ReAct 的 finish 工具约定这条默认提示词"已过期，改成准确描述当前
       `DEFAULT_SYSTEM_PROMPT` 的用途（depends on: T046）
-- [ ] T048 [US4] 跑 `.venv/bin/pytest tests/agents/test_react_agent.py -v`，确认全部通过（depends
+- [X] T048 [US4] 跑 `.venv/bin/pytest tests/agents/test_react_agent.py -v`，确认全部通过（depends
       on: T046, T047）
-- [ ] T049 [US4] 跑 `.venv/bin/pytest tests/core/ tests/agents/ -v`，确认本故事范围内全部测试通
+- [X] T049 [US4] 跑 `.venv/bin/pytest tests/core/ tests/agents/ -v`，确认本故事范围内全部测试通
       过、无回归（depends on: T044, T048）
 
 **Checkpoint**：`finish` 工具机制已彻底移除，`finishTurn` 钩子承担全部终止判定职责。

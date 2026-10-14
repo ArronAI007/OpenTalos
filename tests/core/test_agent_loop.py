@@ -1563,3 +1563,118 @@ async def test_batch_terminate_ends_the_run_when_every_call_is_marked(scripted_c
     # "没有更多文本输出"的收尾路径会用 completion.text（工具调用这一轮没有文本），
     # 所以断言用对 should_continue=False 更敏感的信号：第二轮的 completion 从未被请求过。
     assert answer == ""
+
+
+# ==================== finishTurn 钩子 ====================
+
+
+async def test_finish_turn_end_stops_immediately_even_with_pending_tool_calls(scripted_client, echo_tool_registry):
+    client = scripted_client(
+        tool_completions=[
+            ToolCompletion(
+                text="partial",
+                requested_tools=[ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text": "hi"}')],
+                model_id="mock",
+            ),
+            ToolCompletion(text="should not be reached", requested_tools=[], model_id="mock"),
+        ]
+    )
+    messages: list[dict] = [{"role": "user", "content": "go"}]
+    calls = {"n": 0}
+
+    async def finish_turn(context):
+        calls["n"] += 1
+        return "end"
+
+    answer = await run_tool_turn(client, messages, echo_tool_registry, 3, finish_turn=finish_turn)
+
+    assert calls["n"] == 1
+    assert answer == "partial"  # 停在第一轮，没有跑到第二轮
+
+
+async def test_finish_turn_continue_forces_another_step_without_tool_calls_or_followup(
+    scripted_client, echo_tool_registry
+):
+    client = scripted_client(
+        tool_completions=[
+            ToolCompletion(text="first", requested_tools=[], model_id="mock"),
+            ToolCompletion(text="second", requested_tools=[], model_id="mock"),
+        ]
+    )
+    messages: list[dict] = [{"role": "user", "content": "go"}]
+    calls = {"n": 0}
+
+    async def finish_turn(context):
+        calls["n"] += 1
+        return "continue" if calls["n"] == 1 else None
+
+    # 必须传真实的 tool_registry（哪怕这次没有工具调用）：run_tool_turn 在 tool_registry=None 时
+    # 走的是完全不同的纯文本早退路径，根本不会调用 execute_model_step/finish_turn。
+    answer = await run_tool_turn(client, messages, echo_tool_registry, 3, finish_turn=finish_turn)
+
+    assert answer == "second"  # 第一轮没有工具调用，但 finishTurn 强制再跑一轮
+
+
+async def test_finish_turn_none_preserves_default_scheduling(scripted_client, echo_tool_registry):
+    client = scripted_client(
+        tool_completions=[ToolCompletion(text="direct answer", requested_tools=[], model_id="mock")]
+    )
+    messages: list[dict] = [{"role": "user", "content": "go"}]
+
+    async def finish_turn(context):
+        return None
+
+    answer = await run_tool_turn(client, messages, echo_tool_registry, 3, finish_turn=finish_turn)
+
+    assert answer == "direct answer"  # 默认调度（没有工具调用就停）不受影响
+
+
+async def test_finish_turn_is_not_called_on_output_limit_or_empty_response(scripted_client, echo_tool_registry):
+    calls = {"n": 0}
+
+    async def finish_turn(context):
+        calls["n"] += 1
+        return "continue"
+
+    client = scripted_client(
+        tool_completions=[ToolCompletion(text="truncated", requested_tools=[], model_id="mock", finish_reason="length")]
+    )
+    with pytest.raises(OutputLimitError):
+        await run_tool_turn(client, [{"role": "user", "content": "go"}], echo_tool_registry, 3, finish_turn=finish_turn)
+    assert calls["n"] == 0
+
+    client2 = scripted_client(tool_completions=[ToolCompletion(text="", requested_tools=[], model_id="mock")])
+    with pytest.raises(EmptyModelResponse):
+        await run_tool_turn(
+            client2, [{"role": "user", "content": "go"}], echo_tool_registry, 3, finish_turn=finish_turn
+        )
+    assert calls["n"] == 0
+
+
+async def test_finish_turn_is_not_called_when_tool_batch_already_terminated(scripted_client, echo_tool_registry):
+    client = scripted_client(
+        tool_completions=[
+            ToolCompletion(
+                text=None,
+                requested_tools=[ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text": "hi"}')],
+                model_id="mock",
+            ),
+            ToolCompletion(text="should not be reached", requested_tools=[], model_id="mock"),
+        ]
+    )
+    messages: list[dict] = [{"role": "user", "content": "go"}]
+    finish_turn_calls = {"n": 0}
+
+    async def after(invocation, content):
+        return AfterCallResult(terminate=True)
+
+    async def finish_turn(context):
+        finish_turn_calls["n"] += 1
+        return "continue"
+
+    answer = await run_tool_turn(
+        client, messages, echo_tool_registry, 3, after_tool_call=after, finish_turn=finish_turn
+    )
+
+    assert finish_turn_calls["n"] == 0  # 批次已经 terminate，不再征询 finishTurn
+    assert answer == ""

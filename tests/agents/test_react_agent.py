@@ -9,7 +9,7 @@ from core.model import ModelClient
 from tool.outcome import ToolOutcome
 from tool.registry import ToolRegistry
 from tool.tool import Tool, ToolParameter
-from agents.react_agent import FINISH_TOOL_NAME, STEP_LIMIT_MESSAGE, ReActAgent
+from agents.react_agent import STEP_LIMIT_MESSAGE, ReActAgent
 
 
 async def test_arespond_returns_text_when_the_model_calls_no_tools(scripted_client):
@@ -29,13 +29,9 @@ async def test_arespond_uses_a_tool_then_finishes(scripted_client, echo_tool_reg
                 requested_tools=[ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text": "hi"}')],
                 model_id="mock",
             ),
-            ToolCompletion(
-                text=None,
-                requested_tools=[
-                    ToolInvocation(call_id="c2", tool_name="finish", arguments_json='{"final_answer": "hi echoed"}')
-                ],
-                model_id="mock",
-            ),
+            # 没有更多工具调用的纯文本回复即视为最终答案——finish 工具已移除，这是唯一的正常结束
+            # 路径（见 US4：finishTurn 替代 finish 工具）。
+            ToolCompletion(text="hi echoed", requested_tools=[], model_id="mock"),
         ]
     )
     agent = ReActAgent(name="bot", model_client=client, tool_registry=echo_tool_registry, max_steps=5)
@@ -59,36 +55,13 @@ async def test_arespond_falls_back_to_the_step_limit_message(scripted_client, ec
     assert answer == STEP_LIMIT_MESSAGE
 
 
-async def test_finish_tool_is_offered_even_without_a_tool_registry(scripted_client):
-    client = scripted_client(
-        tool_completions=[
-            ToolCompletion(
-                text=None,
-                requested_tools=[
-                    ToolInvocation(call_id="c1", tool_name="finish", arguments_json='{"final_answer": "42"}')
-                ],
-                model_id="mock",
-            )
-        ]
-    )
-    agent = ReActAgent(name="bot", model_client=client)
-
-    answer = await agent.arespond("what is the answer")
-
-    assert answer == "42"
-
-
 async def test_arespond_streams_text_when_on_text_delta_is_given():
     client = ModelClient(provider="mock")
 
     async def fake_astream_with_tools(messages, tools, tool_choice="auto", on_text_delta=None, **kwargs):
         if on_text_delta is not None:
             await on_text_delta("42")
-        return ToolCompletion(
-            text=None,
-            requested_tools=[ToolInvocation(call_id="c1", tool_name=FINISH_TOOL_NAME, arguments_json='{"final_answer": "42"}')],
-            model_id="mock",
-        )
+        return ToolCompletion(text="42", requested_tools=[], model_id="mock")
 
     client.astream_with_tools = fake_astream_with_tools
     agent = ReActAgent(name="bot", model_client=client)
@@ -166,11 +139,7 @@ async def test_arespond_runs_a_batch_of_tool_calls_concurrently(echo_tool_regist
                 ],
                 model_id="mock",
             )
-        return ToolCompletion(
-            text=None,
-            requested_tools=[ToolInvocation(call_id="c3", tool_name=FINISH_TOOL_NAME, arguments_json='{"final_answer": "done"}')],
-            model_id="mock",
-        )
+        return ToolCompletion(text="done", requested_tools=[], model_id="mock")
 
     client.acomplete_with_tools = fake_acomplete_with_tools
     agent = ReActAgent(name="bot", model_client=client, tool_registry=echo_tool_registry, max_steps=5)
@@ -212,13 +181,7 @@ async def test_arespond_asks_for_approval_and_continues_when_denied(scripted_cli
                 requested_tools=[ToolInvocation(call_id="c1", tool_name="danger", arguments_json="{}")],
                 model_id="mock",
             ),
-            ToolCompletion(
-                text=None,
-                requested_tools=[
-                    ToolInvocation(call_id="c2", tool_name=FINISH_TOOL_NAME, arguments_json='{"final_answer": "moved on"}')
-                ],
-                model_id="mock",
-            ),
+            ToolCompletion(text="moved on", requested_tools=[], model_id="mock"),
         ]
     )
     agent = ReActAgent(
@@ -376,11 +339,11 @@ async def test_react_agent_subscribers_see_full_event_sequence_for_a_tool_call_r
             ),
             ToolCompletion(
                 text=None,
-                requested_tools=[
-                    ToolInvocation(call_id="c2", tool_name=FINISH_TOOL_NAME, arguments_json='{"final_answer": "hi echoed"}')
-                ],
+                requested_tools=[ToolInvocation(call_id="c2", tool_name="echo", arguments_json='{"text": "again"}')],
                 model_id="mock",
             ),
+            # 没有更多工具调用的纯文本回复即视为最终答案——finish 工具已移除。
+            ToolCompletion(text="hi echoed", requested_tools=[], model_id="mock"),
         ]
     )
     agent = ReActAgent(name="bot", model_client=client, tool_registry=echo_tool_registry, max_steps=5)
@@ -400,13 +363,13 @@ async def test_react_agent_subscribers_see_full_event_sequence_for_a_tool_call_r
     assert kinds[-1] == EventKind.RUN_END
     assert EventKind.TURN_START in kinds and EventKind.TURN_END in kinds
     tool_events = [e for e in events if e.kind in (EventKind.TOOL_EXECUTION_START, EventKind.TOOL_EXECUTION_END)]
-    # 两次工具调用（echo + finish 本身也走同一套工具调用事件路径）各有一对 START/END。
+    # 两次 echo 工具调用各有一对 START/END；第三步的纯文本回复不产生工具执行事件。
     assert [e.kind for e in tool_events] == [
         EventKind.TOOL_EXECUTION_START, EventKind.TOOL_EXECUTION_END,
         EventKind.TOOL_EXECUTION_START, EventKind.TOOL_EXECUTION_END,
     ]
     assert tool_events[0].data["tool_name"] == "echo"
-    assert tool_events[2].data["tool_name"] == FINISH_TOOL_NAME
+    assert tool_events[2].data["tool_name"] == "echo"
 
 
 async def test_react_agent_subscribers_see_plain_event_sequence_for_a_no_tool_call_run(scripted_client):
@@ -536,3 +499,48 @@ async def test_react_agent_defaults_to_parallel_execution_without_hooks(scripted
 
     assert answer == "done"
     assert started == ["c1", "c2"]  # 两个调用并发起步
+
+
+async def test_react_agent_finish_turn_can_end_even_with_pending_tool_calls(scripted_client, echo_tool_registry):
+    """finishTurn 替代了 ReAct 原来的 finish 工具终止机制：钩子能在仍有工具调用的情况下强制
+    结束运行（US4）。"""
+    client = scripted_client(
+        tool_completions=[
+            ToolCompletion(
+                text="partial",
+                requested_tools=[ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text": "hi"}')],
+                model_id="mock",
+            ),
+            ToolCompletion(text="should not be reached", requested_tools=[], model_id="mock"),
+        ]
+    )
+
+    async def finish_turn(context):
+        return "end"
+
+    agent = ReActAgent(
+        name="bot", model_client=client, tool_registry=echo_tool_registry, max_steps=5, finish_turn=finish_turn
+    )
+    answer = await agent.arespond("echo hi")
+
+    assert answer == "partial"  # 停在第一轮，没有跑到第二轮
+
+
+async def test_react_agent_default_termination_is_equivalent_to_the_old_finish_tool(scripted_client, echo_tool_registry):
+    """一次完整 ReAct 对话（经过若干次工具调用后给出最终回复）在终止机制从 finish 工具换成
+    finishTurn 之后，仍能在语义等价的时间点正确结束（SC-005）。"""
+    client = scripted_client(
+        tool_completions=[
+            ToolCompletion(
+                text=None,
+                requested_tools=[ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text": "hi"}')],
+                model_id="mock",
+            ),
+            ToolCompletion(text="hi echoed, all done", requested_tools=[], model_id="mock"),
+        ]
+    )
+    agent = ReActAgent(name="bot", model_client=client, tool_registry=echo_tool_registry, max_steps=5)
+
+    answer = await agent.arespond("echo hi then finish")
+
+    assert answer == "hi echoed, all done"

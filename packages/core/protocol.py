@@ -72,6 +72,19 @@ class ToolCompletion:
     should_continue: bool | None = None
 
 
+# finishTurn 钩子的返回值：None 表示不表态、维持原调度。
+TurnDecision = Literal["continue", "end"] | None
+
+
+@dataclass
+class TurnContext:
+    """`finish_turn` 钩子能看到的这一轮信息。"""
+
+    step: int
+    completion: ToolCompletion
+    tool_results: list[dict[str, str]] = field(default_factory=list)
+
+
 @dataclass
 class Completion:
     text: str

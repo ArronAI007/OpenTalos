@@ -1,16 +1,13 @@
-from core.protocol import ToolCompletion, ToolInvocation
+from core.protocol import ToolCompletion
 from agents.subagent_tool import DispatchSubagentTool
 from tool.outcome import OutcomeStatus
 from tool.registry import ToolRegistry
 
 
 async def test_acall_builds_a_subagent_and_returns_its_answer(scripted_client):
+    # 子 agent 没有更多工具调用的纯文本回复即视为最终答案——finish 工具已移除。
     client = scripted_client(
-        tool_completions=[
-            ToolCompletion(text=None, requested_tools=[
-                ToolInvocation(call_id="c1", tool_name="finish", arguments_json='{"final_answer": "sub answer"}')
-            ], model_id="mock"),
-        ],
+        tool_completions=[ToolCompletion(text="sub answer", requested_tools=[], model_id="mock")],
     )
     tool = DispatchSubagentTool(client, ToolRegistry())
 

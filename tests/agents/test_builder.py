@@ -22,4 +22,6 @@ def test_build_agent_appends_system_prompt_suffix_after_the_default_prompt():
     agent = build_agent("bot", client, system_prompt_suffix="<available_skills>...</available_skills>")
 
     assert agent.system_prompt.endswith("<available_skills>...</available_skills>")
-    assert "finish" in agent.system_prompt  # ReAct 自带的 finish 工具约定不能被顶掉
+    # ReAct 自带的默认提示词（工具调用/不可信内容约定）不能被顶掉——finish 工具机制已移除
+    # （见 002-pi-agent-core-alignment 的 finishTurn 替代），不再用"finish"关键字断言。
+    assert "untrusted" in agent.system_prompt

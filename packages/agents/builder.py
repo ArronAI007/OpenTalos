@@ -24,7 +24,7 @@ def build_agent(
         **kwargs,
     )
     if system_prompt_suffix:
-        # 追加（而不是替换）是为了保住 ReAct 的 finish 工具约定这条默认提示词。
+        # 追加（而不是替换）是为了保住 DEFAULT_SYSTEM_PROMPT 里关于工具调用/不可信内容的约定。
         agent.system_prompt = _append_suffix(agent.system_prompt, system_prompt_suffix)
     return agent
 
