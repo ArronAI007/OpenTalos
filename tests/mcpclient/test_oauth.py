@@ -2,6 +2,7 @@
 端点都是固定响应，不涉及真实网络），覆盖 PKCE 流程、并发 401 去重、issuer/URL scheme 安全校验。"""
 import asyncio
 import json
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 import pytest
@@ -61,6 +62,10 @@ class _FakeAuthServer:
         return httpx.Response(404)
 
 
+def _extract_state(authorization_url: str) -> str:
+    return parse_qs(urlparse(authorization_url).query)["state"][0]
+
+
 def _make_provider(fake_server: _FakeAuthServer) -> MCPOAuthProvider:
     http_client = httpx.AsyncClient(transport=httpx.MockTransport(fake_server.handler))
     return MCPOAuthProvider(
@@ -86,10 +91,17 @@ class TestFullPkceFlow:
         assert "code_challenge=" in auth_url
         assert "code_challenge_method=S256" in auth_url
 
-        await provider.complete_authorization("fake-authorization-code")
+        await provider.complete_authorization("fake-authorization-code", _extract_state(auth_url))
 
         token = await provider.current_access_token()
         assert token == "access-1"
+
+    async def test_wrong_state_is_rejected_as_a_possible_csrf(self) -> None:
+        provider = _make_provider(_FakeAuthServer())
+        await provider.start_authorization()
+
+        with pytest.raises(Exception, match="state parameter mismatch"):
+            await provider.complete_authorization("fake-authorization-code", "attacker-supplied-state")
 
 
 class TestConcurrentRefreshDedup:
@@ -97,8 +109,8 @@ class TestConcurrentRefreshDedup:
         fake_server = _FakeAuthServer()
         provider = _make_provider(fake_server)
         # 先走一遍完整授权，确保有 refresh_token 可用。
-        await provider.start_authorization()
-        await provider.complete_authorization("fake-authorization-code")
+        auth_url = await provider.start_authorization()
+        await provider.complete_authorization("fake-authorization-code", _extract_state(auth_url))
 
         auth_provider = RefreshDedupAuthProvider(provider)
         await asyncio.gather(*(auth_provider.on_unauthorized() for _ in range(5)))
@@ -114,8 +126,8 @@ class TestStepUpScope:
     async def test_step_up_builds_a_new_authorization_url_with_union_scope(self) -> None:
         fake_server = _FakeAuthServer()
         provider = _make_provider(fake_server)
-        await provider.start_authorization()
-        await provider.complete_authorization("fake-authorization-code")
+        auth_url = await provider.start_authorization()
+        await provider.complete_authorization("fake-authorization-code", _extract_state(auth_url))
 
         url = await provider.step_up("admin")
         assert "scope=admin+tools" in url or "scope=tools+admin" in url

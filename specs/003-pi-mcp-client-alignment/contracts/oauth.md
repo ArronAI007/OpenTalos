@@ -18,7 +18,7 @@ class MCPOAuthProvider:
     def __init__(self, server_url: str, store: OAuthStateStore, *, client_metadata: dict[str, Any]) -> None: ...
     async def start_authorization(self) -> str:  # 返回授权 URL
         ...
-    async def complete_authorization(self, authorization_code: str) -> None: ...
+    async def complete_authorization(self, authorization_code: str, state_param: str) -> None: ...
 ```
 
 ## 行为契约
@@ -26,9 +26,13 @@ class MCPOAuthProvider:
 1. **未授权时的明确信号**（FR-011 Acceptance Scenario 1）：第一次连接一个要求 OAuth 的服务器且
    本地没有可用凭据时，必须抛出 `MCPOAuthAuthorizationRequiredError`（携带授权 URL），不能表现
    成普通的 `MCPConnectionError`/连接超时——调用方需要能区分"该发起授权流程了"和"单纯连不上"。
-2. **PKCE 授权码流程**：`start_authorization()` 生成 `code_verifier`（存入注入的
-   `OAuthStateStore`）+ 对应的 S256 `code_challenge`，构造授权 URL；`complete_authorization(code)`
-   用存下的 `code_verifier` 换 token，成功后把 `OAuthTokens` 存回 `store`。
+2. **PKCE 授权码流程 + state 的 CSRF 校验**：`start_authorization()` 生成 `code_verifier` + 一个
+   随机 `state`（都存入注入的 `OAuthStateStore`）+ 对应的 S256 `code_challenge`，构造授权 URL；
+   `complete_authorization(code, state_param)` 要求调用方把授权服务器原样回传的 `state` 查询参
+   数传回来，和存下的值用常数时间比较（`secrets.compare_digest`）核对一致才继续——不一致直接拒
+   绝（防止攻击者诱导受害者带着攻击者自己的授权码完成流程）；核对通过后用存下的 `code_verifier`
+   换 token，成功后把 `OAuthTokens` 存回 `store`，并清空这次的 `state`/`code_verifier`（一次性，
+   不能重放）。
 3. **动态客户端注册**：授权服务器元数据里有 `registration_endpoint` 且本地没有已注册的
    `client_information` 时自动注册一次，注册结果存入 `store`。
 4. **token 刷新 + 并发 401 去重**（FR-011、User Story 5 Acceptance Scenario 3）：收到 401 时用

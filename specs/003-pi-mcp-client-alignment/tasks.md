@@ -217,11 +217,11 @@ call_tool+客户端发起的取消+服务端发起的 ping，不需要真实子�
 
 ## Phase 9: Polish & Cross-Cutting Concerns
 
-- [ ] T070 [P] 执行 `quickstart.md` 场景 7（依赖边界核查）：`grep` 确认 `mcp>=2.3.0` 只出现在 `[dependency-groups].dev` 下，`packages/mcpclient` 的 `client.py`/`tools.py`/`protocol/`/`transports/`/`oauth/` 零处 `import mcp`（`demo_server.py` 除外）
-- [ ] T071 运行 `.venv/bin/pytest`（全量），确认 0 回归、测试数只增不减
-- [ ] T072 运行 `.venv/bin/python scripts/check_core_boundary.py`，确认依然零违规（本次改动不涉及 `packages/core`，确认没有意外波及）
-- [ ] T073 [P] 更新项目 memory（`project_opentalos_python_rebuild.md` 追加本次 shipped 记录 + `MEMORY.md` 索引行同步）
-- [ ] T074 对 `packages/mcpclient/oauth/` 全部文件做一次专门的安全检查（凭据存储方式、PKCE 校验正确性、回调 `state` 参数处理、URL scheme 校验覆盖面），对应宪法"安全敏感代码需要额外谨慎"的要求
+- [X] T070 [P] 执行 `quickstart.md` 场景 7（依赖边界核查）：`grep` 确认 `mcp>=2.3.0` 只出现在 `[dependency-groups].dev` 下，`packages/mcpclient` 的 `client.py`/`tools.py`/`protocol/`/`transports/`/`oauth/` 零处 `import mcp`（`demo_server.py` 除外）
+- [X] T071 运行 `.venv/bin/pytest`（全量），确认 0 回归、测试数只增不减
+- [X] T072 运行 `.venv/bin/python scripts/check_core_boundary.py`，确认依然零违规（本次改动不涉及 `packages/core`，确认没有意外波及）
+- [X] T073 [P] 更新项目 memory（`project_opentalos_python_rebuild.md` 追加本次 shipped 记录 + `MEMORY.md` 索引行同步）
+- [X] T074 对 `packages/mcpclient/oauth/` 全部文件做一次专门的安全检查（凭据存储方式、PKCE 校验正确性、回调 `state` 参数处理、URL scheme 校验覆盖面），对应宪法"安全敏感代码需要额外谨慎"的要求
 
 ---
 

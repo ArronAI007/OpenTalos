@@ -129,7 +129,10 @@ class StreamableHttpTransport(TransportEventsMixin):
             await response.aclose()
             needs_reauth = response.status_code == 401 or b"insufficient_scope" in body
             if not needs_reauth or self._auth_provider is None:
-                raise McpHttpError(f"HTTP {response.status_code}: {body!r}")
+                # 不把响应体拼进异常信息：鉴权失败的响应体来自服务端，可能回显请求里的敏感
+                # 内容（比如格式错误时把收到的 Authorization 头原样吐回来），不值得为了调试
+                # 方便冒这个泄露风险。
+                raise McpHttpError(f"HTTP {response.status_code}: authorization failed")
             await self._auth_provider.on_unauthorized()
             await self._apply_auth_header(headers)
             retry_request = self._client.build_request(method, self._url, json=json, headers=headers)

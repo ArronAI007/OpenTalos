@@ -23,6 +23,9 @@ class MCPOAuthState:
     tokens: OAuthTokens | None = None
     client_information: OAuthClientInformation | None = None
     code_verifier: str | None = None
+    # 这次发起的授权请求携带的 state 值，用于 complete_authorization() 时做 CSRF 校验
+    # （一次性：核对通过后立刻清空，拒绝同一个 state 被用来"完成"两次）。
+    expected_state: str | None = None
 
 
 class OAuthStateStore(Protocol):
@@ -83,25 +86,32 @@ class MCPOAuthProvider:
         metadata = await self._discover()
         client_info = await self._ensure_client_registered()
         code_verifier, code_challenge = pkce()
+        request_state = secrets.token_urlsafe(16)
         async with self._writes:
             state = await self._store.load(self._server_url) or MCPOAuthState()
             state.code_verifier = code_verifier
+            state.expected_state = request_state
             await self._store.save(self._server_url, state)
         return start_authorization(
             metadata,
             client_id=client_info.client_id,
             redirect_uri=self._redirect_uri,
             code_challenge=code_challenge,
-            state=secrets.token_urlsafe(16),
+            state=request_state,
             scope=self._client_metadata.scope,
         )
 
-    async def complete_authorization(self, authorization_code: str) -> None:
+    async def complete_authorization(self, authorization_code: str, state_param: str) -> None:
+        """`state_param` 是授权服务器原样回传的 `state` 查询参数——必须和 `start_authorization()`
+        发起这次请求时生成、存下的值一致，否则拒绝（CSRF 防护：没有这一步，攻击者可以诱导受害
+        者带着攻击者自己的授权码完成这里的流程，把攻击者的凭据绑到受害者的会话里）。"""
         metadata = await self._discover()
         async with self._writes:
             state = await self._store.load(self._server_url)
-            if state is None or state.code_verifier is None:
+            if state is None or state.code_verifier is None or state.expected_state is None:
                 raise OAuthError("no pending authorization for this server — call start_authorization() first")
+            if not secrets.compare_digest(state.expected_state, state_param):
+                raise OAuthError("state parameter mismatch — possible CSRF, rejecting this callback")
             if state.client_information is None:
                 raise OAuthError("client is not registered yet")
             tokens = await exchange_authorization_code(
@@ -114,6 +124,7 @@ class MCPOAuthProvider:
             )
             state.tokens = tokens
             state.code_verifier = None
+            state.expected_state = None  # 一次性：不能用同一个 state 再"完成"一次
             await self._store.save(self._server_url, state)
 
     async def refresh(self) -> None:
@@ -151,15 +162,17 @@ class MCPOAuthProvider:
         metadata = await self._discover()
         client_info = await self._ensure_client_registered()
         code_verifier, code_challenge = pkce()
+        request_state = secrets.token_urlsafe(16)
         async with self._writes:
             next_state = await self._store.load(self._server_url) or MCPOAuthState()
             next_state.code_verifier = code_verifier
+            next_state.expected_state = request_state
             await self._store.save(self._server_url, next_state)
         return start_authorization(
             metadata,
             client_id=client_info.client_id,
             redirect_uri=self._redirect_uri,
             code_challenge=code_challenge,
-            state=secrets.token_urlsafe(16),
+            state=request_state,
             scope=new_scope,
         )
