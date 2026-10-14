@@ -96,16 +96,16 @@ call_tool+客户端发起的取消+服务端发起的 ping，不需要真实子�
 
 ### Tests for User Story 2 ⚠️ 先写，确认失败，再实现
 
-- [ ] T023 [P] [US2] 准备一个忽略 SIGTERM、只在 SIGKILL 时退出的测试脚本（放在 `tests/mcpclient/fixtures/` 下）+ 失败测试：对它建立 stdio 连接后调用 `close()`，断言最终确实让它退出（可用耗时量级粗略核实走完了"stdin 关闭宽限期→SIGTERM 等待期→SIGKILL"三个阶段），写入 `tests/mcpclient/test_transports_stdio.py`
-- [ ] T024 [P] [US2] 准备一个会再拉起一个子进程的包装测试脚本（放在 `tests/mcpclient/fixtures/` 下）+ 失败测试：关闭连接后用 `ps`/`pgrep` 核实外层包装进程和它拉起的子进程都不在了，写入 `tests/mcpclient/test_transports_stdio.py`
-- [ ] T025 [P] [US2] 失败测试：直接调用模块级的进程退出清理钩子函数（模拟"宿主进程异常退出"），断言仍存活的已注册进程组会被 SIGTERM，写入 `tests/mcpclient/test_transports_stdio.py`
+- [X] T023 [P] [US2] 准备一个忽略 SIGTERM、只在 SIGKILL 时退出的测试脚本（放在 `tests/mcpclient/fixtures/` 下）+ 失败测试：对它建立 stdio 连接后调用 `close()`，断言最终确实让它退出（可用耗时量级粗略核实走完了"stdin 关闭宽限期→SIGTERM 等待期→SIGKILL"三个阶段），写入 `tests/mcpclient/test_transports_stdio.py`
+- [X] T024 [P] [US2] 准备一个会再拉起一个子进程的包装测试脚本（放在 `tests/mcpclient/fixtures/` 下）+ 失败测试：关闭连接后用 `ps`/`pgrep` 核实外层包装进程和它拉起的子进程都不在了，写入 `tests/mcpclient/test_transports_stdio.py`
+- [X] T025 [P] [US2] 失败测试：直接调用模块级的进程退出清理钩子函数（模拟"宿主进程异常退出"），断言仍存活的已注册进程组会被 SIGTERM，写入 `tests/mcpclient/test_transports_stdio.py`
 
 ### Implementation for User Story 2
 
-- [ ] T026 [US2] 实现 `StdioTransport.start()`：`asyncio.create_subprocess_exec(..., start_new_session=True)`（POSIX 新建进程组）、逐行读取 stdout 解析换行分隔的 JSON-RPC 消息（单行超过 `DEFAULT_MAX_MESSAGE_BYTES=16MB` 报错而不是无限增长内存）、stderr 读入容量上限 64KB 的环形缓冲区，写入 `packages/mcpclient/transports/stdio.py`（依赖 T007）
-- [ ] T027 [US2] 实现 `StdioTransport.close()` 级联：关闭 stdin → 等待 `STDIN_CLOSE_GRACE_MS`（默认 500ms，受 `close_timeout_ms` 封顶）→ 仍未退出发 SIGTERM（POSIX：`os.killpg(os.getpgid(pid), signal.SIGTERM)`；Windows：`taskkill /T /F` 等效机制）→ 等待 `close_timeout_ms`（默认 2000ms）→ 仍未退出发 SIGKILL，写入 `packages/mcpclient/transports/stdio.py`（依赖 T026）
-- [ ] T028 [US2] 实现模块级"存活进程组 id"注册表 + `atexit.register` 清理钩子（宿主进程退出时对仍存活的进程组发 SIGTERM），写入 `packages/mcpclient/transports/stdio.py`（依赖 T026）
-- [ ] T029 [US2] 运行 `.venv/bin/pytest tests/mcpclient/test_transports_stdio.py -v`，确认全部通过（GREEN checkpoint）
+- [X] T026 [US2] 实现 `StdioTransport.start()`：`asyncio.create_subprocess_exec(..., start_new_session=True)`（POSIX 新建进程组）、逐行读取 stdout 解析换行分隔的 JSON-RPC 消息（单行超过 `DEFAULT_MAX_MESSAGE_BYTES=16MB` 报错而不是无限增长内存）、stderr 读入容量上限 64KB 的环形缓冲区，写入 `packages/mcpclient/transports/stdio.py`（依赖 T007）
+- [X] T027 [US2] 实现 `StdioTransport.close()` 级联：关闭 stdin → 等待 `STDIN_CLOSE_GRACE_MS`（默认 500ms，受 `close_timeout_ms` 封顶）→ 仍未退出发 SIGTERM（POSIX：`os.killpg(os.getpgid(pid), signal.SIGTERM)`；Windows：`taskkill /T /F` 等效机制）→ 等待 `close_timeout_ms`（默认 2000ms）→ 仍未退出发 SIGKILL，写入 `packages/mcpclient/transports/stdio.py`（依赖 T026）
+- [X] T028 [US2] 实现模块级"存活进程组 id"注册表 + `atexit.register` 清理钩子（宿主进程退出时对仍存活的进程组发 SIGTERM），写入 `packages/mcpclient/transports/stdio.py`（依赖 T026）
+- [X] T029 [US2] 运行 `.venv/bin/pytest tests/mcpclient/test_transports_stdio.py -v`，确认全部通过（GREEN checkpoint）
 
 **Checkpoint**：User Story 1 + 2 都独立可用——stdio 传输现在是生产可用的真实传输。
 
