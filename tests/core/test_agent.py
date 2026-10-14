@@ -411,3 +411,36 @@ def test_scripted_client_streams_tool_completion_via_astream(scripted_client):
     deltas, result = asyncio.run(run())
     assert "".join(deltas) == "done"
     assert result.requested_tools[0].tool_name == "echo"
+
+
+async def test_build_messages_uses_transform_context_return_value(model_client):
+    async def transform(history: list[ChatMessage]) -> list[ChatMessage]:
+        return [*history, ChatMessage(content="injected by transform_context", role="user")]
+
+    agent = _make_agent(_EchoAgent, model_client=model_client, transform_context=transform)
+    agent.record_message(ChatMessage(content="original", role="user"))
+
+    messages = await agent.build_messages("latest question")
+
+    assert any(m.get("content") == "injected by transform_context" for m in messages)
+
+
+async def test_build_messages_degrades_to_original_history_when_transform_context_raises(model_client):
+    async def broken_transform(history: list[ChatMessage]) -> list[ChatMessage]:
+        raise RuntimeError("transform_context broke")
+
+    agent = _make_agent(_EchoAgent, model_client=model_client, transform_context=broken_transform)
+    agent.record_message(ChatMessage(content="original", role="user"))
+
+    messages = await agent.build_messages("latest question")
+
+    assert any(m.get("content") == "original" for m in messages)  # 降级：原始历史仍然生效
+
+
+async def test_build_messages_uses_original_history_when_transform_context_not_provided(model_client):
+    agent = _make_agent(_EchoAgent, model_client=model_client)
+    agent.record_message(ChatMessage(content="original", role="user"))
+
+    messages = await agent.build_messages("latest question")
+
+    assert any(m.get("content") == "original" for m in messages)

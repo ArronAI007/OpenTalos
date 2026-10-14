@@ -544,3 +544,25 @@ async def test_react_agent_default_termination_is_equivalent_to_the_old_finish_t
     answer = await agent.arespond("echo hi then finish")
 
     assert answer == "hi echoed, all done"
+
+
+async def test_react_agent_exposes_transform_context(scripted_client):
+    client = scripted_client(tool_completions=[ToolCompletion(text="done", requested_tools=[], model_id="mock")])
+    seen: list[list[dict]] = []
+    original = client.acomplete_with_tools
+
+    async def spy(messages, tools, tool_choice="auto", **kwargs):
+        seen.append([dict(m) for m in messages])
+        return await original(messages, tools, tool_choice, **kwargs)
+
+    client.acomplete_with_tools = spy  # type: ignore[method-assign]
+
+    async def transform(history):
+        from core.protocol import ChatMessage
+
+        return [*history, ChatMessage(content="injected", role="user")]
+
+    agent = ReActAgent(name="bot", model_client=client, transform_context=transform)
+    await agent.arespond("原始问题")
+
+    assert any(m.get("content") == "injected" for m in seen[0])

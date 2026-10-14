@@ -46,6 +46,24 @@ def test_seed_messages_rehydrates_tool_history():
     ]
 
 
+def test_seed_messages_filters_out_app_specific_roles():
+    # 应用专属角色（如 "notification"）混入历史时被过滤掉，不出现在发给模型的消息列表里；
+    # 既有的 tool/summary 两种特殊角色的转换行为不受影响（FR-013，消息分层）。
+    history = [
+        ChatMessage(content="hi", role="user"),
+        ChatMessage(content="后台通知，模型不应该看到", role="notification"),
+        ChatMessage(content="hello", role="assistant"),
+    ]
+
+    messages = seed_messages(None, history, "下一步")
+
+    assert messages == [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "hello"},
+        {"role": "user", "content": "下一步"},
+    ]
+
+
 def test_seed_messages_maps_summary_to_system_block():
     history = [
         ChatMessage(content="earlier", role="summary"),

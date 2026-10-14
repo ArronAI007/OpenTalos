@@ -397,48 +397,48 @@ description: "Task list for feature implementation"
 
 ### Tests for User Story 5 ⚠️
 
-- [ ] T050 [P] [US5] 在 `tests/core/test_protocol.py`（不存在则新建）新增：`ChatMessage(role=
+- [X] T050 [P] [US5] 在 `tests/core/test_protocol.py`（不存在则新建）新增：`ChatMessage(role=
       "notification", content="...")` 能正常构造，不再因为 `role` 不在封闭 `Literal` 里而被
       Pydantic 拒绝。预期：当前 `SpeakerRole` 是封闭 `Literal`，构造报 `ValidationError`，测试失
       败。
-- [ ] T051 [P] [US5] 在 `tests/memory/test_working.py`（或现有覆盖 `build_messages` 的测试文件）
+- [X] T051 [P] [US5] 在 `tests/memory/test_working.py`（或现有覆盖 `build_messages` 的测试文件）
       新增：历史里混入一条 `role="notification"` 的消息，`build_messages()` 返回的列表里不包含
       它；`role="tool"`/`role="summary"` 两种既有特殊角色的转换行为不受影响。预期：现有 `else` 分
       支会把这条消息原样透传进返回列表，断言"不包含它"失败。
-- [ ] T052 [US5] 跑 `.venv/bin/pytest tests/core/test_protocol.py tests/memory/test_working.py
+- [X] T052 [US5] 跑 `.venv/bin/pytest tests/core/test_protocol.py tests/memory/test_working.py
       -v`，确认按预期原因失败（depends on: T050, T051）
 
 ### Implementation for User Story 5
 
-- [ ] T053 [US5] 修改 `packages/core/protocol.py`：`SpeakerRole` 从
+- [X] T053 [US5] 修改 `packages/core/protocol.py`：`SpeakerRole` 从
       `Literal["user", "assistant", "system", "tool", "summary"]` 改为 `str`
-- [ ] T054 [US5] 修改 `packages/memory/working.py`：`build_messages()` 新增模块级常量
+- [X] T054 [US5] 修改 `packages/memory/working.py`：`build_messages()` 新增模块级常量
       `_LLM_ROLES = frozenset({"user", "assistant", "system"})`；现有 `else` 分支（处理
       `tool`/`summary` 之外的角色）改成"`message.role in _LLM_ROLES` 才追加，否则跳过"（depends
       on: T053）
-- [ ] T055 [US5] 跑 `.venv/bin/pytest tests/core/test_protocol.py tests/memory/test_working.py
+- [X] T055 [US5] 跑 `.venv/bin/pytest tests/core/test_protocol.py tests/memory/test_working.py
       -v`，确认全部通过（depends on: T054）
 
 ### Tests for User Story 5 (transform_context + ReActAgent 接入) ⚠️
 
-- [ ] T056 [P] [US5] 在 `tests/core/test_agent.py` 新增：提供 `transform_context` 回调（返回一份
+- [X] T056 [P] [US5] 在 `tests/core/test_agent.py` 新增：提供 `transform_context` 回调（返回一份
       裁剪/改写过的历史），断言 `Agent`/`ReActAgent` 生成的最终 `messages` 基于这个返回值而不是原
       始历史；`transform_context` 内部抛异常时，断言运行不崩溃、改用原始历史继续。预期：
       `Agent.__init__`/`build_messages`-调用路径 还没有这个钩子，`TypeError`/断言失败。
 
 ### Implementation (transform_context + ReActAgent 接入)
 
-- [ ] T057 [US5] 修改 `packages/core/agent.py`：`Agent.__init__` 新增
+- [X] T057 [US5] 修改 `packages/core/agent.py`：`Agent.__init__` 新增
       `transform_context: Callable[[list[ChatMessage]], Awaitable[list[ChatMessage]]] | None =
       None` 构造参数；新增一个方法（如 `apply_transform_context`）在拿到 `history_snapshot()` 之
       后、调用 `build_messages()` 之前调用它，异常时吞掉（记一条 trace 事件，若有 recorder）、改
       用原始历史（depends on: T054, T056）
-- [ ] T058 [US5] 跑 `.venv/bin/pytest tests/core/test_agent.py -v`，确认全部通过（depends on:
+- [X] T058 [US5] 跑 `.venv/bin/pytest tests/core/test_agent.py -v`，确认全部通过（depends on:
       T057）
-- [ ] T059 [US5] 修改 `packages/agents/react_agent.py`：`ReActAgent.__init__` 透传
+- [X] T059 [US5] 修改 `packages/agents/react_agent.py`：`ReActAgent.__init__` 透传
       `transform_context` 构造参数给 `super().__init__()`；`arespond()` 里 `build_messages()` 调
       用前改用 T057 新增的方法（depends on: T057）
-- [ ] T060 [US5] 跑 `.venv/bin/pytest tests/core/ tests/agents/ -v`，确认本故事范围内全部测试通
+- [X] T060 [US5] 跑 `.venv/bin/pytest tests/core/ tests/agents/ -v`，确认本故事范围内全部测试通
       过、无回归（depends on: T058, T059）
 
 **Checkpoint**：应用专属消息角色能安全混入历史而不泄漏给模型，`transform_context` 钩子可用。

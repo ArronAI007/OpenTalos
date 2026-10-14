@@ -48,6 +48,7 @@ class Agent(ABC):
         compaction_token_limit: int | None = None,
         output_trimmer: OutputTrimmerLike | None = None,
         approval_gate: Callable[[ToolInvocation], Awaitable[bool]] | None = None,
+        transform_context: Callable[[list[ChatMessage]], Awaitable[list[ChatMessage]]] | None = None,
     ) -> None:
         self.name = name
         self.model_client = model_client
@@ -71,6 +72,10 @@ class Agent(ABC):
         # 这里耦合任何持久化逻辑，所以回调由外部按需注入，None 时静默跳过。
         self.on_compression: Callable[[], Awaitable[None]] | None = None
         self._listeners: list[EventListener] = []
+        # 在 build_messages() 转换成 LLM 消息之前，对历史做一次独立预处理（裁剪/注入外部上下文）；
+        # None 时历史原样传递（FR-014）。异常时降级为用原始历史继续，不是 fail-closed——这是一个
+        # 纯读取型预处理步骤，强行拒绝整轮运行不成比例（见 contracts/request-and-message-hooks.md）。
+        self.transform_context = transform_context
 
     @abstractmethod
     async def arespond(self, input_text: str, **kwargs: object) -> str: ...
@@ -239,8 +244,19 @@ class Agent(ABC):
             extra_slices=extra_slices,
         )
 
-    def build_messages(self, user_text: str) -> list[dict[str, Any]]:
+    async def build_messages(self, user_text: str) -> list[dict[str, Any]]:
         """把 system_prompt + 历史（按轮次截断到 token 预算内）+ 本轮输入组装成合法的、
         OpenAI 兼容的 messages 列表——真实的、生产代码会调用的 prompt 拼装入口。
+
+        `transform_context` 不为空时，先对 `history_snapshot()` 做一次独立预处理，用它的返回
+        值（而不是原始历史）喂给 `build_messages`；预处理抛异常时吞掉、改用原始历史继续（降
+        级，不是 fail-closed——见构造函数里的说明）。
         """
-        return self._short_term.build_messages(self.system_prompt, user_text)
+        history = self.history_snapshot()
+        if self.transform_context is not None:
+            try:
+                history = await self.transform_context(history)
+            except Exception as error:  # noqa: BLE001 - 降级：用原始历史继续，不中断整轮运行
+                if self.recorder:
+                    self.recorder.log_event("transform_context_error", {"error": str(error)})
+        return self._short_term.build_messages(self.system_prompt, user_text, history_override=history)

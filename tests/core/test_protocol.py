@@ -1,8 +1,5 @@
 from datetime import datetime
 
-import pytest
-from pydantic import ValidationError
-
 from core.protocol import ChatMessage, Completion, StreamSummary, ToolCompletion, ToolInvocation
 
 
@@ -25,9 +22,11 @@ def test_chat_message_as_text_formats_role_and_content():
     assert message.as_text() == "[assistant] hello"
 
 
-def test_chat_message_rejects_an_invalid_role():
-    with pytest.raises(ValidationError):
-        ChatMessage(content="hi", role="not-a-real-role")
+def test_chat_message_accepts_an_app_specific_role():
+    # SpeakerRole 放宽为开放字符串（FR-013，消息分层）：应用专属角色不再在构造时被拒绝——
+    # 过滤发生在转换成 LLM 消息的那一步（packages/memory/working.py 的 _LLM_ROLES）。
+    message = ChatMessage(content="hi", role="notification")
+    assert message.role == "notification"
 
 
 def test_completion_str_returns_text():

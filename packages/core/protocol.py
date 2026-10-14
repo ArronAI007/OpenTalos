@@ -10,7 +10,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-SpeakerRole = Literal["user", "assistant", "system", "tool", "summary"]
+# 放宽为开放字符串（而不是封闭 Literal）：允许应用专属消息角色（如 "notification"）混入同一份
+# 历史列表而不被拒绝（FR-013，消息分层）。LLM 实际认识的角色集合收窄到转换步骤里做（见
+# packages/memory/working.py 的 _LLM_ROLES），不在构造消息这一步就校验/拒绝未知角色。
+SpeakerRole = str
 
 
 class ChatMessage(BaseModel):

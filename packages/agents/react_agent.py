@@ -70,6 +70,7 @@ class ReActAgent(Agent):
         before_tool_call: BeforeToolCallHook | None = None,
         after_tool_call: AfterToolCallHook | None = None,
         finish_turn: FinishTurnHook | None = None,
+        transform_context: Callable[[list[ChatMessage]], Awaitable[list[ChatMessage]]] | None = None,
     ) -> None:
         super().__init__(
             name,
@@ -86,6 +87,7 @@ class ReActAgent(Agent):
             compaction_token_limit=compaction_token_limit,
             output_trimmer=output_trimmer,
             approval_gate=approval_gate,
+            transform_context=transform_context,
         )
         self.tool_registry = tool_registry
         self.max_steps = max_steps
@@ -111,7 +113,7 @@ class ReActAgent(Agent):
         stream: bool = bool(kwargs.pop("stream", False))
         steer = _ReActSteerQueue(self, drain_steer) if drain_steer is not None else None
         followup = _ReActSteerQueue(self, drain_followup) if drain_followup is not None else None
-        messages = self.build_messages(input_text)
+        messages = await self.build_messages(input_text)
         # 召回的相关长期记忆作为一条 system 注入（在系统提示之后、历史之前）。
         if recalled:
             block = "## Relevant memory about the user\n" + "\n".join(f"- {item}" for item in recalled)
