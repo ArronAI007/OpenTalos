@@ -5,6 +5,19 @@ from tool.outcome import ToolOutcome
 from tool.tool import Tool, ToolParameter
 
 from .client import MCPClient, MCPConnectionError, MCPServerConfig, MCPToolInfo
+from .protocol.content import ImageLlmContent, LlmContent, TextLlmContent, to_llm_content
+
+
+def _flatten_llm_content(blocks: list[LlmContent]) -> str:
+    """把 `to_llm_content()` 的结果压平成 `ToolOutcome.output` 要求的单个字符串：文本成员按顺
+    序拼接；图片成员转成可读的占位符（不是 Python 对象的 repr），满足 SC-005。"""
+    parts: list[str] = []
+    for block in blocks:
+        if isinstance(block, TextLlmContent):
+            parts.append(block.text)
+        elif isinstance(block, ImageLlmContent):
+            parts.append(f"[图片内容：{block.mime_type}，约 {len(block.data)} 字符的 base64 数据]")
+    return "\n".join(parts)
 
 
 def _json_schema_to_parameters(schema: dict) -> list[ToolParameter]:
@@ -53,9 +66,7 @@ class MCPTool(Tool):
             result = await self._client.call_tool(self._tool_info.name, arguments)
         except MCPConnectionError as error:
             return ToolOutcome.error(str(error))
-        # 现状的纯文本提取（和 connect_and_call_tool 时代行为等价）；Phase 7（User Story 4）会把
-        # 这一段换成 to_llm_content() + 压平，正确处理图片/嵌入资源/structuredContent。
-        text = "\n".join(getattr(block, "text", str(block)) for block in result.content)
+        text = _flatten_llm_content(to_llm_content(result))
         if result.is_error:
             return ToolOutcome.error(f"tool call returned an error: {text}")
         return ToolOutcome.ok(text)

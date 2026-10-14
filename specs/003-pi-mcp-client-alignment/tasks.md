@@ -169,16 +169,16 @@ call_tool+客户端发起的取消+服务端发起的 ping，不需要真实子�
 
 ### Tests for User Story 4 ⚠️ 先写，确认失败，再实现
 
-- [ ] T049 [P] [US4] 失败测试：`to_llm_content()` 对只含文本 block 的 `CallToolResult`，结果和现状 `"\n".join(block.text for block in result.content)` 行为等价（不回归），写入 `tests/mcpclient/test_content_conversion.py`
-- [ ] T050 [P] [US4] 失败测试：`to_llm_content()` 对含图片 block / 嵌入文本资源 block / 嵌入图片资源 block 的结果，正确解包成对应的 `LlmContent` 成员，写入 `tests/mcpclient/test_content_conversion.py`
-- [ ] T051 [P] [US4] 失败测试：`to_llm_content()` 对没有 `content`、只有 `structured_content` 的结果，返回它的 JSON 文本而不是空字符串，写入 `tests/mcpclient/test_content_conversion.py`
-- [ ] T052 [P] [US4] 失败测试：`MCPTool.acall()` 对含图片内容的结果压平出的 `ToolOutcome.output` 字符串里包含可读的 `mime_type` 占位符，不包含 Python 对象 repr 的典型特征（`<`/`0x` 地址），写入 `tests/mcpclient/test_mcpclient_tools.py`
+- [X] T049 [P] [US4] 失败测试：`to_llm_content()` 对只含文本 block 的 `CallToolResult`，结果和现状 `"\n".join(block.text for block in result.content)` 行为等价（不回归），写入 `tests/mcpclient/test_content_conversion.py`
+- [X] T050 [P] [US4] 失败测试：`to_llm_content()` 对含图片 block / 嵌入文本资源 block / 嵌入图片资源 block 的结果，正确解包成对应的 `LlmContent` 成员，写入 `tests/mcpclient/test_content_conversion.py`
+- [X] T051 [P] [US4] 失败测试：`to_llm_content()` 对没有 `content`、只有 `structured_content` 的结果，返回它的 JSON 文本而不是空字符串，写入 `tests/mcpclient/test_content_conversion.py`
+- [X] T052 [P] [US4] 失败测试：`MCPTool.acall()` 对含图片内容的结果压平出的 `ToolOutcome.output` 字符串里包含可读的 `mime_type` 占位符，不包含 Python 对象 repr 的典型特征（`<`/`0x` 地址），写入 `tests/mcpclient/test_mcpclient_tools.py`
 
 ### Implementation for User Story 4
 
-- [ ] T053 [US4] 实现 `to_llm_content(result: CallToolResult) -> list[LlmContent]`（转换规则见 `contracts/content-conversion.md`），写入 `packages/mcpclient/protocol/content.py`（依赖 T004）
-- [ ] T054 [US4] 改造 `MCPTool.acall()`：调用 `to_llm_content()` 后把结果压平成 `ToolOutcome.output` 字符串（文本成员 `"\n"` 连接；图片成员转成 `f"[图片内容：{mime_type}，约 {len(data)} 字符的 base64 数据]"` 占位符），写入 `packages/mcpclient/tools.py`（依赖 T053、T031）
-- [ ] T055 [US4] 运行 `.venv/bin/pytest tests/mcpclient/test_content_conversion.py tests/mcpclient/test_mcpclient_tools.py -v`，确认全部通过（GREEN checkpoint）
+- [X] T053 [US4] 实现 `to_llm_content(result: CallToolResult) -> list[LlmContent]`（转换规则见 `contracts/content-conversion.md`），写入 `packages/mcpclient/protocol/content.py`（依赖 T004）
+- [X] T054 [US4] 改造 `MCPTool.acall()`：调用 `to_llm_content()` 后把结果压平成 `ToolOutcome.output` 字符串（文本成员 `"\n"` 连接；图片成员转成 `f"[图片内容：{mime_type}，约 {len(data)} 字符的 base64 数据]"` 占位符），写入 `packages/mcpclient/tools.py`（依赖 T053、T031）
+- [X] T055 [US4] 运行 `.venv/bin/pytest tests/mcpclient/test_content_conversion.py tests/mcpclient/test_mcpclient_tools.py -v`，确认全部通过（GREEN checkpoint）
 
 **Checkpoint**：图片等多模态内容不再被错误地转成 Python 对象字符串（SC-005）。
 

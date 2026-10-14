@@ -6,7 +6,8 @@ from pathlib import Path
 from tool.outcome import OutcomeStatus
 
 from mcpclient.client import MCPServerConfig, MCPToolInfo
-from mcpclient.tools import MCPTool, _json_schema_to_parameters
+from mcpclient.protocol.content import CallToolResult, ImageContentBlock, to_llm_content
+from mcpclient.tools import MCPTool, _flatten_llm_content, _json_schema_to_parameters
 
 _DEMO_SERVER = str(Path(__file__).resolve().parent.parent.parent / "packages" / "mcpclient" / "demo_server.py")
 
@@ -75,6 +76,13 @@ class TestMCPTool:
         tool = MCPTool(bad_server, MCPToolInfo(name="x", description="", input_schema={}))
         outcome = await tool.acall({})
         assert outcome.status == OutcomeStatus.ERROR
+
+    def test_image_content_flattens_to_a_readable_placeholder_not_a_repr(self) -> None:
+        """SC-005：图片内容压平成人类可读的占位符，不是一段不可读的 Python 对象字符串。"""
+        result = CallToolResult(content=[ImageContentBlock(data="QUJD" * 10, mime_type="image/png")])
+        text = _flatten_llm_content(to_llm_content(result))
+        assert "image/png" in text
+        assert "<" not in text and "0x" not in text
 
     async def test_acall_reuses_the_same_connection_across_calls(self) -> None:
         """SC-006：同一个 MCPTool 连续 acall() 两次，底层只建立一次连接。"""

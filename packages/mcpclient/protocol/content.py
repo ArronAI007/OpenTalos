@@ -1,8 +1,6 @@
-"""工具调用结果的内容类型（`CallToolResult`/`ContentBlock`/`LlmContent`）。
-
-本文件只放类型定义；`to_llm_content()` 转换函数在 User Story 4 阶段实现（见
-contracts/content-conversion.md），避免这个 Foundational 阶段的任务提前掺进业务逻辑。
-"""
+"""工具调用结果的内容类型（`CallToolResult`/`ContentBlock`/`LlmContent`）+ `to_llm_content()`
+转换函数（User Story 4，对应 contracts/content-conversion.md）。"""
+import json
 from dataclasses import dataclass
 from typing import Literal
 
@@ -112,3 +110,39 @@ class ImageLlmContent:
 
 
 LlmContent = TextLlmContent | ImageLlmContent
+
+
+def to_llm_content(result: CallToolResult) -> list[LlmContent]:
+    """把 `CallToolResult` 转成模型可读的内容列表（FR-006）：文本/图片直接透传，嵌入的文本/
+    图片资源解包，音频/资源链接/其余二进制资源转成简短文本占位符；没有 `content` 但有
+    `structured_content` 时用它的 JSON 文本；两者都为空时返回空列表（现状行为的延伸）。"""
+    if not result.content:
+        if result.structured_content is not None:
+            return [TextLlmContent(text=json.dumps(result.structured_content, ensure_ascii=False))]
+        return []
+    converted: list[LlmContent] = []
+    for block in result.content:
+        if isinstance(block, TextContentBlock):
+            converted.append(TextLlmContent(text=block.text))
+        elif isinstance(block, ImageContentBlock):
+            converted.append(ImageLlmContent(data=block.data, mime_type=block.mime_type))
+        elif isinstance(block, AudioContentBlock):
+            converted.append(TextLlmContent(text=f"[音频内容：{block.mime_type}]"))
+        elif isinstance(block, ResourceLinkContentBlock):
+            converted.append(TextLlmContent(text=f"[资源链接：{block.name} ({block.uri})]"))
+        elif isinstance(block, EmbeddedResourceContentBlock):
+            converted.append(_embedded_resource_to_llm_content(block.resource))
+        else:
+            converted.append(TextLlmContent(text=str(block)))
+    return converted
+
+
+def _embedded_resource_to_llm_content(
+    resource: "TextResourceContents | BlobResourceContents",
+) -> LlmContent:
+    if isinstance(resource, TextResourceContents):
+        return TextLlmContent(text=resource.text)
+    mime_type = resource.mime_type or "application/octet-stream"
+    if mime_type.startswith("image/"):
+        return ImageLlmContent(data=resource.blob, mime_type=mime_type)
+    return TextLlmContent(text=f"[嵌入资源：{mime_type}，约 {len(resource.blob)} 字符的 base64 数据]")
