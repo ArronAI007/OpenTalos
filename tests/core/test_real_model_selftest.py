@@ -11,6 +11,7 @@ import pytest
 
 from core.agent_loop import run_tool_turn
 from core.model import ModelClient
+from core.protocol import AgentEvent, EventKind
 
 pytestmark = pytest.mark.skipif(
     not os.environ.get("MODEL_API_KEY"),
@@ -85,3 +86,51 @@ async def test_core_recognizes_a_real_tool_call_intent():
 
     print(f"\n[real model reply] {answer!r}")
     assert tool_registry.called_with, "模型应该请求调用 get_current_time，但 core 没有转发这次调用"
+
+
+async def test_core_pi_alignment_capabilities_fire_on_a_real_tool_call_run():
+    """SC-008：真机验证事件总线/finishTurn 两项核心能力在真实模型往返里确实被触发过（而不是
+    只能在单元测试里观察到）。steering/follow-up/消息分层/prepare_request/thinking_level 的真
+    机集成已经被 ReActAgent 自身的单元测试（scripted_client）充分覆盖，这里只加真实模型这一个
+    维度，不重复全部场景。
+    """
+    client = ModelClient()
+    client.thinking_level = "off"  # 显式验证 off 不会让请求失败（FR-018）
+    tool_registry = _FakeToolExecutor()
+    messages = [
+        {
+            "role": "user",
+            "content": "You must call the get_current_time tool to answer. "
+            "Call it now, then tell the user the time.",
+        }
+    ]
+
+    events: list[AgentEvent] = []
+
+    async def emit(event: AgentEvent) -> None:
+        events.append(event)
+
+    finish_turn_calls: list[bool] = []
+
+    async def finish_turn(context):
+        finish_turn_calls.append(bool(context.completion.requested_tools))
+        return None  # 不覆盖默认调度，只验证真的被调用过
+
+    try:
+        answer = await asyncio.wait_for(
+            run_tool_turn(
+                client, messages, tool_registry, 3, emit=emit, agent_name="selftest", finish_turn=finish_turn
+            ),
+            timeout=_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        pytest.skip("大模型服务超时/不可用")
+
+    print(f"\n[real model reply] {answer!r}")
+    assert tool_registry.called_with, "模型应该请求调用 get_current_time，但 core 没有转发这次调用"
+
+    kinds = [e.kind for e in events]
+    assert kinds[0] == EventKind.TURN_START
+    assert EventKind.TOOL_EXECUTION_START in kinds and EventKind.TOOL_EXECUTION_END in kinds
+    assert all(e.agent_name == "selftest" for e in events)
+    assert finish_turn_calls, "finish_turn 应该在真实运行里被调用过至少一次"

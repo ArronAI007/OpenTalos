@@ -549,16 +549,16 @@ description: "Task list for feature implementation"
 
 ## Phase 10: Polish & Cross-Cutting Concerns
 
-- [ ] T077 [P] 跑 `.venv/bin/pytest tests/ -v`，确认全量测试通过数不低于 T001 记录的基线（扣除本次
+- [X] T077 [P] 跑 `.venv/bin/pytest tests/ -v`，确认全量测试通过数不低于 T001 记录的基线（扣除本次
       明确删除/重写的用例：`test_steering_interrupts_an_in_flight_model_call_and_retries`、
       `test_finish_tool_is_offered_even_without_a_tool_registry`，其余不得有回归）
-- [ ] T078 [P] 跑 `.venv/bin/python scripts/check_core_boundary.py`，确认退出码仍为 `0`（SC-004）
-- [ ] T079 按 `quickstart.md` 列出的 11 个验证场景逐条手动过一遍（场景 8 的真机验证在无凭据环境下
+- [X] T078 [P] 跑 `.venv/bin/python scripts/check_core_boundary.py`，确认退出码仍为 `0`（SC-004）
+- [X] T079 按 `quickstart.md` 列出的 11 个验证场景逐条手动过一遍（场景 8 的真机验证在无凭据环境下
       记录为 `SKIPPED`，有凭据环境下记录真实通过结果），确认每一条实际结果都和文档预期一致
-- [ ] T080 [P] 补一条 `tests/core/test_real_model_selftest.py` 的真机场景（SC-008）：有凭据时跑一
+- [X] T080 [P] 补一条 `tests/core/test_real_model_selftest.py` 的真机场景（SC-008）：有凭据时跑一
       次会触发工具调用的真实对话，断言事件总线产生了真实事件、`finish_turn` 判定了真实的终止；无
       凭据时 `SKIPPED`
-- [ ] T081 [P] 按本仓库既有习惯更新项目 memory（`project_opentalos_python_rebuild.md` 追加这次
+- [X] T081 [P] 按本仓库既有习惯更新项目 memory（`project_opentalos_python_rebuild.md` 追加这次
       pi-agent-core 对齐的记录 + `MEMORY.md` 索引行），记录涉及的文件范围、两处确认的行为替换、真
       机验证结果
 
