@@ -222,12 +222,16 @@ def test_model_client_reads_reasoning_effort_from_env(monkeypatch):
     monkeypatch.setenv("MODEL_REASONING_EFFORT", "low")
     client = ModelClient(provider="mock")
     assert client.reasoning_effort == "low"
+    # reasoning_effort 折算出一个等价的 thinking_level 初值（向后兼容，不再是唯一来源）。
+    assert client.thinking_level == "low"
 
 
 def test_unset_reasoning_effort_is_omitted_from_the_request(monkeypatch):
     monkeypatch.delenv("MODEL_REASONING_EFFORT", raising=False)
     client = ModelClient(provider="mock")
+    assert client.thinking_level == "off"
     assert "reasoning_effort" not in client._build_call_kwargs({})
+    assert "thinking" not in client._build_call_kwargs({})
 
 
 def test_configured_reasoning_effort_is_sent_and_per_call_overrides_win(monkeypatch):
@@ -235,7 +239,65 @@ def test_configured_reasoning_effort_is_sent_and_per_call_overrides_win(monkeypa
     monkeypatch.delenv("MODEL_TEMPERATURE", raising=False)
     client = ModelClient(provider="mock", reasoning_effort="low")
     assert client._build_call_kwargs({}) == {"reasoning_effort": "low"}
-    assert client._build_call_kwargs({"reasoning_effort": "max"}) == {"reasoning_effort": "max"}
+    assert client._build_call_kwargs({"thinking_level": "max"}) == {"reasoning_effort": "max"}
+
+
+def test_thinking_level_off_omits_reasoning_effort_for_openai_compatible_backend(monkeypatch):
+    monkeypatch.delenv("MODEL_REASONING_EFFORT", raising=False)
+    client = ModelClient(provider="mock")
+    for level in ("minimal", "low"):
+        client.thinking_level = level
+        assert client._build_call_kwargs({}).get("reasoning_effort") == "low"
+    for level in ("medium", "high"):
+        client.thinking_level = level
+        assert client._build_call_kwargs({}).get("reasoning_effort") == "high"
+    for level in ("xhigh", "max"):
+        client.thinking_level = level
+        assert client._build_call_kwargs({}).get("reasoning_effort") == "max"
+    client.thinking_level = "off"
+    assert "reasoning_effort" not in client._build_call_kwargs({})
+
+
+def test_thinking_level_is_runtime_mutable_and_takes_effect_on_the_next_call(monkeypatch):
+    monkeypatch.delenv("MODEL_REASONING_EFFORT", raising=False)
+    client = ModelClient(provider="mock")
+    assert "reasoning_effort" not in client._build_call_kwargs({})
+
+    client.thinking_level = "low"
+    assert client._build_call_kwargs({})["reasoning_effort"] == "low"
+
+    client.thinking_level = "off"
+    assert "reasoning_effort" not in client._build_call_kwargs({})
+
+
+def test_claude_backend_uses_native_thinking_budget(monkeypatch):
+    monkeypatch.delenv("MODEL_REASONING_EFFORT", raising=False)
+    monkeypatch.setattr("core.model.AsyncAnthropic", lambda **kwargs: SimpleNamespace())
+    client = ModelClient(provider="anthropic", api_key="k", model_name="claude-test")
+    client.thinking_level = "high"
+
+    call_kwargs = client._build_call_kwargs({})
+
+    assert call_kwargs["thinking"] == {"type": "enabled", "budget_tokens": 8192}
+
+
+def test_claude_backend_thinking_budget_is_customizable(monkeypatch):
+    monkeypatch.delenv("MODEL_REASONING_EFFORT", raising=False)
+    monkeypatch.setattr("core.model.AsyncAnthropic", lambda **kwargs: SimpleNamespace())
+    client = ModelClient(
+        provider="anthropic", api_key="k", model_name="claude-test", thinking_budgets={"high": 99}
+    )
+    client.thinking_level = "high"
+
+    assert client._build_call_kwargs({})["thinking"]["budget_tokens"] == 99
+
+
+def test_claude_backend_thinking_level_off_omits_the_thinking_param(monkeypatch):
+    monkeypatch.delenv("MODEL_REASONING_EFFORT", raising=False)
+    monkeypatch.setattr("core.model.AsyncAnthropic", lambda **kwargs: SimpleNamespace())
+    client = ModelClient(provider="anthropic", api_key="k", model_name="claude-test")
+
+    assert "thinking" not in client._build_call_kwargs({})
 
 
 def test_create_model_backend_returns_openai_compatible_backend_for_that_provider(monkeypatch):

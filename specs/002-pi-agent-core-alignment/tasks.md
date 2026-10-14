@@ -502,38 +502,45 @@ description: "Task list for feature implementation"
 
 ### Tests for User Story 7 ⚠️
 
-- [ ] T069 [P] [US7] 在 `tests/core/test_model.py`（或现有覆盖 `ModelClient` 的测试文件）新增：
+- [X] T069 [P] [US7] 在 `tests/core/test_model.py`（或现有覆盖 `ModelClient` 的测试文件）新增：
       OpenAI 兼容后端下，`thinking_level` 为 `"off"` 时请求不携带 `reasoning_effort`；
       `"minimal"`/`"low"` → 请求携带 `reasoning_effort="low"`；`"medium"`/`"high"` →
       `"high"`；`"xhigh"`/`"max"` → `"max"`；运行期从 `"low"` 改成 `"off"` 后下一次请求不再携带。
       预期：`ModelClient` 还没有 `thinking_level` 属性，`AttributeError`，测试失败。
-- [ ] T070 [P] [US7] 同一个测试文件新增：Anthropic 后端下，`thinking_level` 非 `"off"` 时请求携带
+- [X] T070 [P] [US7] 同一个测试文件新增：Anthropic 后端下，`thinking_level` 非 `"off"` 时请求携带
       `thinking={"type": "enabled", "budget_tokens": ...}`，这个数值来自构造时传入的
       `thinking_budgets` 映射表（自定义值能覆盖默认值）；`"off"` 时不携带 `thinking` 参数。预期：
       同上，测试失败。
-- [ ] T071 [US7] 跑 `.venv/bin/pytest tests/core/test_model.py -v`，确认按预期原因失败（depends
+- [X] T071 [US7] 跑 `.venv/bin/pytest tests/core/test_model.py -v`，确认按预期原因失败（depends
       on: T069, T070）
 
 ### Implementation for User Story 7
 
-- [ ] T072 [US7] 在 `packages/core/protocol.py` 新增 `ThinkingLevel = Literal["off", "minimal",
+- [X] T072 [US7] 在 `packages/core/protocol.py` 新增 `ThinkingLevel = Literal["off", "minimal",
       "low", "medium", "high", "xhigh", "max"]` 类型别名和一个内置默认预算表常量（如
       `DEFAULT_THINKING_BUDGETS: dict[ThinkingLevel, int]`，覆盖除 `"off"` 外的六档）
-- [ ] T073 [US7] 修改 `packages/core/model.py`：`ModelClient` 新增 `thinking_level: ThinkingLevel`
+- [X] T073 [US7] 修改 `packages/core/model.py`：`ModelClient` 新增 `thinking_level: ThinkingLevel`
       运行期可读写实例属性（默认 `"off"`，若构造时提供了 `reasoning_effort` 则折算出一个等价初
       值）、`thinking_budgets: dict[ThinkingLevel, int] | None = None` 构造参数（未提供时用 T072
       的默认表）；`_build_call_kwargs` 新增按后端类型（`isinstance(self._backend,
       OpenAICompatibleBackend)` vs `ClaudeBackend`）转译 `thinking_level` 的逻辑，按
       `contracts/request-and-message-hooks.md` 的映射表（depends on: T072）
-- [ ] T074 [US7] 跑 `.venv/bin/pytest tests/core/test_model.py -v`，确认全部通过（depends on:
+- [X] T074 [US7] 跑 `.venv/bin/pytest tests/core/test_model.py -v`，确认全部通过（depends on:
       T073）
 
 ### Implementation (ReActAgent 接入)
 
-- [ ] T075 [US7] 修改 `packages/agents/react_agent.py`：构造 `ModelClient` 的地方不再传
-      `reasoning_effort`，改为构造后设置 `model_client.thinking_level = ...`（默认
-      `"off"`，与现状"未配置环境变量"的默认行为一致）（depends on: T073）
-- [ ] T076 [US7] 跑 `.venv/bin/pytest tests/core/ tests/agents/ -v`，确认本故事范围内全部测试通
+- [X] T075 [US7] **实现时的核实：此任务无需改动代码。** 原计划假设 `ReActAgent` 自己构造
+      `ModelClient` 并显式传 `reasoning_effort`——repo-wide grep（`ModelClient(`）确认实际不存
+      在这样的调用点：`apps/api/runtime.py`/`packages/a2apeer/main.py` 都是
+      `ModelClient()`（零参数，完全依赖 `MODEL_REASONING_EFFORT`/`MODEL_*` 环境变量），
+      `ReActAgent` 本身从不构造 `ModelClient`，只接收调用方传入的现成实例。T073 已经让
+      `ModelClient.__init__` 把 `reasoning_effort`/环境变量折算成等价的 `thinking_level` 初
+      值，这些现有调用点不需要任何改动就自动获得正确的 `thinking_level`；FR-017 要求的"运行期
+      可读写"本身就是 `ModelClient.thinking_level` 这个普通可变属性，持有 `model_client` 引用
+      的任何调用方都能直接 `agent.model_client.thinking_level = "high"`，不需要 `ReActAgent`
+      额外开一个转发用的构造参数（depends on: T073）
+- [X] T076 [US7] 跑 `.venv/bin/pytest tests/core/ tests/agents/ -v`，确认本故事范围内全部测试通
       过、无回归（depends on: T074, T075）
 
 **Checkpoint**：七档分级推理可用，`"off"` 时行为与现状默认完全等价。

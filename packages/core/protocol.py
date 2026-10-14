@@ -88,6 +88,22 @@ class TurnContext:
     tool_results: list[dict[str, str]] = field(default_factory=list)
 
 
+# 七档可配置的推理强度（FR-017）。"off" 时不携带任何推理强度/预算相关字段，行为与完全不配置
+# 等价（FR-018）。
+ThinkingLevel = Literal["off", "minimal", "low", "medium", "high", "xhigh", "max"]
+
+# 非 "off" 各档的默认 token 预算（主要供原生支持"预算"概念的后端使用，如 Anthropic 的扩展思
+# 考）；调用方可以通过 ModelClient(thinking_budgets=...) 覆盖。
+DEFAULT_THINKING_BUDGETS: dict[ThinkingLevel, int] = {
+    "minimal": 1024,
+    "low": 2048,
+    "medium": 4096,
+    "high": 8192,
+    "xhigh": 16384,
+    "max": 32768,
+}
+
+
 @dataclass
 class RequestOverrides:
     """`prepare_request`/`prepare_next_turn` 钩子的共同返回类型——局部覆写，`None` 字段保留
@@ -97,7 +113,7 @@ class RequestOverrides:
 
     context: list[dict[str, Any]] | None = None
     model: Any = None
-    thinking_level: str | None = None
+    thinking_level: ThinkingLevel | None = None
 
 
 @dataclass

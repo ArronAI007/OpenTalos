@@ -20,7 +20,17 @@ from dotenv import load_dotenv
 from openai import APIConnectionError as OpenAIConnectionError, AsyncOpenAI
 
 from .errors import ModelError, SettingsError
-from .protocol import Completion, StreamSummary, ToolCompletion, ToolInvocation
+from .protocol import Completion, DEFAULT_THINKING_BUDGETS, StreamSummary, ThinkingLevel, ToolCompletion, ToolInvocation
+
+# reasoning_effort（旧扁平机制）的三个字面量档位和 thinking_level 七档之间的等价映射：
+# 既用于从构造期的 reasoning_effort 折算出一个初始 thinking_level（向后兼容），也用于把
+# thinking_level 降维映射回 OpenAI 兼容后端只认识的三个字符串（绝不发送新字符串给供应商）。
+_REASONING_EFFORT_TO_THINKING_LEVEL: dict[str, ThinkingLevel] = {"low": "low", "high": "high", "max": "max"}
+_THINKING_LEVEL_TO_REASONING_EFFORT: dict[ThinkingLevel, str] = {
+    "minimal": "low", "low": "low",
+    "medium": "high", "high": "high",
+    "xhigh": "max", "max": "max",
+}
 
 DEFAULT_TIMEOUT_SECONDS = 60
 
@@ -500,6 +510,7 @@ class ModelClient:
         max_retries: int | None = None,
         retry_base_seconds: float | None = None,
         retry_max_seconds: float | None = None,
+        thinking_budgets: dict[ThinkingLevel, int] | None = None,
     ) -> None:
         self.provider = provider or os.getenv("MODEL_PROVIDER")
         if not self.provider:
@@ -528,8 +539,12 @@ class ModelClient:
         self.max_tokens = max_tokens
 
         # 推理强度（kimi-k3 等 always-on thinking 模型用它控制思维链长度）：未配置就不发这个字段，
-        # 让服务端用自己的默认档——跟 temperature 同一取舍，框架不替用户挑值。
+        # 让服务端用自己的默认档——跟 temperature 同一取舍，框架不替用户挑值。reasoning_effort
+        # 构造参数保留（向后兼容现有脚本/.env），内部折算成等价的 thinking_level 初值，不再是
+        # 请求参数拼装的唯一来源——thinking_level 才是运行期可读写的那个属性（FR-017）。
         self.reasoning_effort = reasoning_effort or os.getenv("MODEL_REASONING_EFFORT") or None
+        self.thinking_level: ThinkingLevel = _REASONING_EFFORT_TO_THINKING_LEVEL.get(self.reasoning_effort or "", "off")
+        self.thinking_budgets: dict[ThinkingLevel, int] = thinking_budgets or dict(DEFAULT_THINKING_BUDGETS)
 
         # 瞬态错误重试：默认最多 3 次重试，指数退避（base 0.5s，上限 8s）+ full jitter，
         # 优先遵循 Retry-After。设 max_retries=0 关闭重试。
@@ -574,9 +589,15 @@ class ModelClient:
         max_tokens = kwargs.pop("max_tokens", self.max_tokens)
         if max_tokens is not None:
             call_kwargs["max_tokens"] = max_tokens
-        reasoning_effort = kwargs.pop("reasoning_effort", self.reasoning_effort)
-        if reasoning_effort is not None:
-            call_kwargs["reasoning_effort"] = reasoning_effort
+        thinking_level: ThinkingLevel = kwargs.pop("thinking_level", self.thinking_level)
+        if thinking_level != "off":
+            if isinstance(self._backend, ClaudeBackend):
+                # Anthropic 原生支持"预算"概念：budget_tokens 来自 thinking_budgets 映射表。
+                budget = self.thinking_budgets.get(thinking_level, DEFAULT_THINKING_BUDGETS[thinking_level])
+                call_kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
+            else:
+                # OpenAI 兼容后端（含 mock）只认识三个字面量——降维映射，绝不发送新字符串。
+                call_kwargs["reasoning_effort"] = _THINKING_LEVEL_TO_REASONING_EFFORT[thinking_level]
         call_kwargs.update(kwargs)
         return call_kwargs
 
