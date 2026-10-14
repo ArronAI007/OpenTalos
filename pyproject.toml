@@ -12,7 +12,7 @@ dependencies = [
     "python-dotenv>=1.0",
     "pyyaml>=6.0",
     "python-multipart>=0.0.9",
-    "mcp>=2.3.0",
+    "httpx>=0.27",
     "a2a-sdk>=1.2.2",
     "docker>=7.2.0",
 ]
@@ -21,7 +21,9 @@ dependencies = [
 dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
-    "httpx>=0.27",
+    # packages/mcpclient 的生产代码不再依赖官方 mcp SDK（SC-001）；demo_server.py 是测试夹具，
+    # 扮演被连接的 MCP *server* 角色，继续用官方 SDK 实现，所以这里保留为测试依赖。
+    "mcp>=2.3.0",
 ]
 
 [tool.uv]
