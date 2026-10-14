@@ -3,7 +3,15 @@ from typing import Any
 
 from context import AssemblyConfig, OutputTrimmer, TokenBudget
 from core.agent import Agent, RuntimeSettings
-from core.agent_loop import AfterToolCallHook, BeforeToolCallHook, FinishTurnHook, execute_model_step, resolve_tool_call
+from core.agent_loop import (
+    AfterToolCallHook,
+    BeforeToolCallHook,
+    FinishTurnHook,
+    PrepareNextTurnHook,
+    PrepareRequestHook,
+    execute_model_step,
+    resolve_tool_call,
+)
 from core.cancellation import CancellationToken
 from core.protocol import AgentEvent, ChatMessage, EventKind, ToolInvocation
 from core.model import ModelClient
@@ -71,6 +79,8 @@ class ReActAgent(Agent):
         after_tool_call: AfterToolCallHook | None = None,
         finish_turn: FinishTurnHook | None = None,
         transform_context: Callable[[list[ChatMessage]], Awaitable[list[ChatMessage]]] | None = None,
+        prepare_request: PrepareRequestHook | None = None,
+        prepare_next_turn: PrepareNextTurnHook | None = None,
     ) -> None:
         super().__init__(
             name,
@@ -95,6 +105,8 @@ class ReActAgent(Agent):
         self.before_tool_call = before_tool_call
         self.after_tool_call = after_tool_call
         self.finish_turn = finish_turn
+        self.prepare_request = prepare_request
+        self.prepare_next_turn = prepare_next_turn
 
     def _tool_schemas(self) -> list[dict[str, Any]]:
         return self.tool_registry.function_schemas() if self.tool_registry else []
@@ -124,6 +136,9 @@ class ReActAgent(Agent):
         self.record_message(ChatMessage(content=input_text, role="user"))
         tools = self._tool_schemas()
         answer: str | None = None
+        # prepare_next_turn 的覆写（如果提供了 model）持续作用到后续每一轮，直到再次被覆写——
+        # 这是它和 prepare_request"只影响这一次请求"的关键区别（见 research.md 决策 7）。
+        current_model_client = self.model_client
 
         for step in range(1, self.max_steps + 1):
 
@@ -132,7 +147,7 @@ class ReActAgent(Agent):
 
             await self._emit_event(EventKind.TURN_START, step=step)
             completion = await execute_model_step(
-                self.model_client,
+                current_model_client,
                 messages,
                 tools,
                 recorder=self.recorder,
@@ -153,6 +168,7 @@ class ReActAgent(Agent):
                 before_tool_call=self.before_tool_call,
                 after_tool_call=self.after_tool_call,
                 finish_turn=self.finish_turn,
+                prepare_request=self.prepare_request,
                 **kwargs,
             )
             await self._emit_event(EventKind.TURN_END, step=step)
@@ -161,11 +177,17 @@ class ReActAgent(Agent):
             # 调用，比如 follow-up 注入了消息，或 finishTurn 返回 "continue"），False 强制停止
             # （即使还有工具调用，比如工具批次全部标记了 terminate，或 finishTurn 返回 "end"），
             # None 时维持默认调度——没有工具调用就停，模型不再请求工具即视为给出了最终答案。
-            if completion.should_continue is True:
-                continue
-            if completion.should_continue is False or not completion.requested_tools:
+            if completion.should_continue is False or (completion.should_continue is None and not completion.requested_tools):
                 answer = completion.text or ""
                 break
+
+            if self.prepare_next_turn is not None:
+                overrides = await self.prepare_next_turn()
+                if overrides is not None:
+                    if overrides.model is not None:
+                        current_model_client = overrides.model
+                    if overrides.context is not None:
+                        messages[:] = overrides.context
 
         if answer is None:
             answer = STEP_LIMIT_MESSAGE

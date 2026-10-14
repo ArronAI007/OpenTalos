@@ -566,3 +566,40 @@ async def test_react_agent_exposes_transform_context(scripted_client):
     await agent.arespond("原始问题")
 
     assert any(m.get("content") == "injected" for m in seen[0])
+
+
+async def test_react_agent_exposes_prepare_request_and_prepare_next_turn(scripted_client, echo_tool_registry):
+    client = scripted_client(
+        tool_completions=[
+            ToolCompletion(
+                text=None,
+                requested_tools=[ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text": "hi"}')],
+                model_id="mock",
+            ),
+            ToolCompletion(text="second", requested_tools=[], model_id="mock"),
+        ]
+    )
+    prepare_request_calls: list[int] = []
+    prepare_next_turn_calls = {"n": 0}
+
+    async def prepare_request(context):
+        prepare_request_calls.append(context.step)
+        return None
+
+    async def prepare_next_turn():
+        prepare_next_turn_calls["n"] += 1
+        return None
+
+    agent = ReActAgent(
+        name="bot",
+        model_client=client,
+        tool_registry=echo_tool_registry,
+        max_steps=5,
+        prepare_request=prepare_request,
+        prepare_next_turn=prepare_next_turn,
+    )
+    answer = await agent.arespond("echo then done")
+
+    assert answer == "second"
+    assert prepare_request_calls == [1, 2]
+    assert prepare_next_turn_calls["n"] == 1  # 只在第一步结束、确定继续时调用一次

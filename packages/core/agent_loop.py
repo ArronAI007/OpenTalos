@@ -17,6 +17,8 @@ from .protocol import (
     BeforeCallResult,
     Completion,
     EventKind,
+    RequestContext,
+    RequestOverrides,
     ToolCompletion,
     ToolInvocation,
     TurnContext,
@@ -39,6 +41,8 @@ EventEmitter = Callable[[AgentEvent], Awaitable[None]]
 BeforeToolCallHook = Callable[[ToolInvocation], Awaitable[BeforeCallResult]]
 AfterToolCallHook = Callable[[ToolInvocation, str], Awaitable[AfterCallResult]]
 FinishTurnHook = Callable[[TurnContext], Awaitable[TurnDecision]]
+PrepareRequestHook = Callable[[RequestContext], Awaitable[RequestOverrides | None]]
+PrepareNextTurnHook = Callable[[], Awaitable[RequestOverrides | None]]
 
 
 async def _emit(emit: EventEmitter | None, kind: EventKind, agent_name: str, **data: Any) -> None:
@@ -277,6 +281,7 @@ async def execute_model_step(
     before_tool_call: BeforeToolCallHook | None = None,
     after_tool_call: AfterToolCallHook | None = None,
     finish_turn: FinishTurnHook | None = None,
+    prepare_request: PrepareRequestHook | None = None,
     **kwargs: Any,
 ) -> ToolCompletion:
     """带工具 schema 的单步：调一次模型 -> 有工具请求就并行执行并把结果追加回 messages。
@@ -327,9 +332,22 @@ async def execute_model_step(
         if on_reasoning_delta is not None:
             await on_reasoning_delta(chunk)
 
+    # prepare_request 在每一次模型请求发起之前都会被调用（包括第一次）；它的覆写只影响这一次
+    # 请求实际发给后端的 model_client/messages，不改变调用方自己持有的 messages 列表（那个列表
+    # 还要继续被追加 assistant/tool 消息，必须是调用方原来传进来的那一份）。
+    call_model_client = model_client
+    call_messages = messages
+    if prepare_request is not None:
+        overrides = await prepare_request(RequestContext(step=step or 0, messages=list(messages)))
+        if overrides is not None:
+            if overrides.model is not None:
+                call_model_client = overrides.model
+            if overrides.context is not None:
+                call_messages = overrides.context
+
     completion = await _call_model(
-        model_client,
-        messages,
+        call_model_client,
+        call_messages,
         tools,
         on_text_delta=_emit_text_delta if want_stream else None,
         on_reasoning_delta=_emit_reasoning_delta if want_stream else None,
@@ -513,6 +531,8 @@ async def run_tool_turn(
     before_tool_call: BeforeToolCallHook | None = None,
     after_tool_call: AfterToolCallHook | None = None,
     finish_turn: FinishTurnHook | None = None,
+    prepare_request: PrepareRequestHook | None = None,
+    prepare_next_turn: PrepareNextTurnHook | None = None,
     **kwargs: Any,
 ) -> str:
     """调用 LLM -> 按需执行工具 -> 把结果喂回去，直到模型不再请求工具或用光 max_iterations。
@@ -538,10 +558,13 @@ async def run_tool_turn(
     async def handle_invocation(invocation: ToolInvocation) -> dict[str, str]:
         return await resolve_tool_call(tool_registry, invocation, recorder, step, trimmer, on_tool_result, approve, metrics)
 
+    # prepare_next_turn 的覆写（如果提供了 model）会持续作用到后续每一轮，直到再次被覆写——
+    # 这是它和 prepare_request"只影响这一次请求"的关键区别（见 research.md 决策 7 的优先级）。
+    current_model_client = model_client
     for step in range(1, max_iterations + 1):
         await _emit(emit, EventKind.TURN_START, agent_name, step=step)
         completion = await execute_model_step(
-            model_client,
+            current_model_client,
             messages,
             tools,
             recorder=recorder,
@@ -563,13 +586,22 @@ async def run_tool_turn(
             before_tool_call=before_tool_call,
             after_tool_call=after_tool_call,
             finish_turn=finish_turn,
+            prepare_request=prepare_request,
             **kwargs,
         )
         await _emit(emit, EventKind.TURN_END, agent_name, step=step)
         if loop_should_stop(completion):
             return completion.text or ""
 
-    fallback = await _complete_text(model_client, messages, on_text_delta, **kwargs)
+        if prepare_next_turn is not None:
+            overrides = await prepare_next_turn()
+            if overrides is not None:
+                if overrides.model is not None:
+                    current_model_client = overrides.model
+                if overrides.context is not None:
+                    messages[:] = overrides.context
+
+    fallback = await _complete_text(current_model_client, messages, on_text_delta, **kwargs)
     _record_usage(cancellation, fallback.token_usage)
     if recorder:
         recorder.log_event("model_output", {"content": fallback.text, "note": "fallback after max_iterations"})

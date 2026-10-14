@@ -89,6 +89,26 @@ class TurnContext:
 
 
 @dataclass
+class RequestOverrides:
+    """`prepare_request`/`prepare_next_turn` 钩子的共同返回类型——局部覆写，`None` 字段保留
+    原值。`model` 字段类型标注为 `Any`（实际是 `core.model.ModelClient` 实例）——`protocol.py`
+    不能导入 `.model`，那边反过来导入了这个文件，会造成循环导入。
+    """
+
+    context: list[dict[str, Any]] | None = None
+    model: Any = None
+    thinking_level: str | None = None
+
+
+@dataclass
+class RequestContext:
+    """`prepare_request` 钩子能看到的、即将发起的这次请求的信息。"""
+
+    step: int
+    messages: list[dict[str, Any]]
+
+
+@dataclass
 class Completion:
     text: str
     model_id: str

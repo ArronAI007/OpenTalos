@@ -455,38 +455,38 @@ description: "Task list for feature implementation"
 
 ### Tests for User Story 6 ⚠️
 
-- [ ] T061 [P] [US6] 在 `tests/core/test_agent_loop.py` 新增：`prepare_request` 在第二次
+- [X] T061 [P] [US6] 在 `tests/core/test_agent_loop.py` 新增：`prepare_request` 在第二次
       `execute_model_step` 调用时把 `model` 换成一个不同的 mock `ModelClient`，断言第二次请求确实
       用新模型（通过断言这个 mock 被调用过）、第一次请求用的还是原模型；`prepare_request` 在第一
       次调用（即最早一次请求）也会被调用一次。预期：`TypeError`（未知关键字参数），测试失败。
-- [ ] T062 [P] [US6] 在 `tests/core/test_agent_loop.py` 新增：`prepare_next_turn` 在一轮结束、确
+- [X] T062 [P] [US6] 在 `tests/core/test_agent_loop.py` 新增：`prepare_next_turn` 在一轮结束、确
       定要继续时被调用一次，其返回的 `context` 覆盖下一轮使用的历史；两个钩子都未提供时维持现状行
       为（模型/上下文不变）。预期：`TypeError`，测试失败。
-- [ ] T063 [US6] 跑 `.venv/bin/pytest tests/core/test_agent_loop.py -v`，确认按预期原因失败
+- [X] T063 [US6] 跑 `.venv/bin/pytest tests/core/test_agent_loop.py -v`，确认按预期原因失败
       （depends on: T061, T062）
 
 ### Implementation for User Story 6
 
-- [ ] T064 [US6] 在 `packages/core/protocol.py` 新增 `RequestOverrides` dataclass
+- [X] T064 [US6] 在 `packages/core/protocol.py` 新增 `RequestOverrides` dataclass
       （`context: list[ChatMessage] | None = None`, `model: ModelClient | None = None`,
       `thinking_level: ThinkingLevel | None = None`）和 `RequestContext` dataclass（`step: int`,
       `messages: list[dict[str, Any]]`）
-- [ ] T065 [US6] 修改 `packages/core/agent_loop.py`：`execute_model_step` 新增
+- [X] T065 [US6] 修改 `packages/core/agent_loop.py`：`execute_model_step` 新增
       `prepare_request: Callable[[RequestContext], Awaitable[RequestOverrides | None]] | None =
       None` 参数，在调用 `_call_model` 之前调用（每次都调），非 `None` 字段覆写这次请求要用的
       `messages`/`model_client`/推理等级；`run_tool_turn` 新增
       `prepare_next_turn: Callable[[], Awaitable[RequestOverrides | None]] | None = None` 参数，
       在"确定继续下一步"之后、下一次 `execute_model_step` 调用之前调用一次，覆写下一轮默认使用的
       值（depends on: T064）
-- [ ] T066 [US6] 跑 `.venv/bin/pytest tests/core/test_agent_loop.py -v`，确认全部通过（depends on:
+- [X] T066 [US6] 跑 `.venv/bin/pytest tests/core/test_agent_loop.py -v`，确认全部通过（depends on:
       T065）
 
 ### Implementation (ReActAgent 接入)
 
-- [ ] T067 [US6] 修改 `packages/agents/react_agent.py`：`ReActAgent.__init__` 新增
+- [X] T067 [US6] 修改 `packages/agents/react_agent.py`：`ReActAgent.__init__` 新增
       `prepare_request`/`prepare_next_turn` 构造参数并在 `arespond()` 里透传给对应调用（depends
       on: T065）
-- [ ] T068 [US6] 跑 `.venv/bin/pytest tests/core/ tests/agents/ -v`，确认本故事范围内全部测试通
+- [X] T068 [US6] 跑 `.venv/bin/pytest tests/core/ tests/agents/ -v`，确认本故事范围内全部测试通
       过、无回归（depends on: T066, T067）
 
 **Checkpoint**：请求级前置钩子可用，默认不提供时行为与现状完全一致。

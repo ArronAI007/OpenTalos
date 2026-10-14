@@ -10,6 +10,7 @@ from core.protocol import (
     BeforeCallResult,
     Completion,
     EventKind,
+    RequestOverrides,
     ToolCompletion,
     ToolInvocation,
 )
@@ -1678,3 +1679,100 @@ async def test_finish_turn_is_not_called_when_tool_batch_already_terminated(scri
 
     assert finish_turn_calls["n"] == 0  # 批次已经 terminate，不再征询 finishTurn
     assert answer == ""
+
+
+# ==================== prepare_request / prepare_next_turn ====================
+
+
+async def test_prepare_request_is_called_before_every_model_call_including_the_first(
+    scripted_client, echo_tool_registry
+):
+    client = scripted_client(
+        tool_completions=[
+            ToolCompletion(
+                text=None,
+                requested_tools=[ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text": "hi"}')],
+                model_id="mock",
+            ),
+            ToolCompletion(text="second", requested_tools=[], model_id="mock"),
+        ]
+    )
+    calls: list[int] = []
+
+    async def prepare_request(context):
+        calls.append(context.step)
+        return None
+
+    await run_tool_turn(
+        client, [{"role": "user", "content": "go"}], echo_tool_registry, 3, prepare_request=prepare_request
+    )
+
+    assert calls == [1, 2]  # 每一步都调用了一次，包括第一步
+
+
+async def test_prepare_request_overrides_the_model_for_one_call_only(scripted_client, echo_tool_registry):
+    client = scripted_client(
+        tool_completions=[
+            ToolCompletion(
+                text=None,
+                requested_tools=[ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text": "hi"}')],
+                model_id="mock",
+            ),
+            ToolCompletion(text="second", requested_tools=[], model_id="mock"),
+        ]
+    )
+    replacement = scripted_client(tool_completions=[ToolCompletion(text="replaced", requested_tools=[], model_id="mock")])
+    replacement_calls = {"n": 0}
+    original_acall = replacement.acomplete_with_tools
+
+    async def spy(*args, **kwargs):
+        replacement_calls["n"] += 1
+        return await original_acall(*args, **kwargs)
+
+    replacement.acomplete_with_tools = spy  # type: ignore[method-assign]
+
+    async def prepare_request(context):
+        if context.step == 2:
+            return RequestOverrides(model=replacement)
+        return None
+
+    answer = await run_tool_turn(
+        client, [{"role": "user", "content": "go"}], echo_tool_registry, 3, prepare_request=prepare_request
+    )
+
+    assert answer == "replaced"  # 第二步确实用了替换后的模型
+    assert replacement_calls["n"] == 1  # 只在第二步用了一次，不影响第一步
+
+
+async def test_prepare_next_turn_is_called_once_per_turn_boundary_and_persists(scripted_client, echo_tool_registry):
+    client = scripted_client(
+        tool_completions=[
+            ToolCompletion(
+                text=None,
+                requested_tools=[ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text": "hi"}')],
+                model_id="mock",
+            ),
+            ToolCompletion(text="second", requested_tools=[], model_id="mock"),
+        ]
+    )
+    calls = {"n": 0}
+
+    async def prepare_next_turn():
+        calls["n"] += 1
+        return RequestOverrides(context=[{"role": "user", "content": "replaced history"}])
+
+    messages: list[dict] = [{"role": "user", "content": "go"}]
+    await run_tool_turn(client, messages, echo_tool_registry, 3, prepare_next_turn=prepare_next_turn)
+
+    assert calls["n"] == 1  # 只在第一步结束、确定继续时调用一次
+    assert messages == [{"role": "user", "content": "replaced history"}]  # 覆写持续生效，不是一次性的
+
+
+async def test_prepare_request_and_prepare_next_turn_absent_preserves_default_behavior(
+    scripted_client, echo_tool_registry
+):
+    client = scripted_client(tool_completions=[ToolCompletion(text="direct", requested_tools=[], model_id="mock")])
+
+    answer = await run_tool_turn(client, [{"role": "user", "content": "go"}], echo_tool_registry, 3)
+
+    assert answer == "direct"
