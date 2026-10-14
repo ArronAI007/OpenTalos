@@ -59,6 +59,7 @@ class MCPServerConfig:
     args: list[str] = field(default_factory=list)  # stdio 专用
     url: str | None = None  # http 专用
     env: dict[str, str] | None = None  # stdio 专用，透传给子进程（例如 API key）
+    headers: dict[str, str] | None = None  # http 专用，鉴权/代理场景的自定义请求头
 
 
 def validate_server_config(data: dict[str, Any]) -> MCPServerConfig:
@@ -87,7 +88,12 @@ def validate_server_config(data: dict[str, Any]) -> MCPServerConfig:
     url = data.get("url")
     if not isinstance(url, str) or not url:
         raise MCPConfigValidationError(f"transport='http' 时 url 必须是非空字符串，收到: {url!r}")
-    return MCPServerConfig(transport="http", url=url)
+    headers = data.get("headers")
+    if headers is not None and (
+        not isinstance(headers, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in headers.items())
+    ):
+        raise MCPConfigValidationError(f"headers 必须是 str->str 的字典，收到: {headers!r}")
+    return MCPServerConfig(transport="http", url=url, headers=headers)
 
 
 @dataclass
@@ -141,7 +147,7 @@ class MCPClient:
         if self._server_config.transport == "http":
             from .transports.streamable_http import StreamableHttpTransport
 
-            return StreamableHttpTransport(self._server_config.url)
+            return StreamableHttpTransport(self._server_config.url, headers=self._server_config.headers)
         raise MCPConnectionError(f"unsupported transport: {self._server_config.transport!r}")
 
     def _ensure_connected(self) -> None:

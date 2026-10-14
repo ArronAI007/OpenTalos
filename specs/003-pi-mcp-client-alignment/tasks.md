@@ -141,20 +141,20 @@ call_tool+客户端发起的取消+服务端发起的 ping，不需要真实子�
 
 ### Tests for User Story 3 ⚠️ 先写，确认失败，再实现
 
-- [ ] T038 [P] [US3] 失败测试：一个测试用最小 ASGI/HTTP handler 驱动一次完整的 `initialize`→`list_tools`→`call_tool` 往返，验证请求以 HTTP POST 发出、响应按 SSE 逐事件解析（不要求一次性完整 JSON），写入 `tests/mcpclient/test_transports_http.py`
-- [ ] T039 [P] [US3] 失败测试：响应流在对应响应到达前中断，客户端自动重连并用 `Last-Event-ID` 续传断线前未读完的内容，最终结果完整不重复，写入 `tests/mcpclient/test_transports_http.py`
-- [ ] T040 [P] [US3] 失败测试：配置了自定义请求头的服务器，实际发出的每一次 HTTP 请求都带着这些头，写入 `tests/mcpclient/test_transports_http.py`
-- [ ] T041 [P] [US3] 失败测试：GET 流请求收到 405 响应时视为"服务端不提供 GET 流"，正常关闭不报错，写入 `tests/mcpclient/test_transports_http.py`
+- [X] T038 [P] [US3] 失败测试：一个测试用最小 ASGI/HTTP handler 驱动一次完整的 `initialize`→`list_tools`→`call_tool` 往返，验证请求以 HTTP POST 发出、响应按 SSE 逐事件解析（不要求一次性完整 JSON），写入 `tests/mcpclient/test_transports_http.py`
+- [X] T039 [P] [US3] 失败测试：响应流在对应响应到达前中断，客户端自动重连并用 `Last-Event-ID` 续传断线前未读完的内容，最终结果完整不重复，写入 `tests/mcpclient/test_transports_http.py`
+- [X] T040 [P] [US3] 失败测试：配置了自定义请求头的服务器，实际发出的每一次 HTTP 请求都带着这些头，写入 `tests/mcpclient/test_transports_http.py`
+- [X] T041 [P] [US3] 失败测试：GET 流请求收到 405 响应时视为"服务端不提供 GET 流"，正常关闭不报错，写入 `tests/mcpclient/test_transports_http.py`
 
 ### Implementation for User Story 3
 
-- [ ] T042 [US3] 实现手写 SSE 帧解析器 `consume_sse_stream()`（追踪 `data:`/`event:`/`id:`/`retry:` 字段，单事件按上限截断报错），写入 `packages/mcpclient/transports/streamable_http.py`
-- [ ] T043 [US3] 实现 `StreamableHttpTransport.send()`：`httpx.AsyncClient` 发 POST（`Accept: application/json, text/event-stream`），按响应 `Content-Type` 分支处理一次性 JSON 或 SSE 流，写入 `packages/mcpclient/transports/streamable_http.py`（依赖 T042、T007）
-- [ ] T044 [US3] 实现指数退避自动重连 + `Last-Event-ID` 续传（初始延迟/最大延迟/最大重试次数对齐 pi 默认值，服务端 `retry:` 字段覆盖退避时机），写入 `packages/mcpclient/transports/streamable_http.py`（依赖 T043）
-- [ ] T045 [US3] 实现 `initialize`/`notifications/initialized` 完成后开启的独立自重连 GET 流（用于服务端主动推送，405 视为正常），写入 `packages/mcpclient/transports/streamable_http.py`（依赖 T043）
-- [ ] T046 [US3] 实现 `Mcp-Session-Id` 响应头跟踪（后续请求带上）、协商后的 `MCP-Protocol-Version` 请求头、自定义请求头透传，写入 `packages/mcpclient/transports/streamable_http.py`（依赖 T043）
-- [ ] T047 [US3] 实现 `AuthProvider`（`typing.Protocol`：`token()`/`on_unauthorized()`）写入 `packages/mcpclient/auth_provider.py`；在 `streamable_http.py` 的请求包装器里接入"收到 401 或 403+insufficient_scope 时调一次 `on_unauthorized` 再重试一次"的逻辑（依赖 T043）
-- [ ] T048 [US3] 运行 `.venv/bin/pytest tests/mcpclient/test_transports_http.py -v`，确认全部通过（GREEN checkpoint）
+- [X] T042 [US3] 实现手写 SSE 帧解析器 `consume_sse_stream()`（追踪 `data:`/`event:`/`id:`/`retry:` 字段，单事件按上限截断报错），写入 `packages/mcpclient/transports/streamable_http.py`
+- [X] T043 [US3] 实现 `StreamableHttpTransport.send()`：`httpx.AsyncClient` 发 POST（`Accept: application/json, text/event-stream`），按响应 `Content-Type` 分支处理一次性 JSON 或 SSE 流，写入 `packages/mcpclient/transports/streamable_http.py`（依赖 T042、T007）
+- [X] T044 [US3] 实现指数退避自动重连 + `Last-Event-ID` 续传（初始延迟/最大延迟/最大重试次数对齐 pi 默认值，服务端 `retry:` 字段覆盖退避时机），写入 `packages/mcpclient/transports/streamable_http.py`（依赖 T043）
+- [X] T045 [US3] 实现 `initialize`/`notifications/initialized` 完成后开启的独立自重连 GET 流（用于服务端主动推送，405 视为正常），写入 `packages/mcpclient/transports/streamable_http.py`（依赖 T043）
+- [X] T046 [US3] 实现 `Mcp-Session-Id` 响应头跟踪（后续请求带上）、协商后的 `MCP-Protocol-Version` 请求头、自定义请求头透传，写入 `packages/mcpclient/transports/streamable_http.py`（依赖 T043）
+- [X] T047 [US3] 实现 `AuthProvider`（`typing.Protocol`：`token()`/`on_unauthorized()`）写入 `packages/mcpclient/auth_provider.py`；在 `streamable_http.py` 的请求包装器里接入"收到 401 或 403+insufficient_scope 时调一次 `on_unauthorized` 再重试一次"的逻辑（依赖 T043）
+- [X] T048 [US3] 运行 `.venv/bin/pytest tests/mcpclient/test_transports_http.py -v`，确认全部通过（GREEN checkpoint）
 
 **Checkpoint**：三种传输（内存/stdio/HTTP）全部独立可用。
 

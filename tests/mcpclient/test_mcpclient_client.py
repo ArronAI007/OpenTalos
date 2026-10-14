@@ -68,7 +68,6 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
-@pytest.mark.skip(reason="Streamable HTTP 传输在 User Story 3（Phase 6）实现，这里先占位")
 class TestConnectAndListToolsHttp:
     async def test_returns_real_tool_info_over_http(self) -> None:
         port = _free_port()
