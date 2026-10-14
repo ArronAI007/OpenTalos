@@ -1,4 +1,4 @@
-"""mcpclient.client 的真机测试——直接对 demo_server.py 发起真实 stdio/HTTP 子进程连接，不 mock。"""
+"""mcp.client 的真机测试——直接对 demo_server.py 发起真实 stdio/HTTP 子进程连接，不 mock。"""
 import asyncio
 import socket
 import sys
@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from mcpclient.client import MCPClient, MCPConnectionError, MCPServerConfig
+from mcp.client import MCPClient, MCPConnectionError, MCPServerConfig
 
-_DEMO_SERVER = str(Path(__file__).resolve().parent.parent.parent / "packages" / "mcpclient" / "demo_server.py")
+_DEMO_SERVER = str(Path(__file__).resolve().parent.parent.parent / "packages" / "mcp" / "demo_server.py")
 
 
 def _stdio_config() -> MCPServerConfig:

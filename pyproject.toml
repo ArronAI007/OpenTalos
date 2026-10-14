@@ -21,8 +21,13 @@ dependencies = [
 dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
-    # packages/mcpclient 的生产代码不再依赖官方 mcp SDK（SC-001）；demo_server.py 是测试夹具，
-    # 扮演被连接的 MCP *server* 角色，继续用官方 SDK 实现，所以这里保留为测试依赖。
+    # 官方 mcp PyPI 包：packages/mcp 自己的生产代码不再依赖它（SC-001）；demo_server.py 是
+    # 测试夹具，扮演被连接的 MCP *server* 角色，继续用官方 SDK 实现，所以这里保留为测试依赖。
+    # 注意：packages/mcp 这个目录名和这个 PyPI 包同名——packages/ 只在 apps/api 主进程/pytest
+    # 里被 prepend 进 sys.path，demo_server.py 永远作为独立子进程启动（不继承那次 sys.path
+    # 插入），所以 import mcp 不会被本仓库自己的 packages/mcp 遮蔽；但若将来有代码在同一个
+    # 进程里直接 `import mcp`（而不是 `from mcp.client import ...` 这种本包内部写法），会命中
+    # 这次目录重命名带来的遮蔽风险，新增这类 import 前需要重新确认。
     "mcp>=2.3.0",
 ]
 

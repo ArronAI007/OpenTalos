@@ -922,7 +922,7 @@ def test_search_client_exposes_the_configured_tavily_client(store, scripted_clie
 
 def _mcp_demo_server_config() -> dict:
     demo_server = str(
-        Path(__file__).resolve().parent.parent.parent.parent / "packages" / "mcpclient" / "demo_server.py"
+        Path(__file__).resolve().parent.parent.parent.parent / "packages" / "mcp" / "demo_server.py"
     )
     return {"command": sys.executable, "args": [demo_server]}
 

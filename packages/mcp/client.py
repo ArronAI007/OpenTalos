@@ -129,7 +129,7 @@ class MCPClient:
     ) -> None:
         self._server_config = server_config
         self._roots = roots
-        self._client_info = client_info or Implementation(name="opentalos-mcpclient", version="0.1.0")
+        self._client_info = client_info or Implementation(name="opentalos-mcp", version="0.1.0")
         self._default_timeout_seconds = default_timeout_seconds
         self._transport: McpTransport | None = None
         self._pending: dict[int, _PendingRequest] = {}

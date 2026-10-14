@@ -7,8 +7,8 @@ from typing import Any
 
 import httpx
 
-from mcpclient.client import MCPClient, MCPServerConfig
-from mcpclient.transports.streamable_http import StreamableHttpTransport, consume_sse_stream
+from mcp.client import MCPClient, MCPServerConfig
+from mcp.transports.streamable_http import StreamableHttpTransport, consume_sse_stream
 
 
 class _FakeHttpMcpApp:

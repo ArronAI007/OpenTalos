@@ -5,7 +5,7 @@ import sys
 import time
 
 subprocess.Popen(
-    [sys.executable, "-c", "import time; time.sleep(120)", "mcpclient-test-grandchild-marker"]
+    [sys.executable, "-c", "import time; time.sleep(120)", "mcp-test-grandchild-marker"]
 )
 
 while True:

@@ -3,15 +3,15 @@ import asyncio
 
 import pytest
 
-from mcpclient.client import (
+from mcp.client import (
     MCPAbortError,
     MCPClient,
     MCPConnectionError,
     MCPProtocolError,
     MCPTimeoutError,
 )
-from mcpclient.protocol.jsonrpc import parse_jsonrpc_message
-from mcpclient.transports.in_memory import create_in_memory_transport_pair
+from mcp.protocol.jsonrpc import parse_jsonrpc_message
+from mcp.transports.in_memory import create_in_memory_transport_pair
 
 
 class _FakeServer:
@@ -176,7 +176,7 @@ class TestServerInitiatedRequests:
         await client.close()
 
     async def test_roots_list_auto_answered_when_roots_provided(self) -> None:
-        from mcpclient.protocol.types import Root
+        from mcp.protocol.types import Root
 
         client_transport, server_transport = create_in_memory_transport_pair()
         server = _FakeServer(server_transport)

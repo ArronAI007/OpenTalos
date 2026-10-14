@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from mcpclient.transports.stdio import StdioTransport, _cleanup_live_process_groups, _live_process_groups
+from mcp.transports.stdio import StdioTransport, _cleanup_live_process_groups, _live_process_groups
 
 _FIXTURES = Path(__file__).resolve().parent / "fixtures"
 _IGNORE_SIGTERM_SCRIPT = str(_FIXTURES / "ignore_sigterm_stdio_server.py")
@@ -47,12 +47,12 @@ class TestGrandchildCleanup:
 
         await asyncio.sleep(0.3)
         assert _pids_matching(_SPAWN_GRANDCHILD_SCRIPT), "包装进程应该已经启动"
-        assert _pids_matching("mcpclient-test-grandchild-marker"), "孙进程应该已经启动"
+        assert _pids_matching("mcp-test-grandchild-marker"), "孙进程应该已经启动"
 
         await transport.close()
 
         assert not _pids_matching(_SPAWN_GRANDCHILD_SCRIPT)
-        assert not _pids_matching("mcpclient-test-grandchild-marker"), "孙进程不应该残留"
+        assert not _pids_matching("mcp-test-grandchild-marker"), "孙进程不应该残留"
 
 
 class TestHostExitCleanupHook:

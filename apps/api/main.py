@@ -21,8 +21,8 @@ if str(_PACKAGES_DIR) not in sys.path:
 from agentgen import AgentGenerationError, generate_agent_spec  # noqa: E402
 from db import ChatStore  # noqa: E402
 from deepresearch import run_research, start_live_run, stream_run_events  # noqa: E402
-from mcpclient.client import MCPClient, MCPConnectionError, MCPServerConfig  # noqa: E402
-from mcpclient.oauth.callback import PendingCallbackRegistry  # noqa: E402
+from mcp.client import MCPClient, MCPConnectionError, MCPServerConfig  # noqa: E402
+from mcp.oauth.callback import PendingCallbackRegistry  # noqa: E402
 from evaluation import (  # noqa: E402
     EVAL_AGENT_TYPES,
     add_eval_case,

@@ -2,7 +2,7 @@
 空结果）的转换结果。"""
 import json
 
-from mcpclient.protocol.content import (
+from mcp.protocol.content import (
     BlobResourceContents,
     CallToolResult,
     EmbeddedResourceContentBlock,

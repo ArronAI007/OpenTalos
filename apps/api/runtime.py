@@ -30,8 +30,8 @@ from tool.registry import CircuitBreaker, ToolRegistry
 from tool.tool import Tool
 from websearch.client import TavilyClient
 from websearch.tools import WebExtractorTool, WebSearchTool
-from mcpclient.client import MCPServerConfig, MCPToolInfo
-from mcpclient.tools import MCPTool
+from mcp.client import MCPServerConfig, MCPToolInfo
+from mcp.tools import MCPTool
 from a2apeer.tools import A2ATool
 
 from db import ChatStore

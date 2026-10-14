@@ -5,11 +5,11 @@ from pathlib import Path
 
 from tool.outcome import OutcomeStatus
 
-from mcpclient.client import MCPServerConfig, MCPToolInfo
-from mcpclient.protocol.content import CallToolResult, ImageContentBlock, to_llm_content
-from mcpclient.tools import MCPTool, _flatten_llm_content, _json_schema_to_parameters
+from mcp.client import MCPServerConfig, MCPToolInfo
+from mcp.protocol.content import CallToolResult, ImageContentBlock, to_llm_content
+from mcp.tools import MCPTool, _flatten_llm_content, _json_schema_to_parameters
 
-_DEMO_SERVER = str(Path(__file__).resolve().parent.parent.parent / "packages" / "mcpclient" / "demo_server.py")
+_DEMO_SERVER = str(Path(__file__).resolve().parent.parent.parent / "packages" / "mcp" / "demo_server.py")
 
 
 class TestJsonSchemaToParameters:

@@ -7,15 +7,15 @@ from urllib.parse import parse_qs, urlparse
 import httpx
 import pytest
 
-from mcpclient.oauth.discovery import discover_authorization_server_metadata
-from mcpclient.oauth.errors import (
+from mcp.oauth.discovery import discover_authorization_server_metadata
+from mcp.oauth.errors import (
     MCPOAuthAuthorizationRequiredError,
     OAuthInsecureEndpointError,
     OAuthIssuerMismatchError,
 )
-from mcpclient.oauth.flow import RefreshDedupAuthProvider, step_up_scope
-from mcpclient.oauth.provider import MCPOAuthProvider, MemoryOAuthStateStore
-from mcpclient.oauth.types import OAuthClientMetadata, parse_authorization_server_metadata
+from mcp.oauth.flow import RefreshDedupAuthProvider, step_up_scope
+from mcp.oauth.provider import MCPOAuthProvider, MemoryOAuthStateStore
+from mcp.oauth.types import OAuthClientMetadata, parse_authorization_server_metadata
 
 _SERVER_URL = "https://fake-mcp-server.example/mcp"
 _AUTH_ORIGIN = "https://fake-mcp-server.example"

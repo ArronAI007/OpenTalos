@@ -718,7 +718,7 @@ async def test_delete_running_deepresearch_run_returns_409(tmp_path, scripted_cl
 
 def _mcp_demo_server_config() -> dict:
     demo_server = str(
-        Path(__file__).resolve().parent.parent.parent.parent / "packages" / "mcpclient" / "demo_server.py"
+        Path(__file__).resolve().parent.parent.parent.parent / "packages" / "mcp" / "demo_server.py"
     )
     return {"name": "weather", "transport": "stdio", "command": sys.executable, "args": [demo_server]}
 
