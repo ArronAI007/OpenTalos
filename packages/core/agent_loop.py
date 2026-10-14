@@ -11,13 +11,23 @@ from typing import Any
 from .cancellation import CancellationToken
 from .errors import AgentRuntimeError, EmptyModelResponse, OutputLimitError
 from .pricing import estimate_cost
-from .protocol import AgentEvent, Completion, EventKind, ToolCompletion, ToolInvocation
+from .protocol import AfterCallResult, AgentEvent, BeforeCallResult, Completion, EventKind, ToolCompletion, ToolInvocation
 from .model import ModelClient
-from .protocols import MetricsSink, NullMetricsSink, OutputTrimmerLike, SteerQueue, ToolExecutor, TraceRecorder
+from .protocols import (
+    MetricsSink,
+    NullMetricsSink,
+    OutputTrimmerLike,
+    SteerQueue,
+    ToolExecutionMode,
+    ToolExecutor,
+    TraceRecorder,
+)
 
 ToolInvocationHandler = Callable[[ToolInvocation], Awaitable[dict[str, str]]]
 ApprovalGate = Callable[[ToolInvocation], Awaitable[bool]]
 EventEmitter = Callable[[AgentEvent], Awaitable[None]]
+BeforeToolCallHook = Callable[[ToolInvocation], Awaitable[BeforeCallResult]]
+AfterToolCallHook = Callable[[ToolInvocation, str], Awaitable[AfterCallResult]]
 
 
 async def _emit(emit: EventEmitter | None, kind: EventKind, agent_name: str, **data: Any) -> None:
@@ -49,6 +59,19 @@ _OUTPUT_LIMIT_REASONS = frozenset({"length", "max_tokens", "max_output_tokens"})
 
 def stopped_by_limit(finish_reason: str | None) -> bool:
     return finish_reason in _OUTPUT_LIMIT_REASONS
+
+
+def loop_should_stop(completion: ToolCompletion) -> bool:
+    """外层循环（run_tool_turn/ReActAgent.arespond）判定这一步之后是否该停止。
+
+    默认规则：没有工具调用就停。`completion.should_continue` 非空时覆盖这条默认规则——
+    True 强制继续（即使没有工具调用，比如 follow-up 注入了消息，或 finishTurn 返回
+    "continue"）；False 强制停止（即使还有工具调用，比如工具批次全部标记了 terminate，或
+    finishTurn 返回 "end"）。
+    """
+    if completion.should_continue is not None:
+        return not completion.should_continue
+    return not completion.requested_tools
 
 
 def _validate_tool_call_ids(invocations: list[ToolInvocation]) -> None:
@@ -238,6 +261,10 @@ async def execute_model_step(
     emit: EventEmitter | None = None,
     agent_name: str = "",
     stream: bool = False,
+    tool_registry: ToolExecutor | None = None,
+    tool_execution_mode: ToolExecutionMode = "parallel",
+    before_tool_call: BeforeToolCallHook | None = None,
+    after_tool_call: AfterToolCallHook | None = None,
     **kwargs: Any,
 ) -> ToolCompletion:
     """带工具 schema 的单步：调一次模型 -> 有工具请求就并行执行并把结果追加回 messages。
@@ -339,13 +366,51 @@ async def execute_model_step(
     if cancellation is not None:
         cancellation.raise_if_cancelled()
 
-    async def run_one(invocation: ToolInvocation) -> dict[str, str]:
+    async def _call_before_hook(invocation: ToolInvocation) -> BeforeCallResult:
+        if before_tool_call is None:
+            return BeforeCallResult()
+        try:
+            return await before_tool_call(invocation)
+        except Exception as exc:  # noqa: BLE001 - fail-closed：钩子自身出错按拦截处理，不静默放行
+            return BeforeCallResult(block=True, reason=f"beforeToolCall hook 自身出错：{exc}")
+
+    async def _call_after_hook(invocation: ToolInvocation, content: str) -> AfterCallResult:
+        if after_tool_call is None:
+            return AfterCallResult()
+        try:
+            return await after_tool_call(invocation, content)
+        except Exception as exc:  # noqa: BLE001 - fail-closed：钩子自身出错按错误处理，不静默放行
+            return AfterCallResult(content=f"afterToolCall hook 自身出错：{exc}", is_error=True)
+
+    async def run_one(invocation: ToolInvocation) -> tuple[dict[str, str], bool]:
         await _emit(
             emit, EventKind.TOOL_EXECUTION_START, agent_name,
             call_id=invocation.call_id, tool_name=invocation.tool_name, arguments_json=invocation.arguments_json,
         )
+
+        before_result = await _call_before_hook(invocation)
+        if before_result.block:
+            reason = before_result.reason or "Blocked by beforeToolCall hook."
+            result = {"role": "tool", "tool_call_id": invocation.call_id, "content": reason}
+            if on_tool_result is not None:
+                on_tool_result(invocation.call_id, invocation.tool_name, invocation.arguments_json, reason)
+            await _emit(
+                emit, EventKind.MESSAGE_START, agent_name, role="tool", call_id=invocation.call_id, content=reason,
+            )
+            await _emit(
+                emit, EventKind.MESSAGE_END, agent_name, role="tool", call_id=invocation.call_id, content=reason,
+            )
+            await _emit(
+                emit, EventKind.TOOL_EXECUTION_END, agent_name,
+                call_id=invocation.call_id, tool_name=invocation.tool_name, result=reason, is_error=True,
+            )
+            return result, before_result.terminate
+
         # 任何中断（取消/异常）都为未完成的调用补一条"执行状态未知"的回执，避免 transcript
         # 里出现"模型请求了工具但没有任何回执"的悬空回合。
+        # handle_invocation（run_tool_turn 传 resolve_tool_call）内部已经按自己的 on_tool_result
+        # 记过一次结果——这里的 after_tool_call 覆写只作用于"发给模型的消息"，不回头篡改已经记
+        # 录的审计/transcript 内容，两者允许不同（这是刻意的设计，不是遗漏）。
         try:
             result = await handle_invocation(invocation)
         except BaseException:
@@ -358,6 +423,12 @@ async def execute_model_step(
                 call_id=invocation.call_id, tool_name=invocation.tool_name, result=receipt["content"], is_error=True,
             )
             raise
+
+        after_result = await _call_after_hook(invocation, result["content"])
+        is_error = after_result.is_error or False
+        if after_result.content is not None:
+            result = {**result, "content": after_result.content}
+
         await _emit(
             emit, EventKind.MESSAGE_START, agent_name, role="tool", call_id=invocation.call_id, content=result["content"],
         )
@@ -366,12 +437,29 @@ async def execute_model_step(
         )
         await _emit(
             emit, EventKind.TOOL_EXECUTION_END, agent_name,
-            call_id=invocation.call_id, tool_name=invocation.tool_name, result=result["content"], is_error=False,
+            call_id=invocation.call_id, tool_name=invocation.tool_name, result=result["content"], is_error=is_error,
         )
-        return result
+        return result, before_result.terminate or after_result.terminate
 
-    results = await asyncio.gather(*(run_one(invocation) for invocation in completion.requested_tools))
-    messages.extend(results)
+    def _execution_mode_for(invocation: ToolInvocation) -> ToolExecutionMode | None:
+        if tool_registry is None:
+            return None
+        info = tool_registry.get(invocation.tool_name)
+        return info.execution_mode if info is not None else None
+
+    sequential = tool_execution_mode == "sequential" or any(
+        _execution_mode_for(invocation) == "sequential" for invocation in completion.requested_tools
+    )
+    if sequential:
+        outcomes = [await run_one(invocation) for invocation in completion.requested_tools]
+    else:
+        outcomes = await asyncio.gather(*(run_one(invocation) for invocation in completion.requested_tools))
+
+    messages.extend(message for message, _ in outcomes)
+    # 批次级 terminate：当且仅当这一批非空且每一个调用都标记了 terminate，才建议提前结束整个运行
+    # （在 finishTurn 钩子被征询之前就生效，见 contracts/queues-and-finish-turn.md）。
+    if outcomes and all(terminate for _, terminate in outcomes):
+        completion.should_continue = False
     return completion
 
 
@@ -394,6 +482,9 @@ async def run_tool_turn(
     emit: EventEmitter | None = None,
     agent_name: str = "",
     stream: bool = False,
+    tool_execution_mode: ToolExecutionMode = "parallel",
+    before_tool_call: BeforeToolCallHook | None = None,
+    after_tool_call: AfterToolCallHook | None = None,
     **kwargs: Any,
 ) -> str:
     """调用 LLM -> 按需执行工具 -> 把结果喂回去，直到模型不再请求工具或用光 max_iterations。
@@ -439,10 +530,14 @@ async def run_tool_turn(
             emit=emit,
             agent_name=agent_name,
             stream=stream,
+            tool_registry=tool_registry,
+            tool_execution_mode=tool_execution_mode,
+            before_tool_call=before_tool_call,
+            after_tool_call=after_tool_call,
             **kwargs,
         )
         await _emit(emit, EventKind.TURN_END, agent_name, step=step)
-        if not completion.requested_tools and not completion.should_continue:
+        if loop_should_stop(completion):
             return completion.text or ""
 
     fallback = await _complete_text(model_client, messages, on_text_delta, **kwargs)

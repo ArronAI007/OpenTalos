@@ -4,7 +4,9 @@
 （`packages/agents`、`apps/api/runtime.py`）构造好之后注入，不需要显式继承这里的任何类型。
 """
 from dataclasses import dataclass
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, runtime_checkable
+
+ToolExecutionMode = Literal["sequential", "parallel"]
 
 
 @runtime_checkable
@@ -30,10 +32,13 @@ class HistoryStore(Protocol):
 
 @dataclass
 class ToolInfo:
-    """`ToolExecutor.get()` 的返回值形状；`tool.tool.Tool` 结构性满足（只用到这两个属性）。"""
+    """`ToolExecutor.get()` 的返回值形状；`tool.tool.Tool` 结构性满足。"""
 
     requires_approval: bool
     untrusted_output: bool
+    # None 表示这个工具不覆盖全局默认的并发/顺序执行模式；批次里只要有一个工具要求
+    # "sequential"，整批就退化成顺序执行。
+    execution_mode: ToolExecutionMode | None = None
 
 
 @dataclass

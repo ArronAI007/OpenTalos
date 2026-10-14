@@ -4,10 +4,11 @@ from typing import Any
 
 from context import AssemblyConfig, OutputTrimmer, TokenBudget
 from core.agent import Agent, RuntimeSettings
-from core.agent_loop import execute_model_step, resolve_tool_call
+from core.agent_loop import AfterToolCallHook, BeforeToolCallHook, execute_model_step, resolve_tool_call
 from core.cancellation import CancellationToken
 from core.protocol import AgentEvent, ChatMessage, EventKind, ToolInvocation
 from core.model import ModelClient
+from core.protocols import ToolExecutionMode
 from memory import WorkingMemory
 from observability import RunRecorder, metrics
 from tool.registry import ToolRegistry
@@ -80,6 +81,9 @@ class ReActAgent(Agent):
         compaction_token_limit: int | None = None,
         output_trimmer: OutputTrimmer | None = None,
         approval_gate: Callable[[ToolInvocation], Awaitable[bool]] | None = None,
+        tool_execution_mode: ToolExecutionMode = "parallel",
+        before_tool_call: BeforeToolCallHook | None = None,
+        after_tool_call: AfterToolCallHook | None = None,
     ) -> None:
         super().__init__(
             name,
@@ -99,6 +103,9 @@ class ReActAgent(Agent):
         )
         self.tool_registry = tool_registry
         self.max_steps = max_steps
+        self.tool_execution_mode = tool_execution_mode
+        self.before_tool_call = before_tool_call
+        self.after_tool_call = after_tool_call
 
     def _tool_schemas(self) -> list[dict[str, Any]]:
         extra = self.tool_registry.function_schemas() if self.tool_registry else []
@@ -153,9 +160,19 @@ class ReActAgent(Agent):
                 emit=self._emit,
                 agent_name=self.name,
                 stream=stream,
+                tool_registry=self.tool_registry,
+                tool_execution_mode=self.tool_execution_mode,
+                before_tool_call=self.before_tool_call,
+                after_tool_call=self.after_tool_call,
                 **kwargs,
             )
             await self._emit_event(EventKind.TURN_END, step=step)
+
+            if completion.should_continue is False:
+                # 工具批次全部标记了 terminate（见 agent_loop.execute_model_step）：即使这一步
+                # 还有 requested_tools，也强制停止，不再继续到下一步。
+                answer = completion.text or ""
+                break
 
             if not completion.requested_tools:
                 if completion.should_continue:

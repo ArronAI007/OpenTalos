@@ -258,33 +258,33 @@ description: "Task list for feature implementation"
 
 ### Tests for User Story 3 ⚠️
 
-- [ ] T029 [P] [US3] 在 `tests/core/test_agent_loop.py` 新增：一批 3 个工具调用，其中 1 个（经假
+- [X] T029 [P] [US3] 在 `tests/core/test_agent_loop.py` 新增：一批 3 个工具调用，其中 1 个（经假
       `ToolExecutor.get()` 返回 `ToolInfo(execution_mode="sequential", ...)`）要求顺序执行，断言
       整批顺序执行（用共享列表记录各工具开始/结束时间戳，断言不重叠）；另起一批没有任何工具标记
       `execution_mode` 的调用，断言仍然并发执行（现状不变）。预期：`ToolInfo` 还没有
       `execution_mode` 字段，构造测试替身即报 `TypeError`，测试失败。
-- [ ] T030 [P] [US3] 在 `tests/core/test_agent_loop.py` 新增：`before_tool_call` 返回
+- [X] T030 [P] [US3] 在 `tests/core/test_agent_loop.py` 新增：`before_tool_call` 返回
       `BeforeCallResult(block=True, reason="...")` 时工具函数本身完全不被调用，模型收到的内容含
       `reason`；`after_tool_call` 返回 `AfterCallResult(details=...)` 只覆写 `details`，
       `content`/`is_error` 保持原值；`before_tool_call`/`after_tool_call` 内部抛异常时被当作
       `block=True`/`is_error=True` 处理，不向上传播；一批里只有部分调用标记 `terminate=True` 时运
       行不提前结束，全部标记时提前结束。预期：`execute_model_step` 还没有这两个参数，
       `TypeError`，测试失败。
-- [ ] T031 [US3] 跑 `.venv/bin/pytest tests/core/test_agent_loop.py -v`，确认按预期原因失败
+- [X] T031 [US3] 跑 `.venv/bin/pytest tests/core/test_agent_loop.py -v`，确认按预期原因失败
       （depends on: T029, T030）
 
 ### Implementation for User Story 3
 
-- [ ] T032 [US3] 修改 `packages/core/protocols.py`：`ToolInfo` 新增
+- [X] T032 [US3] 修改 `packages/core/protocols.py`：`ToolInfo` 新增
       `execution_mode: Literal["sequential", "parallel"] | None = None` 字段；修改
       `packages/core/protocol.py`：新增 `BeforeCallResult`（`block: bool = False`,
       `reason: str | None = None`, `terminate: bool = False`）和 `AfterCallResult`
       （`content: str | None = None`, `details: Any = None`, `is_error: bool | None = None`,
       `terminate: bool = False`）两个 dataclass
-- [ ] T033 [US3] 修改 `packages/tool/tool.py`：`Tool.__init__` 新增
+- [X] T033 [US3] 修改 `packages/tool/tool.py`：`Tool.__init__` 新增
       `execution_mode: Literal["sequential", "parallel"] | None = None` 构造参数并存成同名实例属
       性（depends on: T032）
-- [ ] T034 [US3] 修改 `packages/core/agent_loop.py`：`execute_model_step` 新增
+- [X] T034 [US3] 修改 `packages/core/agent_loop.py`：`execute_model_step` 新增
       `tool_execution_mode: Literal["sequential", "parallel"] = "parallel"`、
       `before_tool_call`/`after_tool_call` 三个参数；`resolve_tool_call` 包一层：执行前调用
       `before_tool_call`（异常时按 fail-closed 转成 `BeforeCallResult(block=True, reason=...)`），
@@ -294,12 +294,12 @@ description: "Task list for feature implementation"
       按"这一批里是否有任何工具 `execution_mode=="sequential"`"决定用 `asyncio.gather` 还是顺序
       `for` 循环；批次结束后，当且仅当非空且全部标记 `terminate=True` 时，把"提前结束"信号传给外
       层循环（depends on: T032, T033）
-- [ ] T035 [US3] 跑 `.venv/bin/pytest tests/core/test_agent_loop.py -v`，确认全部通过（depends on:
+- [X] T035 [US3] 跑 `.venv/bin/pytest tests/core/test_agent_loop.py -v`，确认全部通过（depends on:
       T034）
 
 ### Tests for User Story 3 (ReActAgent 接入) ⚠️
 
-- [ ] T036 [US3] 在 `tests/agents/test_react_agent.py` 新增：构造 `ReActAgent` 时传入
+- [X] T036 [US3] 在 `tests/agents/test_react_agent.py` 新增：构造 `ReActAgent` 时传入
       `tool_execution_mode="sequential"`，断言一批多工具调用确实顺序执行；传入
       `before_tool_call`/`after_tool_call` 构造参数，断言它们在真实的 `arespond()` 调用里生效；不
       传时断言现状行为（并发执行）不变。预期：`ReActAgent.__init__` 还没有这些构造参数，
@@ -307,13 +307,13 @@ description: "Task list for feature implementation"
 
 ### Implementation (ReActAgent 接入)
 
-- [ ] T037 [US3] 修改 `packages/agents/react_agent.py`：`ReActAgent.__init__` 新增
+- [X] T037 [US3] 修改 `packages/agents/react_agent.py`：`ReActAgent.__init__` 新增
       `tool_execution_mode: Literal["sequential", "parallel"] = "parallel"`、
       `before_tool_call`/`after_tool_call` 构造参数，存成实例属性并在 `arespond()` 每次调用
       `execute_model_step(...)` 时透传（depends on: T034, T036）
-- [ ] T038 [US3] 跑 `.venv/bin/pytest tests/agents/test_react_agent.py -v`，确认全部通过（depends
+- [X] T038 [US3] 跑 `.venv/bin/pytest tests/agents/test_react_agent.py -v`，确认全部通过（depends
       on: T037）
-- [ ] T039 [US3] 跑 `.venv/bin/pytest tests/core/ tests/agents/ -v`，确认本故事范围内全部测试通
+- [X] T039 [US3] 跑 `.venv/bin/pytest tests/core/ tests/agents/ -v`，确认本故事范围内全部测试通
       过、无回归（depends on: T035, T038）
 
 **Checkpoint**：工具执行模式与前后钩子已上线，现状默认行为（全并发、无钩子）保持不变。

@@ -38,6 +38,25 @@ class ToolInvocation:
 
 
 @dataclass
+class BeforeCallResult:
+    """`before_tool_call` 钩子的返回值。`block=True` 时这次调用不会真正执行。"""
+
+    block: bool = False
+    reason: str | None = None
+    terminate: bool = False
+
+
+@dataclass
+class AfterCallResult:
+    """`after_tool_call` 钩子的返回值——局部覆写，`None` 字段保留工具原始执行结果。"""
+
+    content: str | None = None
+    details: Any = None
+    is_error: bool | None = None
+    terminate: bool = False
+
+
+@dataclass
 class ToolCompletion:
     text: str | None
     requested_tools: list[ToolInvocation]

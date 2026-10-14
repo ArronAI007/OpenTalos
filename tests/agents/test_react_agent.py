@@ -3,7 +3,7 @@ import asyncio
 import pytest
 
 from core.cancellation import CancellationToken
-from core.protocol import AgentEvent, EventKind, ToolCompletion, ToolInvocation
+from core.protocol import AfterCallResult, AgentEvent, BeforeCallResult, EventKind, ToolCompletion, ToolInvocation
 from core.errors import EmptyModelResponse, OperationCancelled, OutputLimitError
 from core.model import ModelClient
 from tool.outcome import ToolOutcome
@@ -428,3 +428,111 @@ async def test_react_agent_subscribers_see_plain_event_sequence_for_a_no_tool_ca
     assert kinds[-1] == EventKind.RUN_END
     assert EventKind.MESSAGE_START in kinds and EventKind.MESSAGE_END in kinds
     assert not any(e.kind in (EventKind.TOOL_EXECUTION_START, EventKind.TOOL_EXECUTION_END) for e in events)
+
+
+async def test_react_agent_exposes_tool_execution_mode_and_hooks(scripted_client, echo_tool_registry):
+    client = scripted_client(
+        tool_completions=[
+            ToolCompletion(
+                text=None,
+                requested_tools=[
+                    ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text": "one"}'),
+                    ToolInvocation(call_id="c2", tool_name="echo", arguments_json='{"text": "two"}'),
+                ],
+                model_id="mock",
+            ),
+            ToolCompletion(text="done", requested_tools=[], model_id="mock"),
+        ]
+    )
+    order: list[str] = []
+    original_acall = echo_tool_registry.acall
+
+    async def spy_acall(name, arguments, *, call_id=None):
+        order.append(f"start:{call_id}")
+        result = await original_acall(name, arguments, call_id=call_id)
+        order.append(f"end:{call_id}")
+        return result
+
+    echo_tool_registry.acall = spy_acall  # type: ignore[method-assign]
+
+    before_calls: list[str] = []
+
+    async def before(invocation):
+        before_calls.append(invocation.call_id)
+        return BeforeCallResult()
+
+    after_calls: list[str] = []
+
+    async def after(invocation, content):
+        after_calls.append(invocation.call_id)
+        return AfterCallResult(content=f"[hooked] {content}")
+
+    seen: list[list[dict]] = []
+    original_acomplete_with_tools = client.acomplete_with_tools
+
+    async def spy_acomplete_with_tools(messages, tools, tool_choice="auto", **kwargs):
+        seen.append([dict(m) for m in messages])
+        return await original_acomplete_with_tools(messages, tools, tool_choice, **kwargs)
+
+    client.acomplete_with_tools = spy_acomplete_with_tools  # type: ignore[method-assign]
+
+    agent = ReActAgent(
+        name="bot",
+        model_client=client,
+        tool_registry=echo_tool_registry,
+        max_steps=5,
+        tool_execution_mode="sequential",
+        before_tool_call=before,
+        after_tool_call=after,
+    )
+
+    answer = await agent.arespond("echo both")
+
+    assert answer == "done"
+    assert order == ["start:c1", "end:c1", "start:c2", "end:c2"]  # 全局顺序执行模式生效
+    assert before_calls == ["c1", "c2"]
+    assert after_calls == ["c1", "c2"]
+    # afterToolCall 的覆写生效在"发给模型的消息"上（这里用第二步看到的 messages 验证）。
+    second_step_messages = seen[1]
+    tool_contents = [m["content"] for m in second_step_messages if m.get("role") == "tool"]
+    assert tool_contents == ["[hooked] echoed: one", "[hooked] echoed: two"]
+    # Agent 自己的历史快照（transcript）保留工具的原始执行结果——afterToolCall 覆写的是"模型看到
+    # 的视图"，不是事后篡改审计记录；两者允许不同，这是刻意的设计（见 react_agent.py 的注释）。
+    tool_messages = [m.content for m in agent.history_snapshot() if m.role == "tool"]
+    assert tool_messages == ["echoed: one", "echoed: two"]
+
+
+async def test_react_agent_defaults_to_parallel_execution_without_hooks(scripted_client, echo_tool_registry):
+    """不传任何新参数时，现状行为（全并发、无钩子）保持不变。"""
+    client = scripted_client(
+        tool_completions=[
+            ToolCompletion(
+                text=None,
+                requested_tools=[
+                    ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text": "one"}'),
+                    ToolInvocation(call_id="c2", tool_name="echo", arguments_json='{"text": "two"}'),
+                ],
+                model_id="mock",
+            ),
+            ToolCompletion(text="done", requested_tools=[], model_id="mock"),
+        ]
+    )
+    started: list[str] = []
+    release = asyncio.Event()
+    original_acall = echo_tool_registry.acall
+
+    async def spy_acall(name, arguments, *, call_id=None):
+        started.append(call_id)
+        if len(started) == 1:
+            await release.wait()
+        else:
+            release.set()
+        return await original_acall(name, arguments, call_id=call_id)
+
+    echo_tool_registry.acall = spy_acall  # type: ignore[method-assign]
+
+    agent = ReActAgent(name="bot", model_client=client, tool_registry=echo_tool_registry, max_steps=5)
+    answer = await agent.arespond("echo both")
+
+    assert answer == "done"
+    assert started == ["c1", "c2"]  # 两个调用并发起步

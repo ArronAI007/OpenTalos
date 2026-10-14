@@ -4,7 +4,15 @@ import pytest
 
 from context import OutputTrimmer
 from core.cancellation import CancellationToken
-from core.protocol import AgentEvent, Completion, EventKind, ToolCompletion, ToolInvocation
+from core.protocol import (
+    AfterCallResult,
+    AgentEvent,
+    BeforeCallResult,
+    Completion,
+    EventKind,
+    ToolCompletion,
+    ToolInvocation,
+)
 from core.errors import (
     AgentRuntimeError,
     EmptyModelResponse,
@@ -1290,3 +1298,268 @@ async def test_run_tool_turn_emits_turn_start_and_turn_end_per_step(scripted_cli
         (EventKind.TURN_START, 1), (EventKind.TURN_END, 1),
         (EventKind.TURN_START, 2), (EventKind.TURN_END, 2),
     ]
+
+
+# ==================== 工具执行模式 + before/afterToolCall 钩子 ====================
+
+
+async def test_sequential_tool_marks_the_whole_batch_sequential(scripted_client, echo_tool_registry):
+    from tool.tool import Tool, ToolParameter
+
+    class _SequentialEcho(Tool):
+        def __init__(self) -> None:
+            super().__init__(name="seq_echo", description="Sequential echo.", execution_mode="sequential")
+
+        def parameters(self) -> list[ToolParameter]:
+            return [ToolParameter(name="text", type="string", description="text")]
+
+        async def acall(self, arguments):
+            from tool.outcome import ToolOutcome
+
+            return ToolOutcome.ok(f"seq: {arguments['text']}")
+
+    echo_tool_registry.register(_SequentialEcho())
+    client = scripted_client(
+        tool_completions=[
+            ToolCompletion(
+                text=None,
+                requested_tools=[
+                    ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text": "one"}'),
+                    ToolInvocation(call_id="c2", tool_name="seq_echo", arguments_json='{"text": "two"}'),
+                ],
+                model_id="mock",
+            ),
+            ToolCompletion(text="done", requested_tools=[], model_id="mock"),
+        ]
+    )
+    messages: list[dict] = [{"role": "user", "content": "go"}]
+    order: list[str] = []
+    original_acall = echo_tool_registry.acall
+
+    async def spy_acall(name, arguments, *, call_id=None):
+        order.append(f"start:{name}")
+        result = await original_acall(name, arguments, call_id=call_id)
+        order.append(f"end:{name}")
+        return result
+
+    echo_tool_registry.acall = spy_acall  # type: ignore[method-assign]
+
+    await run_tool_turn(client, messages, echo_tool_registry, 3)
+
+    # 批次里有一个工具要求顺序执行，整批退化成顺序：第一个工具必须完全跑完才轮到第二个。
+    assert order == ["start:echo", "end:echo", "start:seq_echo", "end:seq_echo"]
+
+
+async def test_batch_stays_concurrent_when_no_tool_requests_sequential(scripted_client, echo_tool_registry):
+    client = scripted_client(
+        tool_completions=[
+            ToolCompletion(
+                text=None,
+                requested_tools=[
+                    ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text": "one"}'),
+                    ToolInvocation(call_id="c2", tool_name="echo", arguments_json='{"text": "two"}'),
+                ],
+                model_id="mock",
+            ),
+            ToolCompletion(text="done", requested_tools=[], model_id="mock"),
+        ]
+    )
+    messages: list[dict] = [{"role": "user", "content": "go"}]
+    started: list[str] = []
+    release = asyncio.Event()
+
+    class _SlowEcho:
+        pass
+
+    original_acall = echo_tool_registry.acall
+
+    async def spy_acall(name, arguments, *, call_id=None):
+        started.append(call_id)
+        if len(started) == 1:
+            await release.wait()
+        else:
+            release.set()
+        return await original_acall(name, arguments, call_id=call_id)
+
+    echo_tool_registry.acall = spy_acall  # type: ignore[method-assign]
+
+    await run_tool_turn(client, messages, echo_tool_registry, 3)
+
+    assert started == ["c1", "c2"]  # 两个调用并发起步，c2 不需要等 c1 完全跑完才开始
+
+
+async def test_global_sequential_mode_forces_sequential_execution(scripted_client, echo_tool_registry):
+    client = scripted_client(
+        tool_completions=[
+            ToolCompletion(
+                text=None,
+                requested_tools=[
+                    ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text": "one"}'),
+                    ToolInvocation(call_id="c2", tool_name="echo", arguments_json='{"text": "two"}'),
+                ],
+                model_id="mock",
+            ),
+            ToolCompletion(text="done", requested_tools=[], model_id="mock"),
+        ]
+    )
+    messages: list[dict] = [{"role": "user", "content": "go"}]
+    order: list[str] = []
+    original_acall = echo_tool_registry.acall
+
+    async def spy_acall(name, arguments, *, call_id=None):
+        order.append(f"start:{call_id}")
+        result = await original_acall(name, arguments, call_id=call_id)
+        order.append(f"end:{call_id}")
+        return result
+
+    echo_tool_registry.acall = spy_acall  # type: ignore[method-assign]
+
+    await run_tool_turn(client, messages, echo_tool_registry, 3, tool_execution_mode="sequential")
+
+    assert order == ["start:c1", "end:c1", "start:c2", "end:c2"]
+
+
+async def test_before_tool_call_blocks_and_reports_a_reason(scripted_client, echo_tool_registry):
+    client = scripted_client(
+        tool_completions=[
+            ToolCompletion(
+                text=None,
+                requested_tools=[ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text": "hi"}')],
+                model_id="mock",
+            ),
+            ToolCompletion(text="done", requested_tools=[], model_id="mock"),
+        ]
+    )
+    messages: list[dict] = [{"role": "user", "content": "go"}]
+    calls = {"n": 0}
+
+    async def before(invocation):
+        calls["n"] += 1
+        return BeforeCallResult(block=True, reason="not allowed right now")
+
+    await run_tool_turn(client, messages, echo_tool_registry, 3, before_tool_call=before)
+
+    assert calls["n"] == 1
+    tool_message = next(m for m in messages if m["role"] == "tool")
+    assert tool_message["content"] == "not allowed right now"
+
+
+async def test_before_tool_call_hook_exception_is_fail_closed(scripted_client, echo_tool_registry):
+    client = scripted_client(
+        tool_completions=[
+            ToolCompletion(
+                text=None,
+                requested_tools=[ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text": "hi"}')],
+                model_id="mock",
+            ),
+            ToolCompletion(text="done", requested_tools=[], model_id="mock"),
+        ]
+    )
+    messages: list[dict] = [{"role": "user", "content": "go"}]
+
+    async def broken_before(invocation):
+        raise RuntimeError("hook bug")
+
+    # fail-closed：钩子自身出错不应该让整轮运行崩溃，也不应该静默放行实际执行。
+    answer = await run_tool_turn(client, messages, echo_tool_registry, 3, before_tool_call=broken_before)
+
+    assert answer == "done"
+    tool_message = next(m for m in messages if m["role"] == "tool")
+    assert "hook 自身出错" in tool_message["content"]
+
+
+async def test_after_tool_call_overrides_only_the_content_field(scripted_client, echo_tool_registry):
+    client = scripted_client(
+        tool_completions=[
+            ToolCompletion(
+                text=None,
+                requested_tools=[ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text": "hi"}')],
+                model_id="mock",
+            ),
+            ToolCompletion(text="done", requested_tools=[], model_id="mock"),
+        ]
+    )
+    messages: list[dict] = [{"role": "user", "content": "go"}]
+
+    async def after(invocation, content):
+        return AfterCallResult(content=f"overridden: {content}")
+
+    await run_tool_turn(client, messages, echo_tool_registry, 3, after_tool_call=after)
+
+    tool_message = next(m for m in messages if m["role"] == "tool")
+    assert tool_message["content"] == "overridden: echoed: hi"
+
+
+async def test_after_tool_call_hook_exception_is_fail_closed(scripted_client, echo_tool_registry):
+    client = scripted_client(
+        tool_completions=[
+            ToolCompletion(
+                text=None,
+                requested_tools=[ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text": "hi"}')],
+                model_id="mock",
+            ),
+            ToolCompletion(text="done", requested_tools=[], model_id="mock"),
+        ]
+    )
+    messages: list[dict] = [{"role": "user", "content": "go"}]
+
+    async def broken_after(invocation, content):
+        raise RuntimeError("hook bug")
+
+    answer = await run_tool_turn(client, messages, echo_tool_registry, 3, after_tool_call=broken_after)
+
+    assert answer == "done"
+    tool_message = next(m for m in messages if m["role"] == "tool")
+    assert "hook 自身出错" in tool_message["content"]
+
+
+async def test_batch_terminate_requires_every_call_to_be_marked(scripted_client, echo_tool_registry):
+    client = scripted_client(
+        tool_completions=[
+            ToolCompletion(
+                text=None,
+                requested_tools=[
+                    ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text": "one"}'),
+                    ToolInvocation(call_id="c2", tool_name="echo", arguments_json='{"text": "two"}'),
+                ],
+                model_id="mock",
+            ),
+            ToolCompletion(text="second turn", requested_tools=[], model_id="mock"),
+        ]
+    )
+    messages: list[dict] = [{"role": "user", "content": "go"}]
+
+    async def after(invocation, content):
+        # 只有 c1 标记 terminate，c2 不标记——整批不应该提前结束。
+        return AfterCallResult(terminate=invocation.call_id == "c1")
+
+    answer = await run_tool_turn(client, messages, echo_tool_registry, 3, after_tool_call=after)
+
+    assert answer == "second turn"  # 没有提前结束，正常跑到第二轮
+
+
+async def test_batch_terminate_ends_the_run_when_every_call_is_marked(scripted_client, echo_tool_registry):
+    client = scripted_client(
+        tool_completions=[
+            ToolCompletion(
+                text=None,
+                requested_tools=[
+                    ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text": "one"}'),
+                    ToolInvocation(call_id="c2", tool_name="echo", arguments_json='{"text": "two"}'),
+                ],
+                model_id="mock",
+            ),
+            ToolCompletion(text="should not be reached", requested_tools=[], model_id="mock"),
+        ]
+    )
+    messages: list[dict] = [{"role": "user", "content": "go"}]
+
+    async def after(invocation, content):
+        return AfterCallResult(terminate=True)
+
+    answer = await run_tool_turn(client, messages, echo_tool_registry, 3, after_tool_call=after)
+
+    # 整批都标记了 terminate：运行提前结束，不会跑到第二轮——这里 run_tool_turn 的
+    # "没有更多文本输出"的收尾路径会用 completion.text（工具调用这一轮没有文本），
+    # 所以断言用对 should_continue=False 更敏感的信号：第二轮的 completion 从未被请求过。
+    assert answer == ""
