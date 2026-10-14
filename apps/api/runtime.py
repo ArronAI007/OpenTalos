@@ -123,8 +123,10 @@ class _LiveRun:
     events: list[dict[str, Any]] = field(default_factory=list)
     condition: asyncio.Condition = field(default_factory=asyncio.Condition)
     stop_event: asyncio.Event = field(default_factory=asyncio.Event)
-    steer: asyncio.Queue[str] = field(default_factory=asyncio.Queue)
-    steer_event: asyncio.Event = field(default_factory=asyncio.Event)
+    # 纯轮询排队，不存在打断正在进行中的模型调用的机制（FR-006）：steering 在当前这一步的工具调
+    # 用跑完后被轮询注入；follow-up 只在没有更多工具调用、也没有排队的 steering 消息时才被轮询。
+    steering: asyncio.Queue[str] = field(default_factory=asyncio.Queue)
+    followup: asyncio.Queue[str] = field(default_factory=asyncio.Queue)
     done: bool = False
     finished_at: float | None = None
     runner: asyncio.Task[None] | None = None
@@ -427,7 +429,8 @@ class ChatRuntime:
         self._task_locks.pop(task_id, None)
 
     async def steer(self, task_id: str, content: str) -> bool:
-        """运行中注入一条用户消息（打断纠偏）：落 user 行、下发 user_stored、入队待 agent 下一步采用。
+        """运行中注入一条用户消息：落 user 行、下发 user_stored、入队待 agent 下一步轮询采用
+        （纯轮询，不打断正在进行中的模型调用/工具执行，见 FR-006）。
 
         无进行中的运行返回 False（前端据此改走普通发送）。
         """
@@ -436,8 +439,7 @@ class ChatRuntime:
             return False
         user_row = await asyncio.to_thread(self._store.append_message, task_id, "user", content)
         await self._append(run, {"type": "user_stored", "id": user_row["id"], "created_at": user_row["created_at"]})
-        run.steer.put_nowait(content)
-        run.steer_event.set()  # 唤醒在飞的模型调用，令其立即打断重跑
+        run.steering.put_nowait(content)
         return True
 
     async def _recall_memories(self, query: str) -> list[str]:
@@ -585,9 +587,8 @@ class ChatRuntime:
                     content,
                     stream=True,
                     cancellation=cancellation,
-                    drain_steer=lambda: _drain_queue(run.steer),
-                    steer_event=run.steer_event,
-                    on_steer_interrupt=lambda: emit({"type": "steer_interrupt"}),
+                    drain_steer=lambda: _drain_queue(run.steering),
+                    drain_followup=lambda: _drain_queue(run.followup),
                     recalled=recalled,
                     on_usage=record_usage,
                 )
@@ -627,8 +628,6 @@ class ChatRuntime:
                     break
                 if event["type"] == "delta":
                     parts.append(event["text"])
-                elif event["type"] == "steer_interrupt":
-                    parts.clear()  # 被打断的部分丢弃，重新生成的文本随后重新累计
                 elif event["type"] == "tool_call":
                     pending_calls.append(event)
                 elif event["type"] == "tool_result":

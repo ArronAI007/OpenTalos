@@ -177,25 +177,25 @@ description: "Task list for feature implementation"
 
 ### Tests for User Story 2 ⚠️
 
-- [ ] T017 [P] [US2] 在 `tests/core/test_agent_loop.py` 新增：工具调用执行期间（用一个会在真正返回
+- [X] T017 [P] [US2] 在 `tests/core/test_agent_loop.py` 新增：工具调用执行期间（用一个会在真正返回
       前等待一个 `asyncio.Event` 的假工具）排队一条 steering 消息，断言这次工具调用没有被取消（事
       件/断言都确认执行到底），消息在下一次 `execute_model_step` 调用前出现在 `messages` 里，且全
       程没有抛出 `ModelInterrupted`；额外断言 `SteerQueue` Protocol 不再要求
       `clear_interrupt`/`interrupt_event`（用一个只实现 `drain()` 的最小假对象即可通过
       `isinstance` 检查）。预期：当前 `_call_model` 仍然会对 `steer.interrupt_event` 发起赛跑逻
       辑，断言"全程没有打断"会因为现有实现尝试访问这个属性而失败/或行为不符预期。
-- [ ] T018 [P] [US2] 在 `tests/core/test_agent_loop.py` 新增：没有更多工具调用时排队一条 follow-up
+- [X] T018 [P] [US2] 在 `tests/core/test_agent_loop.py` 新增：没有更多工具调用时排队一条 follow-up
       消息，断言 `execute_model_step`/`run_tool_turn` 不直接停止，而是把消息注入并多跑一轮；steering
       和 follow-up 都有消息时，断言 steering 先被注入（通过观察 `messages` 里两条消息的相对顺序）。
       预期：`TypeError`（`execute_model_step`/`run_tool_turn` 还没有 `followup` 参数），测试失败。
-- [ ] T019 [US2] 跑 `.venv/bin/pytest tests/core/test_agent_loop.py -v`，确认 T017/T018 按预期原因
+- [X] T019 [US2] 跑 `.venv/bin/pytest tests/core/test_agent_loop.py -v`，确认 T017/T018 按预期原因
       失败（depends on: T017, T018）
 
 ### Implementation for User Story 2
 
-- [ ] T020 [US2] 修改 `packages/core/protocols.py`：`SteerQueue` Protocol 删除
+- [X] T020 [US2] 修改 `packages/core/protocols.py`：`SteerQueue` Protocol 删除
       `clear_interrupt()`/`interrupt_event` 两个成员，只保留 `drain() -> list[str]`
-- [ ] T021 [US2] 修改 `packages/core/agent_loop.py`：删除 `ModelInterrupted` 异常类；
+- [X] T021 [US2] 修改 `packages/core/agent_loop.py`：删除 `ModelInterrupted` 异常类；
       `_call_model` 删除"和 `interrupt.wait()` 赛跑"那一整段，简化成普通 `await call`（删除
       `interrupt: asyncio.Event | None` 参数）；`execute_model_step` 删除
       `steer.clear_interrupt()`/`interrupt = steer.interrupt_event` 这两行（`steer.drain()` 本身
@@ -204,12 +204,12 @@ description: "Task list for feature implementation"
       让这一步"继续"而不是返回，具体由外层 `run_tool_turn` 的循环承接：`execute_model_step` 把"是
       否还要继续"的信号通过返回值或一个新的布尔标记传出去）；`run_tool_turn` 同步新增 `followup`
       参数并透传（depends on: T020）
-- [ ] T022 [US2] 跑 `.venv/bin/pytest tests/core/test_agent_loop.py -v`，确认全部通过（depends on:
+- [X] T022 [US2] 跑 `.venv/bin/pytest tests/core/test_agent_loop.py -v`，确认全部通过（depends on:
       T021）
 
 ### Tests for User Story 2 (ReActAgent 接入) ⚠️
 
-- [ ] T023 [US2] 在 `tests/agents/test_react_agent.py`：删除
+- [X] T023 [US2] 在 `tests/agents/test_react_agent.py`：删除
       `test_steering_interrupts_an_in_flight_model_call_and_retries`（断言的行为本身被废弃，不是
       改名重写）；新增一个正向测试，断言 `ReActAgent` 跑一个工具调用时排队 steering 消息不会打断
       它；新增一个 follow-up 测试，断言没有更多工具调用时排队 follow-up 消息会让 `ReActAgent` 多跑
@@ -218,7 +218,7 @@ description: "Task list for feature implementation"
 
 ### Implementation (ReActAgent 接入)
 
-- [ ] T024 [US2] 修改 `packages/agents/react_agent.py`：`_ReActSteerQueue` 删除
+- [X] T024 [US2] 修改 `packages/agents/react_agent.py`：`_ReActSteerQueue` 删除
       `clear_interrupt()`/`interrupt_event`；删除 `arespond()` 里 `while True: try: ... except
       ModelInterrupted: continue` 的重试循环（`execute_model_step` 现在不会再抛这个异常）；新增一
       个 follow-up 版本的队列适配器（结构和 `_ReActSteerQueue` 相同，包住新增的
@@ -226,12 +226,12 @@ description: "Task list for feature implementation"
       弹出 `drain_followup`，构造 `followup = _ReActSteerQueue(...)`（或共享同一个适配器类，传入
       不同的 drain 回调）并传给每次 `execute_model_step(..., followup=followup)`（depends on:
       T021, T023）
-- [ ] T025 [US2] 跑 `.venv/bin/pytest tests/agents/test_react_agent.py -v`，确认全部通过（depends
+- [X] T025 [US2] 跑 `.venv/bin/pytest tests/agents/test_react_agent.py -v`，确认全部通过（depends
       on: T024）
 
 ### Implementation (apps/api 接入)
 
-- [ ] T026 [US2] 修改 `apps/api/runtime.py`：`_LiveRun` 删除 `steer_event: asyncio.Event` 字段，
+- [X] T026 [US2] 修改 `apps/api/runtime.py`：`_LiveRun` 删除 `steer_event: asyncio.Event` 字段，
       `steer: asyncio.Queue[str]` 重命名为 `steering: asyncio.Queue[str]`，新增
       `followup: asyncio.Queue[str] = field(default_factory=asyncio.Queue)`；`steer()` 方法删除
       `run.steer_event.set()` 这行，写入目标从 `run.steer` 改成 `run.steering`；`_run_turn()` 的
@@ -240,9 +240,9 @@ description: "Task list for feature implementation"
       `drain_followup=lambda: _drain_queue(run.followup)`，删除
       `steer_event=run.steer_event`/`on_steer_interrupt=...` 两个 kwargs（打断通知机制随打断能力
       一起移除）（depends on: T024）
-- [ ] T027 [US2] 跑 `.venv/bin/pytest tests/apps/api/ -v`，确认全部通过、无回归（因字段改名而需要
+- [X] T027 [US2] 跑 `.venv/bin/pytest tests/apps/api/ -v`，确认全部通过、无回归（因字段改名而需要
       调整的测试一并修正）（depends on: T026）
-- [ ] T028 [US2] 跑 `.venv/bin/pytest tests/core/ tests/agents/ tests/apps/api/ -v`，确认本故事范
+- [X] T028 [US2] 跑 `.venv/bin/pytest tests/core/ tests/agents/ tests/apps/api/ -v`，确认本故事范
       围内全部测试通过、无回归（depends on: T022, T025, T027）
 
 **Checkpoint**：Steering/Follow-up 均为纯轮询语义，打断能力已彻底移除。

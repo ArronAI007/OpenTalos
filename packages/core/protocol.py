@@ -47,6 +47,10 @@ class ToolCompletion:
     # 供应商原始结束原因（OpenAI 的 finish_reason / Anthropic 的 stop_reason）。用于区分
     # "模型自然说完" 与 "撞上 max_tokens 被截断"——后者不能当作完整答案。
     finish_reason: str | None = None
+    # 覆盖外层循环默认的"有工具调用就继续、没有就停"调度：None 不覆盖；True 强制再跑一轮（即使
+    # 没有工具调用，比如 follow-up 轮询注入了消息，或 finishTurn 钩子返回 "continue"）；False 强
+    # 制停止（即使还有工具调用，finishTurn 返回 "end" 时用）。
+    should_continue: bool | None = None
 
 
 @dataclass

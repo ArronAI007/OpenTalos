@@ -289,23 +289,42 @@ async def test_recalled_memories_are_injected_as_a_system_message(scripted_clien
     assert "用户叫张三" in seen[0][1]["content"]
 
 
-async def test_steering_interrupts_an_in_flight_model_call_and_retries():
+async def test_steering_does_not_interrupt_an_in_flight_tool_call(echo_tool_registry):
+    """FR-006 正向断言：工具调用执行期间排队一条 steering 消息，不会打断/取消这次工具调用——
+    这次替换了原来断言"打断正在进行的模型调用"的 test_steering_interrupts_an_in_flight_model_
+    call_and_retries（那条断言的行为本身已被移除，不是改名重写）。"""
+    tool_started = asyncio.Event()
+    release_tool = asyncio.Event()
+
+    class _SlowTool(Tool):
+        def __init__(self) -> None:
+            super().__init__(name="slow", description="Blocks until released.")
+
+        def parameters(self) -> list[ToolParameter]:
+            return []
+
+        async def acall(self, arguments):
+            tool_started.set()
+            await release_tool.wait()
+            return ToolOutcome.ok("slow done")
+
+    echo_tool_registry.register(_SlowTool())
+
     client = ModelClient(provider="mock")
     calls = {"n": 0}
-    seen: list[list[dict]] = []
-    first_started = asyncio.Event()
 
     async def fake_acomplete_with_tools(messages, tools, tool_choice="auto", **kwargs):
         calls["n"] += 1
-        seen.append([dict(m) for m in messages])
         if calls["n"] == 1:
-            first_started.set()
-            await asyncio.sleep(3600)  # 只能被 steer 打断，不会自然醒
-        return ToolCompletion(text="重跑后的回答", requested_tools=[], model_id="mock")
+            return ToolCompletion(
+                text=None,
+                requested_tools=[ToolInvocation(call_id="c1", tool_name="slow", arguments_json="{}")],
+                model_id="mock",
+            )
+        return ToolCompletion(text="done", requested_tools=[], model_id="mock")
 
     client.acomplete_with_tools = fake_acomplete_with_tools  # type: ignore[method-assign]
 
-    steer_event = asyncio.Event()
     pending: list[str] = []
 
     def drain_steer() -> list[str]:
@@ -313,33 +332,38 @@ async def test_steering_interrupts_an_in_flight_model_call_and_retries():
         pending.clear()
         return out
 
-    interrupts = {"n": 0}
+    agent = ReActAgent(name="bot", model_client=client, tool_registry=echo_tool_registry, max_steps=5)
 
-    async def on_steer_interrupt() -> None:
-        interrupts["n"] += 1
+    task = asyncio.create_task(agent.arespond("run the slow tool", drain_steer=drain_steer))
+    await tool_started.wait()
+    pending.append("改用中文回答")  # 工具执行期间排队一条 steering 消息
+    await asyncio.sleep(0.01)
+    assert not task.done()  # 工具还在执行，没有被取消/打断
+    release_tool.set()
+    answer = await task
 
-    agent = ReActAgent(name="bot", model_client=client)
+    assert answer == "done"
+    assert any(m.content == "改用中文回答" for m in agent.history_snapshot() if m.role == "user")
 
-    async def scenario() -> str:
-        task = asyncio.create_task(
-            agent.arespond(
-                "原始问题",
-                drain_steer=drain_steer,
-                steer_event=steer_event,
-                on_steer_interrupt=on_steer_interrupt,
-            )
-        )
-        await first_started.wait()
-        pending.append("改用中文")
-        steer_event.set()
-        return await task
 
-    answer = await scenario()
+async def test_followup_injects_a_message_and_keeps_the_run_going(scripted_client):
+    client = scripted_client(
+        tool_completions=[
+            ToolCompletion(text="第一轮回答", requested_tools=[], model_id="mock"),
+            ToolCompletion(text="第二轮回答", requested_tools=[], model_id="mock"),
+        ]
+    )
+    calls = {"n": 0}
 
-    assert answer == "重跑后的回答"
-    assert interrupts["n"] == 1  # 打断了一次
-    assert calls["n"] == 2  # 第一步重跑了一次
-    assert any(m.get("content") == "改用中文" for m in seen[1])  # 重跑时已带上 steer
+    def drain_followup() -> list[str]:
+        calls["n"] += 1
+        return ["还有一件事"] if calls["n"] == 1 else []
+
+    agent = ReActAgent(name="bot", model_client=client, max_steps=5)
+    answer = await agent.arespond("原始问题", drain_followup=drain_followup)
+
+    assert answer == "第二轮回答"
+    assert [m.content for m in agent.history_snapshot() if m.role == "user"] == ["原始问题", "还有一件事"]
 
 
 async def test_react_agent_subscribers_see_full_event_sequence_for_a_tool_call_run(scripted_client, echo_tool_registry):

@@ -1177,21 +1177,22 @@ def test_steer_without_active_run_returns_false(store) -> None:
     assert asyncio.run(runtime.steer("t1", "改用中文")) is False
 
 
-async def test_steering_interrupts_generation_and_discards_the_partial_reply(store, scripted_client, tmp_path) -> None:
-    calls = {"n": 0}
-    first_started = asyncio.Event()
+async def test_steering_does_not_interrupt_generation_and_keeps_the_partial_reply(
+    store, scripted_client, tmp_path
+) -> None:
+    """替换原来断言"打断正在进行的生成"的 test_steering_interrupts_generation_and_discards_the_
+    partial_reply——那条断言的行为本身已被移除（FR-006），这里换成验证 steering 不会打断生成、
+    流式内容不会因为排队的消息被丢弃重来。"""
+    release = asyncio.Event()
     client = scripted_client(tool_completions=[])
 
     async def model(messages, tools, on_text_delta=None, on_reasoning_delta=None, **kwargs):
-        calls["n"] += 1
-        if calls["n"] == 1:
-            if on_text_delta is not None:
-                await on_text_delta("旧内容")  # 会被打断丢弃
-            first_started.set()
-            await asyncio.sleep(3600)  # 只能被 steer 打断
         if on_text_delta is not None:
-            await on_text_delta("新回答")
-        return ToolCompletion(text="新回答", requested_tools=[], model_id="mock-model")
+            await on_text_delta("部分")
+        await release.wait()
+        if on_text_delta is not None:
+            await on_text_delta("内容")
+        return ToolCompletion(text="部分内容", requested_tools=[], model_id="mock-model")
 
     client.astream_with_tools = model  # type: ignore[method-assign]
     runtime = _runtime(store, client, tmp_path)
@@ -1200,24 +1201,24 @@ async def test_steering_interrupts_generation_and_discards_the_partial_reply(sto
 
     async def scenario() -> list[dict[str, Any]]:
         events: list[dict[str, Any]] = []
-
-        async def consume() -> None:
-            async for event in runtime.stream_reply(task["id"], "原始问题"):
-                events.append(event)
-
-        consumer = asyncio.create_task(consume())
-        await first_started.wait()
-        assert await runtime.steer(task["id"], "改用中文") is True
-        await consumer
+        steered = False
+        async for event in runtime.stream_reply(task["id"], "原始问题"):
+            events.append(event)
+            if not steered and event["type"] == "delta" and event["text"] == "部分":
+                assert await runtime.steer(task["id"], "改用中文") is True
+                steered = True
+                release.set()
         return events
 
     events = await scenario()
 
-    assert any(e["type"] == "steer_interrupt" for e in events)
+    assert not any(e["type"] == "steer_interrupt" for e in events)  # 打断事件已不存在
+    deltas = "".join(e["text"] for e in events if e["type"] == "delta")
+    assert deltas == "部分内容"  # 排队的 steering 消息没有让已经流出的内容被清空重来
     done = next(e for e in events if e["type"] == "done")
-    assert done["reply"] == "新回答"  # 被打断的"旧内容"未进最终回复
-    rows = store.list_messages(task["id"])
-    assert rows[-1]["kind"] == "assistant" and rows[-1]["content"] == "新回答"
+    assert done["reply"] == "部分内容"
+    user_rows = [r for r in store.list_messages(task["id"]) if r["kind"] == "user"]
+    assert [r["content"] for r in user_rows] == ["原始问题", "改用中文"]
 
 
 async def test_steer_appends_a_user_row_and_emits_user_stored(store, scripted_client, tmp_path) -> None:

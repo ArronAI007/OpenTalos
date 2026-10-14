@@ -3,7 +3,6 @@
 `observability.RunRecorder`、`context.TokenBudget`、`context.OutputTrimmer`）由调用方
 （`packages/agents`、`apps/api/runtime.py`）构造好之后注入，不需要显式继承这里的任何类型。
 """
-import asyncio
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
@@ -97,10 +96,8 @@ class OutputTrimmerLike(Protocol):
 
 @runtime_checkable
 class SteerQueue(Protocol):
-    """steering/follow-up 的排队与打断；由 `apps/api/runtime.py` 的 `_LiveRun` 结构性满足。"""
+    """steering 或 follow-up 的排队（纯轮询，不支持打断正在进行的模型调用/工具执行）；两种队列
+    共用同一个形状，各自的轮询时机由调用方（`execute_model_step`）决定，不是 Protocol 的一部分。
+    """
 
     def drain(self) -> list[str]: ...
-    def clear_interrupt(self) -> None: ...
-
-    @property
-    def interrupt_event(self) -> asyncio.Event: ...

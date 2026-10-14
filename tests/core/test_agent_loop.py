@@ -12,6 +12,7 @@ from core.errors import (
     OutputLimitError,
 )
 from core.model import FakeModelBackend, ModelClient
+from core.protocols import SteerQueue
 from tool.outcome import ToolOutcome
 from tool.registry import ToolRegistry
 from tool.tool import Tool, ToolParameter
@@ -1019,26 +1020,24 @@ async def test_resolve_tool_call_records_tool_metrics(echo_tool_registry):
     )
 
 
-# ==================== SteerQueue：steering/follow-up 的排队与打断下沉进 core ====================
+# ==================== SteerQueue：steering/follow-up 纯轮询，无打断能力 ====================
 
 
 class _FakeSteerQueue:
+    """只实现 drain()——SteerQueue Protocol 收窄后不再要求 clear_interrupt/interrupt_event。"""
+
     def __init__(self, pending: list[str] | None = None) -> None:
         self._pending = list(pending or [])
-        self.clear_interrupt_calls = 0
-        self._event = asyncio.Event()
 
     def drain(self) -> list[str]:
         pending, self._pending = self._pending, []
         return pending
 
-    def clear_interrupt(self) -> None:
-        self.clear_interrupt_calls += 1
-        self._event.clear()
 
-    @property
-    def interrupt_event(self) -> asyncio.Event:
-        return self._event
+def test_minimal_drain_only_object_satisfies_the_steer_queue_protocol():
+    assert isinstance(_FakeSteerQueue(), SteerQueue)
+    assert not hasattr(SteerQueue, "clear_interrupt")
+    assert not hasattr(SteerQueue, "interrupt_event")
 
 
 async def test_execute_model_step_drains_and_injects_steer_queue_messages(scripted_client):
@@ -1056,7 +1055,6 @@ async def test_execute_model_step_drains_and_injects_steer_queue_messages(script
     )
 
     assert {"role": "user", "content": "纠偏消息"} in messages
-    assert steer.clear_interrupt_calls == 1
 
 
 async def test_execute_model_step_is_a_noop_when_steer_has_nothing_pending(scripted_client):
@@ -1074,7 +1072,100 @@ async def test_execute_model_step_is_a_noop_when_steer_has_nothing_pending(scrip
     )
 
     assert messages == [{"role": "user", "content": "hi"}]
-    assert steer.clear_interrupt_calls == 1
+
+
+async def test_execute_model_step_never_interrupts_a_slow_in_flight_model_call(scripted_client):
+    """核心正向断言（FR-006）：steer 有排队消息时，一次正在进行中的模型调用必须被正常跑完，
+    不存在任何能取消它的机制——不像 drain() 调用点本身（调用模型之前）那样简单，这里特意构造
+    一次"模型调用本身耗时"的场景，验证它不会被排队的 steer 消息打断。"""
+    call_started = asyncio.Event()
+    release_call = asyncio.Event()
+
+    async def slow_acomplete_with_tools(messages, tools, tool_choice="auto", **kwargs):
+        call_started.set()
+        await release_call.wait()
+        return ToolCompletion(text="done", requested_tools=[], model_id="mock")
+
+    client = ModelClient(provider="mock")
+    client.acomplete_with_tools = slow_acomplete_with_tools  # type: ignore[method-assign]
+    steer = _FakeSteerQueue(pending=[])
+
+    async def handle_invocation(invocation):
+        raise AssertionError("should not be called")
+
+    task = asyncio.create_task(
+        execute_model_step(
+            client, [{"role": "user", "content": "hi"}], [], handle_invocation=handle_invocation, steer=steer
+        )
+    )
+    await call_started.wait()
+    steer._pending.append("迟到的纠偏消息")  # 模型调用进行期间排队一条 steering 消息
+    await asyncio.sleep(0.01)
+    assert not task.done()  # 排队消息本身不会让正在进行的模型调用提前结束
+    release_call.set()
+    completion = await task
+
+    assert completion.text == "done"  # 模型调用正常跑完，没有被取消/打断
+
+
+async def test_execute_model_step_polls_followup_only_when_no_tool_calls_remain(scripted_client):
+    client = scripted_client(
+        tool_completions=[ToolCompletion(text="done", requested_tools=[], model_id="mock")]
+    )
+    messages: list[dict] = [{"role": "user", "content": "hi"}]
+    followup = _FakeSteerQueue(pending=["后续追加的消息"])
+
+    async def handle_invocation(invocation):
+        raise AssertionError("should not be called")
+
+    result = await execute_model_step(
+        client, messages, [], handle_invocation=handle_invocation, followup=followup
+    )
+
+    assert result.should_continue is True
+    assert {"role": "user", "content": "后续追加的消息"} in messages
+
+
+async def test_execute_model_step_does_not_poll_followup_when_tool_calls_are_pending(scripted_client, echo_tool_registry):
+    client = scripted_client(
+        tool_completions=[
+            ToolCompletion(
+                text=None,
+                requested_tools=[ToolInvocation(call_id="c1", tool_name="echo", arguments_json='{"text": "hi"}')],
+                model_id="mock",
+            )
+        ]
+    )
+    messages: list[dict] = [{"role": "user", "content": "hi"}]
+    followup = _FakeSteerQueue(pending=["后续追加的消息"])
+
+    async def handle_invocation(invocation):
+        return await resolve_tool_call(echo_tool_registry, invocation)
+
+    await execute_model_step(client, messages, [], handle_invocation=handle_invocation, followup=followup)
+
+    assert not any(m.get("content") == "后续追加的消息" for m in messages)  # 还有工具调用，不轮询 follow-up
+
+
+async def test_execute_model_step_prioritizes_steering_over_followup_when_both_have_messages(scripted_client):
+    client = scripted_client(
+        tool_completions=[ToolCompletion(text="done", requested_tools=[], model_id="mock")]
+    )
+    messages: list[dict] = [{"role": "user", "content": "hi"}]
+    steer = _FakeSteerQueue(pending=["steering 消息"])
+    followup = _FakeSteerQueue(pending=["followup 消息"])
+
+    async def handle_invocation(invocation):
+        raise AssertionError("should not be called")
+
+    await execute_model_step(
+        client, messages, [], handle_invocation=handle_invocation, steer=steer, followup=followup
+    )
+
+    # steering 在本步开头就已经被 drain 并注入；此时没有更多工具调用，followup 也会被轮询并注入，
+    # 但 steering 的消息必须排在更早的位置（本步开头注入 vs. 结尾才轮询 followup）。
+    contents = [m.get("content") for m in messages]
+    assert contents.index("steering 消息") < contents.index("followup 消息")
 
 
 # ==================== 事件总线：execute_model_step/run_tool_turn 的 emit 参数 ====================

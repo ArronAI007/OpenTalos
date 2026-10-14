@@ -1,11 +1,10 @@
-import asyncio
 import json
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 from context import AssemblyConfig, OutputTrimmer, TokenBudget
 from core.agent import Agent, RuntimeSettings
-from core.agent_loop import ModelInterrupted, execute_model_step, resolve_tool_call
+from core.agent_loop import execute_model_step, resolve_tool_call
 from core.cancellation import CancellationToken
 from core.protocol import AgentEvent, ChatMessage, EventKind, ToolInvocation
 from core.model import ModelClient
@@ -41,38 +40,26 @@ STEP_LIMIT_MESSAGE = "Reached the step limit without a final answer."
 
 
 class _ReActSteerQueue:
-    """把 `arespond(drain_steer=..., steer_event=...)` 这两个旧参数包成一个满足
-    `core.protocols.SteerQueue` 形状的小适配器，交给 `execute_model_step` 统一处理排队/打断。
-    `drain()` 过滤空白消息、并把接受的消息记进 Agent 自己的 transcript（`execute_model_step`
-    只会把它们追加进这一次请求的 messages 列表，不知道、也不需要知道 Agent 的持久历史）。
+    """把 `arespond(drain_steer=...)`/`arespond(drain_followup=...)` 这类原始回调包成一个满足
+    `core.protocols.SteerQueue` 形状的小适配器（纯轮询，不支持打断），交给 `execute_model_step`
+    统一处理排队。`drain()` 过滤空白消息、并把接受的消息记进 Agent 自己的 transcript
+    （`execute_model_step` 只会把它们追加进这一次请求的 messages 列表，不知道、也不需要知道
+    Agent 的持久历史）。steering 和 follow-up 共用同一个适配器类，各自包一个不同的原始回调。
     """
 
-    def __init__(
-        self,
-        agent: "ReActAgent",
-        drain_steer: Callable[[], list[str]] | None,
-        steer_event: asyncio.Event | None,
-    ) -> None:
+    def __init__(self, agent: "ReActAgent", drain_fn: Callable[[], list[str]] | None) -> None:
         self._agent = agent
-        self._drain_steer = drain_steer
-        self._event = steer_event or asyncio.Event()
+        self._drain_fn = drain_fn
 
     def drain(self) -> list[str]:
-        if self._drain_steer is None:
+        if self._drain_fn is None:
             return []
         accepted = []
-        for text in self._drain_steer():
+        for text in self._drain_fn():
             if text.strip():
                 self._agent.record_message(ChatMessage(content=text, role="user"))
                 accepted.append(text)
         return accepted
-
-    def clear_interrupt(self) -> None:
-        self._event.clear()
-
-    @property
-    def interrupt_event(self) -> asyncio.Event:
-        return self._event
 
 
 class ReActAgent(Agent):
@@ -120,16 +107,17 @@ class ReActAgent(Agent):
     async def arespond(self, input_text: str, **kwargs: object) -> str:
         cancellation: CancellationToken | None = kwargs.pop("cancellation", None)
         on_text_delta: Callable[[str], Awaitable[None]] | None = kwargs.pop("on_text_delta", None)
-        # 运行中的"打断纠偏"：排队/打断统一交给 execute_model_step 经 SteerQueue 处理。
+        # steering/follow-up：纯轮询排队，统一交给 execute_model_step 经 SteerQueue 处理，
+        # 不存在任何打断正在进行中的模型调用的机制（FR-006）。
         drain_steer: Callable[[], list[str]] | None = kwargs.pop("drain_steer", None)
-        steer_event: asyncio.Event | None = kwargs.pop("steer_event", None)
-        on_steer_interrupt = kwargs.pop("on_steer_interrupt", None)
+        drain_followup: Callable[[], list[str]] | None = kwargs.pop("drain_followup", None)
         recalled: list[str] | None = kwargs.pop("recalled", None)
         on_usage = kwargs.pop("on_usage", None)
         # 显式请求走流式（增量只经事件总线下发），独立于是否提供了原始 on_text_delta 回调——
         # 供只想订阅事件总线、不需要专用回调的调用方（如 apps/api）使用。
         stream: bool = bool(kwargs.pop("stream", False))
-        steer = _ReActSteerQueue(self, drain_steer, steer_event) if (drain_steer or steer_event) else None
+        steer = _ReActSteerQueue(self, drain_steer) if drain_steer is not None else None
+        followup = _ReActSteerQueue(self, drain_followup) if drain_followup is not None else None
         messages = self.build_messages(input_text)
         # 召回的相关长期记忆作为一条 system 注入（在系统提示之后、历史之前）。
         if recalled:
@@ -148,36 +136,30 @@ class ReActAgent(Agent):
                 return await self._handle(invocation, step)
 
             await self._emit_event(EventKind.TURN_START, step=step)
-            while True:
-                try:
-                    completion = await execute_model_step(
-                        self.model_client,
-                        messages,
-                        tools,
-                        recorder=self.recorder,
-                        step=step,
-                        on_text_delta=on_text_delta,
-                        cancellation=cancellation,
-                        handle_invocation=handle_invocation,
-                        on_tool_result=self.record_tool_result,
-                        on_usage=on_usage,
-                        metrics=self.metrics,
-                        steer=steer,
-                        emit=self._emit,
-                        agent_name=self.name,
-                        stream=stream,
-                        **kwargs,
-                    )
-                except ModelInterrupted:
-                    # 生成中被 steer 打断：通知前端丢弃被打断的流式内容，execute_model_step 下
-                    # 一次调用会自己重新 drain 并注入，这里只需要重试。
-                    if on_steer_interrupt is not None:
-                        await on_steer_interrupt()
-                    continue
-                break
+            completion = await execute_model_step(
+                self.model_client,
+                messages,
+                tools,
+                recorder=self.recorder,
+                step=step,
+                on_text_delta=on_text_delta,
+                cancellation=cancellation,
+                handle_invocation=handle_invocation,
+                on_tool_result=self.record_tool_result,
+                on_usage=on_usage,
+                metrics=self.metrics,
+                steer=steer,
+                followup=followup,
+                emit=self._emit,
+                agent_name=self.name,
+                stream=stream,
+                **kwargs,
+            )
             await self._emit_event(EventKind.TURN_END, step=step)
 
             if not completion.requested_tools:
+                if completion.should_continue:
+                    continue  # follow-up 注入了消息，再多跑一步而不是直接停止
                 answer = completion.text or ""
                 break
 
