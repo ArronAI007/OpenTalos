@@ -952,6 +952,25 @@ async def test_disabled_mcp_server_tool_absent_from_registry(store, scripted_cli
     assert registry is None or registry.get("get_weather") is None
 
 
+async def test_evict_closes_the_task_s_mcp_tool_connections(store, scripted_client, tmp_path) -> None:
+    """FR-009/SC-006：evict() 现在是 async，且要关闭这个任务持有的全部 MCPTool 持久连接。"""
+    store.create_mcp_server(
+        name="weather", transport="stdio", config=_mcp_demo_server_config(),
+        cached_tools=[{"name": "get_weather", "description": "d", "input_schema": {"type": "object", "properties": {}}}],
+    )
+    runtime = _runtime(store, scripted_client(tool_completions=[]), tmp_path)
+    task = store.create_task("react")
+    await runtime._get_agent(task)
+    tool = runtime._task_mcp_tools[task["id"]][0]
+    await tool.acall({"city": "Beijing"})  # 建立一次真实连接
+    assert tool._client is not None
+
+    await runtime.evict(task["id"])
+
+    assert tool._client is None
+    assert task["id"] not in runtime._task_mcp_tools
+
+
 async def test_a2a_peer_tool_absent_without_url(store, scripted_client, tmp_path) -> None:
     client = scripted_client(tool_completions=[])
     runtime = ChatRuntime(

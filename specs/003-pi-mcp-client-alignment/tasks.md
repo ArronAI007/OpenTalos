@@ -118,14 +118,14 @@ call_tool+客户端发起的取消+服务端发起的 ping，不需要真实子�
 > 传输）：现有全部真实配置的 MCP 服务器都是 stdio，必须有可用的真实传输才能端到端迁移/验证，不能
 > 只在内存传输层面完成这一步。
 
-- [ ] T030 [US1] 删除 `packages/mcpclient/client.py` 里的 `connect_and_list_tools()`/`connect_and_call_tool()` 两个一次性连接函数（FR-009 确认的刻意替换，不保留兼容包装）（依赖 T021、T026-T028）
-- [ ] T031 [US1] 改造 `packages/mcpclient/tools.py` 的 `MCPTool`：新增 `self._client: MCPClient | None = None`，`acall()` 首次调用时 `await self._client.connect()`（懒连接），之后复用同一个连接；新增 `async def aclose(self) -> None`（`self._client` 非空时调用其 `close()`）；捕获异常的分支继续认 `MCPConnectionError`（含新子类）不变（依赖 T030）
-- [ ] T032 [US1] 改造 `apps/api/main.py`：`POST /api/mcp/servers`（创建）和 `POST /api/mcp/servers/{server_id}/refresh` 两条路由，把 `connect_and_list_tools(server_config)` 替换成 `async with MCPClient(server_config) as client: tools = await client.list_tools()`（依赖 T030）
-- [ ] T033 [US1] 改造 `apps/api/runtime.py`：`AgentRuntime` 新增 `self._task_mcp_tools: dict[str, list[MCPTool]] = {}`；`_get_agent()` 在 `_build_registry(task["id"])` 调用之后，把 `_ensure_mcp_tools()` 构造出的 `MCPTool` 列表存入 `self._task_mcp_tools[task["id"]]`；`evict(task_id)` 改成 `async def evict`，新增 `for tool in self._task_mcp_tools.pop(task_id, []): await tool.aclose()`；核实并更新全部调用 `evict()` 的现有调用点加上 `await`（依赖 T031）
-- [ ] T034 [US1] 改写 `tests/mcpclient/test_mcpclient_client.py`：原有依赖 `connect_and_list_tools`/`connect_and_call_tool` 的断言改成 `MCPClient(...).connect()`/`list_tools()`/`call_tool()`/`close()` 的等价场景（含原有的 bad-command 连接失败、stdio env 透传、HTTP 真机三类场景），覆盖面不低于现状（依赖 T030-T033）
-- [ ] T035 [US1] 改写 `tests/mcpclient/test_mcpclient_tools.py`：`MCPTool.acall()` 相关断言跟着新内部实现调整（公开行为——`ToolOutcome` 状态/文本内容——保持不变）；新增一条"同一个 `MCPTool` 连续 `acall()` 两次，底层只建立一次连接"的断言（对应 SC-006，可以通过给 `MCPClient.connect` 打点计数验证）（依赖 T031）
-- [ ] T036 [US1] 核实并更新 `tests/apps/api/test_api_routes.py` 等现有测试：如果直接 mock 了 `connect_and_list_tools`，改成 mock `MCPClient` 的等价入口；补一条 `evict()` 变成 `async def` 后现有调用点仍然正确工作的回归测试（依赖 T032-T033）
-- [ ] T037 [US1] 运行 `.venv/bin/pytest tests/mcpclient/ tests/apps/api/ -v`，确认全部通过（GREEN checkpoint，SC-002/SC-006 成立）
+- [X] T030 [US1] 删除 `packages/mcpclient/client.py` 里的 `connect_and_list_tools()`/`connect_and_call_tool()` 两个一次性连接函数（FR-009 确认的刻意替换，不保留兼容包装）（依赖 T021、T026-T028）
+- [X] T031 [US1] 改造 `packages/mcpclient/tools.py` 的 `MCPTool`：新增 `self._client: MCPClient | None = None`，`acall()` 首次调用时 `await self._client.connect()`（懒连接），之后复用同一个连接；新增 `async def aclose(self) -> None`（`self._client` 非空时调用其 `close()`）；捕获异常的分支继续认 `MCPConnectionError`（含新子类）不变（依赖 T030）
+- [X] T032 [US1] 改造 `apps/api/main.py`：`POST /api/mcp/servers`（创建）和 `POST /api/mcp/servers/{server_id}/refresh` 两条路由，把 `connect_and_list_tools(server_config)` 替换成 `async with MCPClient(server_config) as client: tools = await client.list_tools()`（依赖 T030）
+- [X] T033 [US1] 改造 `apps/api/runtime.py`：`AgentRuntime` 新增 `self._task_mcp_tools: dict[str, list[MCPTool]] = {}`；`_get_agent()` 在 `_build_registry(task["id"])` 调用之后，把 `_ensure_mcp_tools()` 构造出的 `MCPTool` 列表存入 `self._task_mcp_tools[task["id"]]`；`evict(task_id)` 改成 `async def evict`，新增 `for tool in self._task_mcp_tools.pop(task_id, []): await tool.aclose()`；核实并更新全部调用 `evict()` 的现有调用点加上 `await`（依赖 T031）
+- [X] T034 [US1] 改写 `tests/mcpclient/test_mcpclient_client.py`：原有依赖 `connect_and_list_tools`/`connect_and_call_tool` 的断言改成 `MCPClient(...).connect()`/`list_tools()`/`call_tool()`/`close()` 的等价场景（含原有的 bad-command 连接失败、stdio env 透传、HTTP 真机三类场景），覆盖面不低于现状（依赖 T030-T033）
+- [X] T035 [US1] 改写 `tests/mcpclient/test_mcpclient_tools.py`：`MCPTool.acall()` 相关断言跟着新内部实现调整（公开行为——`ToolOutcome` 状态/文本内容——保持不变）；新增一条"同一个 `MCPTool` 连续 `acall()` 两次，底层只建立一次连接"的断言（对应 SC-006，可以通过给 `MCPClient.connect` 打点计数验证）（依赖 T031）
+- [X] T036 [US1] 核实并更新 `tests/apps/api/test_api_routes.py` 等现有测试：如果直接 mock 了 `connect_and_list_tools`，改成 mock `MCPClient` 的等价入口；补一条 `evict()` 变成 `async def` 后现有调用点仍然正确工作的回归测试（依赖 T032-T033）
+- [X] T037 [US1] 运行 `.venv/bin/pytest tests/mcpclient/ tests/apps/api/ -v`，确认全部通过（GREEN checkpoint，SC-002/SC-006 成立）
 
 **Checkpoint**：真实调用方已完整迁移到持久会话模型，现状的"添加/刷新服务器"和"模型调用 MCP 工
 具"两条用户可见路径继续可用。

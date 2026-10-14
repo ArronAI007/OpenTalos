@@ -152,14 +152,19 @@ class MCPClient:
         self._transport = transport if transport is not None else self._build_transport()
         self._transport.on_message = self._handle_message
         self._transport.on_close = self._handle_close
-        await self._transport.start()
-        capabilities = ClientCapabilities(roots={"listChanged": False} if self._roots is not None else None)
-        params = {
-            "protocolVersion": SUPPORTED_PROTOCOL_VERSIONS[0],
-            "capabilities": {k: v for k, v in vars(capabilities).items() if v is not None},
-            "clientInfo": {"name": self._client_info.name, "version": self._client_info.version},
-        }
-        result = await self._request("initialize", params, timeout_seconds=self._default_timeout_seconds)
+        try:
+            await self._transport.start()
+            capabilities = ClientCapabilities(roots={"listChanged": False} if self._roots is not None else None)
+            params = {
+                "protocolVersion": SUPPORTED_PROTOCOL_VERSIONS[0],
+                "capabilities": {k: v for k, v in vars(capabilities).items() if v is not None},
+                "clientInfo": {"name": self._client_info.name, "version": self._client_info.version},
+            }
+            result = await self._request("initialize", params, timeout_seconds=self._default_timeout_seconds)
+        except MCPConnectionError:
+            raise
+        except Exception as exc:  # noqa: BLE001 — 握手窗口期的任何失败都统一包成 MCPConnectionError
+            raise MCPConnectionError(f"{type(exc).__name__}: {exc}") from exc
         negotiated_version = result.get("protocolVersion")
         if negotiated_version not in SUPPORTED_PROTOCOL_VERSIONS:
             await self._transport.close()

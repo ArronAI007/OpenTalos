@@ -4,7 +4,7 @@ from typing import Any
 from tool.outcome import ToolOutcome
 from tool.tool import Tool, ToolParameter
 
-from .client import MCPConnectionError, MCPServerConfig, MCPToolInfo, connect_and_call_tool
+from .client import MCPClient, MCPConnectionError, MCPServerConfig, MCPToolInfo
 
 
 def _json_schema_to_parameters(schema: dict) -> list[ToolParameter]:
@@ -39,13 +39,28 @@ class MCPTool(Tool):
         )
         self._server_config = server_config
         self._tool_info = tool_info
+        self._client: MCPClient | None = None
 
     def parameters(self) -> list[ToolParameter]:
         return _json_schema_to_parameters(self._tool_info.input_schema)
 
     async def acall(self, arguments: dict[str, Any]) -> ToolOutcome:
         try:
-            result = await connect_and_call_tool(self._server_config, self._tool_info.name, arguments)
+            if self._client is None:
+                client = MCPClient(self._server_config)
+                await client.connect()
+                self._client = client
+            result = await self._client.call_tool(self._tool_info.name, arguments)
         except MCPConnectionError as error:
             return ToolOutcome.error(str(error))
-        return ToolOutcome.ok(result)
+        # 现状的纯文本提取（和 connect_and_call_tool 时代行为等价）；Phase 7（User Story 4）会把
+        # 这一段换成 to_llm_content() + 压平，正确处理图片/嵌入资源/structuredContent。
+        text = "\n".join(getattr(block, "text", str(block)) for block in result.content)
+        if result.is_error:
+            return ToolOutcome.error(f"tool call returned an error: {text}")
+        return ToolOutcome.ok(text)
+
+    async def aclose(self) -> None:
+        if self._client is not None:
+            await self._client.close()
+            self._client = None

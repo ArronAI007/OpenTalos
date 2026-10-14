@@ -62,12 +62,27 @@ class TestMCPTool:
         assert self._tool().untrusted_output is True
 
     async def test_acall_returns_real_result(self) -> None:
-        outcome = await self._tool().acall({"city": "Beijing"})
-        assert outcome.status == OutcomeStatus.OK
-        assert "Beijing" in outcome.output
+        tool = self._tool()
+        try:
+            outcome = await tool.acall({"city": "Beijing"})
+            assert outcome.status == OutcomeStatus.OK
+            assert "Beijing" in outcome.output
+        finally:
+            await tool.aclose()
 
     async def test_acall_failure_becomes_error_outcome(self) -> None:
         bad_server = MCPServerConfig(transport="stdio", command="no-such-executable-xyz", args=[])
         tool = MCPTool(bad_server, MCPToolInfo(name="x", description="", input_schema={}))
         outcome = await tool.acall({})
         assert outcome.status == OutcomeStatus.ERROR
+
+    async def test_acall_reuses_the_same_connection_across_calls(self) -> None:
+        """SC-006：同一个 MCPTool 连续 acall() 两次，底层只建立一次连接。"""
+        tool = self._tool()
+        try:
+            await tool.acall({"city": "Beijing"})
+            client_after_first_call = tool._client
+            await tool.acall({"city": "Shanghai"})
+            assert tool._client is client_after_first_call
+        finally:
+            await tool.aclose()

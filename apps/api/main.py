@@ -21,7 +21,7 @@ if str(_PACKAGES_DIR) not in sys.path:
 from agentgen import AgentGenerationError, generate_agent_spec  # noqa: E402
 from db import ChatStore  # noqa: E402
 from deepresearch import run_research, start_live_run, stream_run_events  # noqa: E402
-from mcpclient.client import MCPConnectionError, MCPServerConfig, connect_and_list_tools  # noqa: E402
+from mcpclient.client import MCPClient, MCPConnectionError, MCPServerConfig  # noqa: E402
 from evaluation import (  # noqa: E402
     EVAL_AGENT_TYPES,
     add_eval_case,
@@ -331,7 +331,7 @@ def create_app(runtime: ChatRuntime | None = None, eval_cases_path: Path | None 
     async def delete_task(task_id: str) -> None:
         if not store.delete_task(task_id):
             raise HTTPException(404, "task not found")
-        runtime.evict(task_id)
+        await runtime.evict(task_id)
 
     @app.post("/api/tasks/{task_id}/stop")
     async def stop_stream(task_id: str) -> dict:
@@ -366,7 +366,7 @@ def create_app(runtime: ChatRuntime | None = None, eval_cases_path: Path | None 
         if not store.delete_turn(task_id, message_id):
             raise HTTPException(404, "user message not found")
         # 缓存 agent 的 transcript 仍含被删内容，逐出强制下轮从 DB 重放。
-        runtime.evict(task_id)
+        await runtime.evict(task_id)
 
     @app.post("/api/tasks/{task_id}/messages")
     async def post_message(task_id: str, request: PostMessageRequest) -> StreamingResponse:
@@ -600,7 +600,8 @@ def create_app(runtime: ChatRuntime | None = None, eval_cases_path: Path | None 
             env=request.env,
         )
         try:
-            tools = await connect_and_list_tools(server_config)
+            async with MCPClient(server_config) as client:
+                tools = await client.list_tools()
         except MCPConnectionError as error:
             raise HTTPException(502, str(error)) from error
         config = (
@@ -633,7 +634,8 @@ def create_app(runtime: ChatRuntime | None = None, eval_cases_path: Path | None 
             raise HTTPException(404, "server not found")
         server_config = MCPServerConfig(transport=existing["transport"], **existing["config"])
         try:
-            tools = await connect_and_list_tools(server_config)
+            async with MCPClient(server_config) as client:
+                tools = await client.list_tools()
         except MCPConnectionError as error:
             return store.update_mcp_server_probe_result(server_id, last_error=str(error))
         cached_tools = [

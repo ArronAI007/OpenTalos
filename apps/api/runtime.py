@@ -175,6 +175,9 @@ class ChatRuntime:
         self._pending_approvals: dict[str, tuple[str, asyncio.Future[bool]]] = {}
         self._agents: dict[str, Agent] = {}
         self._registries: dict[str, EventToolRegistry] = {}
+        # 本次任务构造出的 MCPTool 实例（各自持有一个持久 MCPClient 连接）：evict() 时逐个
+        # 关闭，避免连接/子进程随 Agent 缓存逐出而悄悄泄漏。
+        self._task_mcp_tools: dict[str, list[MCPTool]] = {}
         self._task_locks: dict[str, asyncio.Lock] = {}
         # 每 task 的活动运行：事件日志/停止信号与连接解耦（断连不中止、可续传）。
         self._runs: dict[str, _LiveRun] = {}
@@ -375,6 +378,9 @@ class ChatRuntime:
             compaction_token_limit=self._compaction_token_limit,
             approval_gate=self._gate_for(task["id"]),
         )
+        # 这次 _ensure_mcp_tools() 构造出的 MCPTool 实例现在各自持有一个持久连接（见
+        # MCPTool.acall()），和这个任务的 Agent 同生命周期：evict() 时一并关闭。
+        self._task_mcp_tools[task["id"]] = list(self._mcp_tools)
 
         # 压缩成功后落一份 Surface 快照（summary + 保留近期）到 DB：重启据此恢复、不重新压。
         async def _persist_checkpoint() -> None:
@@ -421,12 +427,14 @@ class ChatRuntime:
         if run is not None and not run.done:
             run.stop_event.set()
 
-    def evict(self, task_id: str) -> None:
+    async def evict(self, task_id: str) -> None:
         # 调用方须保证该任务当前没有进行中的流：pop 掉锁对象后，新流会 setdefault 造出
         # 一把新锁，同一任务的两条流会并发跑，可能串流。
         self._agents.pop(task_id, None)
         self._registries.pop(task_id, None)
         self._task_locks.pop(task_id, None)
+        for tool in self._task_mcp_tools.pop(task_id, []):
+            await tool.aclose()
 
     async def steer(self, task_id: str, content: str) -> bool:
         """运行中注入一条用户消息：落 user 行、下发 user_stored、入队待 agent 下一步轮询采用
