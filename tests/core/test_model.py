@@ -842,3 +842,58 @@ async def test_astream_with_tools_does_not_retry_after_a_delta_was_emitted():
 
     assert seen == ["partial"]
     assert calls["n"] == 1
+
+
+class TestNamedProviderKeyAndBaseUrlResolution:
+    """User Story 1：按名字选择预置 Provider，自动套用对应的密钥环境变量和默认服务地址。"""
+
+    def test_unknown_provider_raises_at_construction_time(self, monkeypatch) -> None:
+        monkeypatch.delenv("MODEL_API_KEY", raising=False)
+        with pytest.raises(SettingsError, match="Unknown MODEL_PROVIDER"):
+            ModelClient(provider="no-such-provider", model_name="m", api_key="k")
+
+    def test_provider_specific_env_var_wins_over_generic_model_api_key(self, monkeypatch) -> None:
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "deepseek-key")
+        monkeypatch.setenv("MODEL_API_KEY", "generic-key")
+        client = ModelClient(provider="deepseek", model_name="deepseek-chat")
+        assert client.api_key == "deepseek-key"
+
+    def test_only_generic_model_api_key_set_matches_current_behavior(self, monkeypatch) -> None:
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.setenv("MODEL_API_KEY", "generic-key")
+        monkeypatch.setattr("core.model.AsyncAnthropic", lambda **kwargs: SimpleNamespace())
+        client = ModelClient(provider="anthropic", model_name="claude-sonnet-5")
+        assert client.api_key == "generic-key"
+
+        monkeypatch.setattr("core.model.AsyncOpenAI", lambda **kwargs: SimpleNamespace())
+        compatible = ModelClient(provider="openai-compatible", model_name="m", base_url="http://x")
+        assert compatible.api_key == "generic-key"
+
+        monkeypatch.delenv("MODEL_API_KEY", raising=False)
+        mock_client = ModelClient(provider="mock")
+        assert mock_client.api_key == "mock"
+
+    def test_explicit_base_url_overrides_provider_default(self, monkeypatch) -> None:
+        monkeypatch.delenv("MODEL_BASE_URL", raising=False)
+        client = ModelClient(
+            provider="deepseek", model_name="deepseek-chat", api_key="k", base_url="https://custom-mirror.example"
+        )
+        assert client.base_url == "https://custom-mirror.example"
+
+    def test_model_base_url_env_overrides_provider_default(self, monkeypatch) -> None:
+        monkeypatch.setenv("MODEL_BASE_URL", "https://custom-mirror.example")
+        client = ModelClient(provider="deepseek", model_name="deepseek-chat", api_key="k")
+        assert client.base_url == "https://custom-mirror.example"
+
+    def test_named_providers_use_their_own_default_base_url(self, monkeypatch) -> None:
+        monkeypatch.delenv("MODEL_BASE_URL", raising=False)
+        monkeypatch.setattr("core.model.AsyncOpenAI", lambda **kwargs: SimpleNamespace())
+
+        openai_client = ModelClient(provider="openai", model_name="gpt-4o", api_key="k")
+        assert openai_client.base_url is None  # 用 OpenAI SDK 自己的默认端点
+
+        deepseek_client = ModelClient(provider="deepseek", model_name="deepseek-chat", api_key="k")
+        assert deepseek_client.base_url == "https://api.deepseek.com"
+
+        moonshot_client = ModelClient(provider="moonshot", model_name="moonshot-v1-128k", api_key="k")
+        assert moonshot_client.base_url == "https://api.moonshot.cn/v1"

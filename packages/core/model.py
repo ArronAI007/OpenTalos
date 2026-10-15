@@ -21,6 +21,7 @@ from openai import APIConnectionError as OpenAIConnectionError, AsyncOpenAI
 
 from .errors import ModelError, SettingsError
 from .protocol import Completion, DEFAULT_THINKING_BUDGETS, StreamSummary, ThinkingLevel, ToolCompletion, ToolInvocation
+from .providers import get_provider_preset
 
 # reasoning_effort（旧扁平机制）的三个字面量档位和 thinking_level 七档之间的等价映射：
 # 既用于从构造期的 reasoning_effort 折算出一个初始 thinking_level（向后兼容），也用于把
@@ -487,13 +488,14 @@ class ClaudeBackend(ModelBackend):
 def create_model_backend(
     provider: str, *, api_key: str, base_url: str | None, timeout: int, model_name: str
 ) -> ModelBackend:
-    if provider == "anthropic":
+    # 未注册的 provider 名字在这里统一报错（get_provider_preset 内部实现），
+    # ModelClient.__init__ 也会更早地调用同一个函数——两处都调用同一个单一来源，不是重复校验。
+    backend = get_provider_preset(provider).backend
+    if backend == "anthropic":
         return ClaudeBackend(api_key=api_key, base_url=base_url, timeout=timeout, model_name=model_name)
-    if provider == "openai-compatible":
+    if backend == "openai-compatible":
         return OpenAICompatibleBackend(api_key=api_key, base_url=base_url, timeout=timeout, model_name=model_name)
-    if provider == "mock":
-        return FakeModelBackend(api_key=api_key, base_url=base_url, timeout=timeout, model_name=model_name)
-    raise SettingsError(f'Unknown MODEL_PROVIDER "{provider}". Supported: anthropic, openai-compatible, mock.')
+    return FakeModelBackend(api_key=api_key, base_url=base_url, timeout=timeout, model_name=model_name)
 
 
 class ModelClient:
@@ -515,9 +517,17 @@ class ModelClient:
         self.provider = provider or os.getenv("MODEL_PROVIDER")
         if not self.provider:
             raise SettingsError("必须提供 provider（provider 参数或 MODEL_PROVIDER 环境变量）")
+        # 未注册的 provider 名字在这里就报错（构造阶段，不是第一次发请求时）；查到的 preset 同时
+        # 驱动下面的密钥/base_url 解析优先级，以及后端构造时的声明式请求参数怪癖。
+        preset = get_provider_preset(self.provider)
+        self._preset = preset
 
         self.model_name = model_name or os.getenv("MODEL_NAME")
-        self.api_key = api_key or os.getenv("MODEL_API_KEY")
+        self.api_key = (
+            api_key
+            or (os.getenv(preset.api_key_env_var) if preset.api_key_env_var else None)
+            or os.getenv("MODEL_API_KEY")
+        )
         if self.provider == "mock":
             self.model_name = self.model_name or "mock-model"
             self.api_key = self.api_key or "mock"
@@ -527,7 +537,7 @@ class ModelClient:
             if not self.api_key:
                 raise SettingsError("必须提供 API 密钥（api_key 参数或 MODEL_API_KEY 环境变量）")
 
-        self.base_url = base_url or os.getenv("MODEL_BASE_URL")
+        self.base_url = base_url or os.getenv("MODEL_BASE_URL") or preset.default_base_url
         timeout_env = os.getenv("MODEL_TIMEOUT")
         self.timeout = timeout if timeout is not None else (int(timeout_env) if timeout_env else DEFAULT_TIMEOUT_SECONDS)
 
