@@ -213,17 +213,17 @@
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
-- [ ] T030 [P] 更新 `.env.example`：在现状 `MODEL_PROVIDER=` 那一行附近补充注释，列出新支持的
+- [X] T030 [P] 更新 `.env.example`：在现状 `MODEL_PROVIDER=` 那一行附近补充注释，列出新支持的
       具名 provider 名字（`anthropic`/`openai`/`deepseek`/`moonshot`/`openai-compatible`/
       `mock`）和各自对应的专属密钥环境变量名（`ANTHROPIC_API_KEY`/`OPENAI_API_KEY`/
       `DEEPSEEK_API_KEY`/`MOONSHOT_API_KEY`），说明"专属变量优先于通用 `MODEL_API_KEY`"这条优
       先级规则
-- [ ] T031 运行 `.venv/bin/pytest`（全量），和 T001 记录的基线对比，确认 0 回归、测试数只增不
+- [X] T031 运行 `.venv/bin/pytest`（全量），和 T001 记录的基线对比，确认 0 回归、测试数只增不
       减
-- [ ] T032 运行 `.venv/bin/python scripts/check_core_boundary.py`，确认依然零违规（新增的
+- [X] T032 运行 `.venv/bin/python scripts/check_core_boundary.py`，确认依然零违规（新增的
       `providers.py`/`model_catalog.py` 都不 import 其他 `packages/*`）
-- [ ] T033 [P] 执行 quickstart.md 的全部 5 个验证场景，确认每条命令按文档预期工作
-- [ ] T034 [P] 更新项目 memory（`project_opentalos_python_rebuild.md` 追加本次 shipped 记录 +
+- [X] T033 [P] 执行 quickstart.md 的全部 5 个验证场景，确认每条命令按文档预期工作
+- [X] T034 [P] 更新项目 memory（`project_opentalos_python_rebuild.md` 追加本次 shipped 记录 +
       `MEMORY.md` 索引行同步）
 
 ---

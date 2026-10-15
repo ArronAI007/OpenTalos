@@ -47,7 +47,7 @@ provider 专属环境变量优先于通用 `MODEL_API_KEY`；只设置通用 `MO
 ## 场景 3：流式用量上报的声明式配置（User Story 3）
 
 ```bash
-.venv/bin/pytest tests/core/test_model.py -k stream_usage -v
+.venv/bin/pytest tests/core/test_model.py -k DeclarativeProviderQuirks -v
 ```
 
 预期：声明 `supports_stream_usage=False` 的（测试专属合成）provider，首次流式请求就不带
