@@ -159,15 +159,24 @@ class FakeModelBackend(ModelBackend):
 
 
 class OpenAICompatibleBackend(ModelBackend):
-    def __init__(self, *, api_key: str, base_url: str | None, timeout: int, model_name: str) -> None:
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        base_url: str | None,
+        timeout: int,
+        model_name: str,
+        supports_stream_usage: bool | None = None,
+    ) -> None:
         super().__init__(api_key=api_key, base_url=base_url, timeout=timeout, model_name=model_name)
         client_kwargs: dict[str, Any] = {"api_key": api_key, "timeout": timeout}
         if base_url is not None:
             client_kwargs["base_url"] = base_url
         self._client = AsyncOpenAI(**client_kwargs)
-        # 是否随流式请求发送 stream_options={include_usage}。部分 openai-compatible 供应商不支持
-        # 该字段（请求构造即 400），首次被拒后置 False，后续不再重试，避免每次流式都白打一次请求。
-        self._stream_usage_enabled = True
+        # 是否随流式请求发送 stream_options={include_usage}。None（默认）= 不知道，用现状的反应
+        # 式学习（先试、首次被拒后置 False 不再重试）；声明了 True/False 时直接采用，首次请求就
+        # 生效，不需要试探（User Story 3）。
+        self._stream_usage_enabled = True if supports_stream_usage is None else supports_stream_usage
 
     @staticmethod
     def _extract_usage(usage: Any) -> dict[str, int]:
@@ -490,11 +499,14 @@ def create_model_backend(
 ) -> ModelBackend:
     # 未注册的 provider 名字在这里统一报错（get_provider_preset 内部实现），
     # ModelClient.__init__ 也会更早地调用同一个函数——两处都调用同一个单一来源，不是重复校验。
-    backend = get_provider_preset(provider).backend
-    if backend == "anthropic":
+    preset = get_provider_preset(provider)
+    if preset.backend == "anthropic":
         return ClaudeBackend(api_key=api_key, base_url=base_url, timeout=timeout, model_name=model_name)
-    if backend == "openai-compatible":
-        return OpenAICompatibleBackend(api_key=api_key, base_url=base_url, timeout=timeout, model_name=model_name)
+    if preset.backend == "openai-compatible":
+        return OpenAICompatibleBackend(
+            api_key=api_key, base_url=base_url, timeout=timeout, model_name=model_name,
+            supports_stream_usage=preset.supports_stream_usage,
+        )
     return FakeModelBackend(api_key=api_key, base_url=base_url, timeout=timeout, model_name=model_name)
 
 
@@ -606,8 +618,11 @@ class ModelClient:
                 budget = self.thinking_budgets.get(thinking_level, DEFAULT_THINKING_BUDGETS[thinking_level])
                 call_kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
             else:
-                # OpenAI 兼容后端（含 mock）只认识三个字面量——降维映射，绝不发送新字符串。
-                call_kwargs["reasoning_effort"] = _THINKING_LEVEL_TO_REASONING_EFFORT[thinking_level]
+                # OpenAI 兼容后端（含 mock）只认识三个字面量——降维映射，绝不发送新字符串。字段
+                # 名默认是 "reasoning_effort"，具名 provider 声明了 reasoning_param_name 时改用
+                # 那个名字（User Story 3，首批全部留空，行为不变）。
+                field_name = self._preset.reasoning_param_name or "reasoning_effort"
+                call_kwargs[field_name] = _THINKING_LEVEL_TO_REASONING_EFFORT[thinking_level]
         call_kwargs.update(kwargs)
         return call_kwargs
 

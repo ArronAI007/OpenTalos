@@ -179,32 +179,32 @@
 
 ### Tests for User Story 3 ⚠️ 先写，确认失败，再实现
 
-- [ ] T023 [P] [US3] 失败测试：构造 `OpenAICompatibleBackend(..., supports_stream_usage=False)`
+- [X] T023 [P] [US3] 失败测试：构造 `OpenAICompatibleBackend(..., supports_stream_usage=False)`
       （测试专属合成配置，不对应任何真实服务商），首次流式请求的调用参数里没有
       `stream_options`，不经历"先失败一次再降级"，写入 `tests/core/test_model.py`
-- [ ] T024 [P] [US3] 失败测试：构造 `OpenAICompatibleBackend(..., supports_stream_usage=None)`
+- [X] T024 [P] [US3] 失败测试：构造 `OpenAICompatibleBackend(..., supports_stream_usage=None)`
       （对应现状 `openai-compatible` 的默认行为），首次流式请求仍然尝试带
       `stream_options.include_usage`，失败后降级并记住——和改动前完全一致，写入
       `tests/core/test_model.py`
-- [ ] T025 [P] [US3] 失败测试：`preset.reasoning_param_name="custom_reasoning_field"` 时，
+- [X] T025 [P] [US3] 失败测试：`preset.reasoning_param_name="custom_reasoning_field"` 时，
       `ModelClient._build_call_kwargs` 构造出的请求参数里用 `"custom_reasoning_field"` 这个键
       承载推理强度，而不是 `"reasoning_effort"`；`reasoning_param_name=None`（现状全部 6 个预
       设的取值）时行为和改动前完全一致，写入 `tests/core/test_model.py`
 
 ### Implementation for User Story 3
 
-- [ ] T026 [US3] `OpenAICompatibleBackend.__init__` 新增可选构造参数
+- [X] T026 [US3] `OpenAICompatibleBackend.__init__` 新增可选构造参数
       `supports_stream_usage: bool | None = None`；`self._stream_usage_enabled` 的初值改为
       `True if supports_stream_usage is None else supports_stream_usage`（`None` 时保留现状
       反应式学习；非 `None` 时 `_create_stream()` 直接用声明值，不再需要试探-降级那条分支），
       写入 `packages/core/model.py`（依赖 T023, T024）
-- [ ] T027 [US3] `ModelClient.__init__` 构造 `OpenAICompatibleBackend` 时，把 T009 查到的
+- [X] T027 [US3] `ModelClient.__init__` 构造 `OpenAICompatibleBackend` 时，把 T009 查到的
       `preset.supports_stream_usage` 传给它的新构造参数，写入 `packages/core/model.py`（依赖
       T026）
-- [ ] T028 [US3] `ModelClient._build_call_kwargs` 读取 `preset.reasoning_param_name`（为 `None`
+- [X] T028 [US3] `ModelClient._build_call_kwargs` 读取 `preset.reasoning_param_name`（为 `None`
       时继续用字面量 `"reasoning_effort"`）决定请求参数字典里推理强度字段的键名，写入
       `packages/core/model.py`（依赖 T025）
-- [ ] T029 [US3] 运行 `.venv/bin/pytest tests/core/test_model.py -v`，确认全部通过（GREEN
+- [X] T029 [US3] 运行 `.venv/bin/pytest tests/core/test_model.py -v`，确认全部通过（GREEN
       checkpoint）
 
 **Checkpoint**：全部 3 个 User Story 独立可用。

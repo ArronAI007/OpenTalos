@@ -844,6 +844,79 @@ async def test_astream_with_tools_does_not_retry_after_a_delta_was_emitted():
     assert calls["n"] == 1
 
 
+class TestDeclarativeProviderQuirks:
+    """User Story 3：声明式的流式用量上报支持 + 推理强度字段名覆盖。"""
+
+    async def test_declared_unsupported_stream_usage_skips_the_probe_from_the_first_request(self, monkeypatch) -> None:
+        calls: list[dict] = []
+
+        async def fake_stream():
+            yield SimpleNamespace(
+                choices=[SimpleNamespace(delta=SimpleNamespace(content="hi"), finish_reason="stop")], usage=None
+            )
+
+        async def create(**kwargs):
+            calls.append(kwargs)
+            return fake_stream()
+
+        fake_client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+        monkeypatch.setattr("core.model.AsyncOpenAI", lambda **kwargs: fake_client)
+
+        backend = OpenAICompatibleBackend(
+            api_key="k", base_url=None, timeout=60, model_name="m", supports_stream_usage=False
+        )
+        chunks = [chunk async for chunk in backend.astream([{"role": "user", "content": "hi"}])]
+
+        assert chunks == ["hi"]
+        assert len(calls) == 1  # 没有"先试后降级"那一次额外请求
+        assert "stream_options" not in calls[0]
+
+    async def test_undeclared_provider_keeps_the_reactive_learning_behavior(self, monkeypatch) -> None:
+        calls: list[dict] = []
+
+        async def fake_stream():
+            yield SimpleNamespace(
+                choices=[SimpleNamespace(delta=SimpleNamespace(content="hi"), finish_reason="stop")], usage=None
+            )
+
+        async def create(**kwargs):
+            calls.append(kwargs)
+            if "stream_options" in kwargs:
+                raise RuntimeError("stream_options not supported")
+            return fake_stream()
+
+        fake_client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+        monkeypatch.setattr("core.model.AsyncOpenAI", lambda **kwargs: fake_client)
+
+        backend = OpenAICompatibleBackend(
+            api_key="k", base_url=None, timeout=60, model_name="m", supports_stream_usage=None
+        )
+        chunks = [chunk async for chunk in backend.astream([{"role": "user", "content": "hi"}])]
+
+        assert chunks == ["hi"]
+        assert "stream_options" in calls[0]
+        assert "stream_options" not in calls[1]
+
+    def test_reasoning_param_name_override_changes_the_request_field_name(self, monkeypatch) -> None:
+        from core.providers import ProviderPreset
+
+        monkeypatch.delenv("MODEL_REASONING_EFFORT", raising=False)
+        client = ModelClient(provider="mock", reasoning_effort="low")
+        client._preset = ProviderPreset(
+            name="test-only", default_base_url=None, api_key_env_var=None,
+            supports_stream_usage=None, backend="mock", reasoning_param_name="custom_reasoning_field",
+        )
+        kwargs = client._build_call_kwargs({})
+        assert kwargs["custom_reasoning_field"] == "low"
+        assert "reasoning_effort" not in kwargs
+
+    def test_reasoning_param_name_none_matches_current_behavior(self, monkeypatch) -> None:
+        monkeypatch.delenv("MODEL_REASONING_EFFORT", raising=False)
+        client = ModelClient(provider="mock", reasoning_effort="low")
+        kwargs = client._build_call_kwargs({})
+        assert kwargs["reasoning_effort"] == "low"
+
+
 class TestNamedProviderKeyAndBaseUrlResolution:
     """User Story 1：按名字选择预置 Provider，自动套用对应的密钥环境变量和默认服务地址。"""
 
