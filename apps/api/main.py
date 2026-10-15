@@ -129,6 +129,23 @@ class UpdateMCPServerBody(BaseModel):
     enabled: bool
 
 
+class CreateProviderConfigBody(BaseModel):
+    name: str
+    purpose: str  # 'chat' | 'embedding'
+    backend: str | None = None  # purpose='chat' 时必填
+    base_url: str | None = None
+    api_key: str
+    model_name: str
+
+
+class UpdateProviderConfigBody(BaseModel):
+    name: str | None = None
+    base_url: str | None = None
+    api_key: str | None = None
+    model_name: str | None = None
+    active: bool | None = None
+
+
 class ForgetMemoriesBody(BaseModel):
     strategy: str  # 'importance_based' | 'time_based' | 'capacity_based'
     threshold: float = 0.3
@@ -653,6 +670,39 @@ def create_app(runtime: ChatRuntime | None = None, eval_cases_path: Path | None 
     async def delete_mcp_server_route(server_id: str) -> None:
         if not store.delete_mcp_server(server_id):
             raise HTTPException(404, "server not found")
+
+    @app.post("/api/providers")
+    async def create_provider_config_route(request: CreateProviderConfigBody) -> dict:
+        try:
+            return store.create_provider_config(
+                name=request.name, purpose=request.purpose, backend=request.backend,
+                base_url=request.base_url, api_key=request.api_key, model_name=request.model_name,
+            )
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from error
+
+    @app.get("/api/providers")
+    async def list_provider_configs_route(purpose: str | None = None) -> dict:
+        return {"providers": store.list_provider_configs(purpose=purpose)}
+
+    @app.patch("/api/providers/{config_id}")
+    async def update_provider_config_route(config_id: str, request: UpdateProviderConfigBody) -> dict:
+        updated = store.update_provider_config(
+            config_id, name=request.name, base_url=request.base_url,
+            api_key=request.api_key, model_name=request.model_name,
+        )
+        if updated is None:
+            raise HTTPException(404, "provider config not found")
+        if request.active is True:
+            updated = store.set_provider_config_active(config_id)
+        elif request.active is False:
+            updated = store.set_provider_config_inactive(config_id)
+        return updated
+
+    @app.delete("/api/providers/{config_id}", status_code=204)
+    async def delete_provider_config_route(config_id: str) -> None:
+        if not store.delete_provider_config(config_id):
+            raise HTTPException(404, "provider config not found")
 
     @app.get("/api/mcp/oauth/callback")
     async def mcp_oauth_callback_route(oauth_request: Request, state: str) -> dict:

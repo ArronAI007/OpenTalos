@@ -157,6 +157,11 @@ class ChatRuntime:
     ) -> None:
         self._store = store
         self._model_client = model_client  # None → 首次需要时按 env 构造
+        # 显式注入（测试/脚本路径）时绕过 provider_configs 解析，永远用调用方给的这个实例。
+        self._model_client_overridden = model_client is not None
+        # _resolve_chat_model_client() 为某个新任务专门构造出来的 ModelClient（owned=True）：
+        # 和这个任务的 Agent 同生命周期，evict() 时一并关闭，避免连接泄漏。
+        self._task_model_clients: dict[str, ModelClient] = {}
         # 技能是进程内的文件系统目录（pi 式方案），不再是独立服务。
         self._skills_root = Path(skills_root) if skills_root is not None else _DEFAULT_SKILLS_ROOT
         self._my_skills_path = Path(my_skills_path) if my_skills_path is not None else _DEFAULT_MY_SKILLS_PATH
@@ -219,6 +224,13 @@ class ChatRuntime:
 
     @property
     def model_name(self) -> str:
+        """反映"如果现在构造一个新任务，会用哪个模型名"——有激活的 chat 配置就直接读它的
+        model_name 字段，不为了读一个名字而构造一次完整的 ModelClient。"""
+        if self._model_client_overridden:
+            return self._client().model_name
+        active = self._store.get_active_provider_config("chat")
+        if active is not None:
+            return active["model_name"]
         return self._client().model_name
 
     @property
@@ -230,6 +242,24 @@ class ChatRuntime:
             self._model_client = ModelClient()
         return self._model_client
 
+    def _resolve_chat_model_client(self) -> tuple[ModelClient, bool]:
+        """每个全新 task_id 调用一次：显式注入的 model_client 直接复用（测试/脚本路径，不查
+        provider_configs）；否则查一次 provider_configs 的激活 chat 配置，有则据此构造一个新
+        的 ModelClient；没有就退回进程级默认单例（现状 self._client()）。返回
+        (model_client, owned)——owned=True 表示这是本次新构造、专属这个任务的实例，调用方须在
+        evict() 时关闭它；owned=False 的实例各自有自己的生命周期，不归调用方管。
+        """
+        if self._model_client_overridden:
+            return self._client(), False
+        active = self._store.get_active_provider_config("chat")
+        if active is None:
+            return self._client(), False
+        client = ModelClient(
+            provider=active["backend"], model_name=active["model_name"],
+            api_key=active["api_key"], base_url=active["base_url"],
+        )
+        return client, True
+
     async def aclose(self) -> None:
         """释放运行时持有的模型客户端（httpx 连接池）；未构造过则 no-op。
 
@@ -237,6 +267,8 @@ class ChatRuntime:
         """
         if self._model_client is not None:
             await self._model_client.aclose()
+        for client in self._task_model_clients.values():
+            await client.aclose()
 
     async def suggest_skill_usage(self, name: str, description: str) -> list[str]:
         return await suggest_skill_usage_examples(self._client(), name, description)
@@ -370,7 +402,9 @@ class ChatRuntime:
         await self._ensure_skills()
         await self._ensure_mcp_tools()
         suffix = await self._suffix_for(task)
-        model_client = self._client()
+        model_client, owned = self._resolve_chat_model_client()
+        if owned:
+            self._task_model_clients[task["id"]] = model_client
         # 未显式指定压缩阈值时，用模型能力目录按上下文窗口给一个默认值（已知模型）；模型不在目
         # 录里时回退到改动前的硬编码默认值，不回归（FR-008）。
         effective_compaction_limit = self._compaction_token_limit
@@ -442,6 +476,9 @@ class ChatRuntime:
         self._task_locks.pop(task_id, None)
         for tool in self._task_mcp_tools.pop(task_id, []):
             await tool.aclose()
+        task_model_client = self._task_model_clients.pop(task_id, None)
+        if task_model_client is not None:
+            await task_model_client.aclose()
 
     async def steer(self, task_id: str, content: str) -> bool:
         """运行中注入一条用户消息：落 user 行、下发 user_stored、入队待 agent 下一步轮询采用

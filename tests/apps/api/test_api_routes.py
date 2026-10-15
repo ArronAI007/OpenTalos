@@ -18,7 +18,7 @@ def api(tmp_path, scripted_client):
     client = scripted_client(tool_completions=[
         ToolCompletion(text="pong", requested_tools=[], model_id="mock-model"),
     ])
-    # scripted_client 的 mock 客户端会先读 .env 里的 MODEL_NAME（core/model.py 的 load_dotenv
+    # scripted_client 的 mock 客户端会先读 .env 里的 MODEL_NAME（ai/model.py 的 load_dotenv
     # + "mock 默认值仅在环境变量为空时兜底"），导致 model_name 泄漏成真实模型名。测试里强制回
     # 确定性 mock 名，与 ToolCompletion(model_id="mock-model") 的意图一致。
     client.model_name = "mock-model"
@@ -781,6 +781,75 @@ async def test_delete_mcp_server(api) -> None:
     resp = await api.delete(f"/api/mcp/servers/{created['id']}")
     assert resp.status_code == 204
     assert (await api.get("/api/mcp/servers")).json()["servers"] == []
+
+
+def _provider_config_body(**overrides: Any) -> dict:
+    body = {
+        "name": "my-provider", "purpose": "chat", "backend": "mock",
+        "api_key": "sk-test-key", "model_name": "mock-model",
+    }
+    body.update(overrides)
+    return body
+
+
+async def test_create_provider_config_masks_the_key_in_the_response(api) -> None:
+    resp = await api.post("/api/providers", json=_provider_config_body(api_key="sk-abcdefgh1234"))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["api_key_masked"] == "*" * (len("sk-abcdefgh1234") - 4) + "1234"
+    assert "api_key" not in body
+    assert body["active"] is False
+
+
+async def test_create_chat_provider_config_without_backend_is_rejected(api) -> None:
+    resp = await api.post("/api/providers", json=_provider_config_body(backend=None))
+    assert resp.status_code == 400
+
+
+async def test_create_embedding_provider_config_with_a_backend_is_rejected(api) -> None:
+    resp = await api.post(
+        "/api/providers", json=_provider_config_body(purpose="embedding", backend="mock"),
+    )
+    assert resp.status_code == 400
+
+
+async def test_list_provider_configs_filters_by_purpose(api) -> None:
+    await api.post("/api/providers", json=_provider_config_body(purpose="chat"))
+    await api.post("/api/providers", json=_provider_config_body(purpose="embedding", backend=None))
+
+    listed = await api.get("/api/providers", params={"purpose": "chat"})
+    assert len(listed.json()["providers"]) == 1
+    assert listed.json()["providers"][0]["purpose"] == "chat"
+
+
+async def test_patch_provider_config_active_deactivates_the_previous_one(api) -> None:
+    first = (await api.post("/api/providers", json=_provider_config_body(name="a"))).json()
+    second = (await api.post("/api/providers", json=_provider_config_body(name="b"))).json()
+
+    await api.patch(f"/api/providers/{first['id']}", json={"active": True})
+    resp = await api.patch(f"/api/providers/{second['id']}", json={"active": True})
+
+    assert resp.status_code == 200
+    assert resp.json()["active"] is True
+    listed = (await api.get("/api/providers")).json()["providers"]
+    assert {row["id"]: row["active"] for row in listed} == {first["id"]: False, second["id"]: True}
+
+
+async def test_patch_missing_provider_config_returns_404(api) -> None:
+    resp = await api.patch("/api/providers/no-such-id", json={"active": True})
+    assert resp.status_code == 404
+
+
+async def test_delete_provider_config(api) -> None:
+    created = (await api.post("/api/providers", json=_provider_config_body())).json()
+    resp = await api.delete(f"/api/providers/{created['id']}")
+    assert resp.status_code == 204
+    assert (await api.get("/api/providers")).json()["providers"] == []
+
+
+async def test_delete_missing_provider_config_returns_404(api) -> None:
+    resp = await api.delete("/api/providers/no-such-id")
+    assert resp.status_code == 404
 
 
 async def test_delete_missing_mcp_server_returns_404(api) -> None:

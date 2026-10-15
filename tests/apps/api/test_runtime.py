@@ -1503,3 +1503,80 @@ def test_stream_reply_writes_a_complete_trace_with_task_id(store, scripted_clien
     assert events[0]["payload"]["task_id"] == task["id"]  # HTTP 请求 ↔ trace 关联
     assert events[-1]["event"] == "session_end"
     assert "Session Stats" in traces[0].with_suffix(".html").read_text(encoding="utf-8")
+
+
+class TestChatProviderConfigLiveReload:
+    """ChatRuntime 没有显式注入 model_client 时，_get_agent() 对一个全新 task_id 应该查一次
+    provider_configs 的激活 chat 配置；已缓存的 task 不受后续配置变更影响。"""
+
+    def _runtime_without_explicit_client(self, store: ChatStore, tmp_path: Path) -> ChatRuntime:
+        return ChatRuntime(store, trace_dir=tmp_path / "traces")
+
+    async def test_new_task_uses_the_active_chat_config(self, store: ChatStore, tmp_path: Path) -> None:
+        store.create_provider_config(
+            name="custom", purpose="chat", backend="mock", base_url=None,
+            api_key="sk-custom-key", model_name="custom-model-name",
+        )
+        config = store.list_provider_configs(purpose="chat")[0]
+        store.set_provider_config_active(config["id"])
+        runtime = self._runtime_without_explicit_client(store, tmp_path)
+        task = store.create_task("react")
+
+        agent = await runtime._get_agent(task)
+
+        assert agent.model_client.model_name == "custom-model-name"
+        assert agent.model_client.api_key == "sk-custom-key"
+
+    async def test_already_cached_task_is_unaffected_by_a_later_config_change(
+        self, store: ChatStore, tmp_path: Path
+    ) -> None:
+        store.create_provider_config(
+            name="first", purpose="chat", backend="mock", base_url=None, api_key="k1", model_name="model-one",
+        )
+        first_config = store.list_provider_configs(purpose="chat")[0]
+        store.set_provider_config_active(first_config["id"])
+        runtime = self._runtime_without_explicit_client(store, tmp_path)
+        task = store.create_task("react")
+        first_agent = await runtime._get_agent(task)
+
+        store.create_provider_config(
+            name="second", purpose="chat", backend="mock", base_url=None, api_key="k2", model_name="model-two",
+        )
+        second_config = [c for c in store.list_provider_configs(purpose="chat") if c["name"] == "second"][0]
+        store.set_provider_config_active(second_config["id"])
+
+        cached_again = await runtime._get_agent(task)
+        assert cached_again is first_agent
+        assert cached_again.model_client.model_name == "model-one"
+
+    async def test_falls_back_to_env_construction_when_nothing_is_active(
+        self, store: ChatStore, tmp_path: Path, monkeypatch
+    ) -> None:
+        monkeypatch.setenv("MODEL_PROVIDER", "mock")
+        monkeypatch.setenv("MODEL_NAME", "env-fallback-model")
+        monkeypatch.setenv("MODEL_API_KEY", "env-fallback-key")
+        runtime = self._runtime_without_explicit_client(store, tmp_path)
+        task = store.create_task("react")
+
+        agent = await runtime._get_agent(task)
+
+        assert agent.model_client.model_name == "env-fallback-model"
+
+    async def test_deleting_the_active_config_falls_back_to_env_for_the_next_new_task(
+        self, store: ChatStore, tmp_path: Path, monkeypatch
+    ) -> None:
+        monkeypatch.setenv("MODEL_PROVIDER", "mock")
+        monkeypatch.setenv("MODEL_NAME", "env-fallback-model")
+        monkeypatch.setenv("MODEL_API_KEY", "env-fallback-key")
+        store.create_provider_config(
+            name="temp", purpose="chat", backend="mock", base_url=None, api_key="k", model_name="temp-model",
+        )
+        config = store.list_provider_configs(purpose="chat")[0]
+        store.set_provider_config_active(config["id"])
+        store.delete_provider_config(config["id"])
+        runtime = self._runtime_without_explicit_client(store, tmp_path)
+        task = store.create_task("react")
+
+        agent = await runtime._get_agent(task)
+
+        assert agent.model_client.model_name == "env-fallback-model"

@@ -10,6 +10,7 @@ import {
   BeakerIcon,
   BrainIcon,
   ChartBarIcon,
+  KeyIcon,
   PlugIcon,
   PuzzleIcon,
   SparklesIcon,
@@ -97,6 +98,10 @@ export function Sidebar({ collapsed, mobileOpen, onToggleCollapse, onCloseMobile
         <Link href="/mcp" onClick={onCloseMobile} className={navLinkCls}>
           <PlugIcon />
           MCP
+        </Link>
+        <Link href="/providers" onClick={onCloseMobile} className={navLinkCls}>
+          <KeyIcon />
+          Provider
         </Link>
         <Link href="/memory" onClick={onCloseMobile} className={navLinkCls}>
           <BrainIcon />

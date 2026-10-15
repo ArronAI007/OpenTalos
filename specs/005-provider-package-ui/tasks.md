@@ -161,28 +161,28 @@ User Story 1（纯粹的文件搬移 + 新 Protocol）的 TDD 落脚点是"新�
 
 ### Tests for User Story 2 ⚠️ 先写，确认失败，再实现
 
-- [ ] T012 [P] [US2] 失败测试：`ChatStore.create_provider_config(name=..., purpose="chat",
+- [X] T012 [P] [US2] 失败测试：`ChatStore.create_provider_config(name=..., purpose="chat",
       backend="anthropic", base_url=None, api_key="sk-test", model_name="claude-sonnet-5")`
       创建成功并可以被 `get_provider_config`/`list_provider_configs` 查到；
       `list_provider_configs(purpose="chat")` 只返回该 purpose 的行，写入
       `tests/apps/api/test_db.py`
-- [ ] T013 [P] [US2] 失败测试：`create_provider_config` 在 `purpose` 不是
+- [X] T013 [P] [US2] 失败测试：`create_provider_config` 在 `purpose` 不是
       `"chat"`/`"embedding"` 之一、或 `purpose="chat"` 但 `backend` 缺失/不是
       `"anthropic"`/`"openai-compatible"`/`"mock"` 之一时拒绝（抛出清晰错误，不是数据库约
       束报错），写入 `tests/apps/api/test_db.py`
-- [ ] T014 [P] [US2] 失败测试：`_provider_config_row_to_dict`（或等价的序列化函数）返回的
+- [X] T014 [P] [US2] 失败测试：`_provider_config_row_to_dict`（或等价的序列化函数）返回的
       dict 里，密钥长度 ≤4 时整体是 `"****"`，否则只保留末 4 位、其余替换成 `*`；直接查数据
       库原始行，确认存的是完整明文（证明掩码只在序列化层），写入
       `tests/apps/api/test_db.py`
-- [ ] T015 [P] [US2] 失败测试：`set_provider_config_active(id, purpose="chat")`（或等价方
+- [X] T015 [P] [US2] 失败测试：`set_provider_config_active(id, purpose="chat")`（或等价方
       法名）激活一条后，同 purpose 下此前激活的那条自动变为未激活；跨 purpose 的激活互不影
       响，写入 `tests/apps/api/test_db.py`
-- [ ] T016 [P] [US2] 失败测试：`POST /api/providers`（`purpose="chat"` 缺 `backend` → 400；
+- [X] T016 [P] [US2] 失败测试：`POST /api/providers`（`purpose="chat"` 缺 `backend` → 400；
       `purpose="embedding"` 但传了 `backend` → 400）、`GET /api/providers` 响应体密钥已掩
       码、`PATCH /api/providers/{id}` 传 `{"active": true}` 后同 purpose 下其余行取消激
       活、`DELETE /api/providers/{id}` 成功 204/未知 id 404，写入
       `tests/apps/api/test_api_routes.py`
-- [ ] T017 [P] [US2] 失败测试：构造 `ChatRuntime`，新增并激活一条 `purpose="chat"` 的配置，
+- [X] T017 [P] [US2] 失败测试：构造 `ChatRuntime`，新增并激活一条 `purpose="chat"` 的配置，
       对一个全新的 `task_id` 调用 `_get_agent()`，确认返回的 `Agent` 持有的 `ModelClient`
       使用了这条配置的 `model_name`/`api_key`；对此前已经调用过 `_get_agent()`（已缓存）的
       `task_id` 再次调用，确认返回同一个 `Agent` 实例（配置变更不影响已缓存任务）；删除/取
@@ -191,54 +191,54 @@ User Story 1（纯粹的文件搬移 + 新 Protocol）的 TDD 落脚点是"新�
 
 ### Implementation for User Story 2
 
-- [ ] T018 [US2] 在 `apps/api/db.py` 的 `_SCHEMA` 新增 `provider_configs` 表（字段：`id`
+- [X] T018 [US2] 在 `apps/api/db.py` 的 `_SCHEMA` 新增 `provider_configs` 表（字段：`id`
       TEXT 主键、`created_at` TEXT、`name` TEXT、`purpose` TEXT、`backend` TEXT 可空、
       `base_url` TEXT 可空、`api_key` TEXT 非空、`model_name` TEXT 非空、`active` INTEGER
       默认 0），精确 DDL 见 data-model.md（依赖 T012）
-- [ ] T019 [US2] 在 `apps/api/db.py` 实现 `create_provider_config`（校验 `purpose` ∈
+- [X] T019 [US2] 在 `apps/api/db.py` 实现 `create_provider_config`（校验 `purpose` ∈
       `{"chat","embedding"}`；`purpose="chat"` 时校验 `backend` ∈
       `{"anthropic","openai-compatible","mock"}` 且非空，`purpose="embedding"` 时要求
       `backend` 为空，不满足则抛 `ValueError`/等价异常）+ `get_provider_config` +
       `list_provider_configs(purpose: str | None = None)` + `_provider_config_row_to_dict`
       （密钥掩码：长度 ≤4 → `"****"`，否则 `"*" * (len-4) + key[-4:]`），写入
       `apps/api/db.py`（依赖 T018, T013, T014）
-- [ ] T020 [US2] 在 `apps/api/db.py` 实现 `update_provider_config`（支持更新
+- [X] T020 [US2] 在 `apps/api/db.py` 实现 `update_provider_config`（支持更新
       `name`/`base_url`/`api_key`/`model_name`）+ `set_provider_config_active`（同一事务
       内先把同 `purpose` 的其余行 `active` 置 0，再把目标行置 1）+
       `delete_provider_config`，写入 `apps/api/db.py`（依赖 T019, T015）
-- [ ] T021 [US2] 在 `apps/api/main.py` 新增 `CreateProviderConfigBody`/
+- [X] T021 [US2] 在 `apps/api/main.py` 新增 `CreateProviderConfigBody`/
       `UpdateProviderConfigBody`（Pydantic，字段见 contracts/provider-configs-api.md）+
       `POST /api/providers`、`GET /api/providers`（支持 `?purpose=` 查询参数）、`PATCH
       /api/providers/{id}`、`DELETE /api/providers/{id}` 四个路由，写入 `apps/api/main.py`
       （依赖 T020, T016）
-- [ ] T022 [US2] 在 `apps/api/runtime.py` 实现 `ChatRuntime._resolve_chat_model_client()`
+- [X] T022 [US2] 在 `apps/api/runtime.py` 实现 `ChatRuntime._resolve_chat_model_client()`
       （查 `provider_configs` 表 `purpose="chat"` 且 `active=1` 的行，有则用其字段构造
       `ModelClient`，没有则 `ModelClient()` 无参构造）；`_get_agent()` 对一个还没有缓存
       `Agent` 的 `task_id`，用这个方法替代现状的 `self._client()` 单例缓存；`model_name`
       属性相应改为反映"如果现在构造新任务会用哪个模型"，写入 `apps/api/runtime.py`（依赖
       T021, T017）
-- [ ] T023 [US2] 运行 `.venv/bin/pytest tests/apps/api/test_db.py tests/apps/api/
+- [X] T023 [US2] 运行 `.venv/bin/pytest tests/apps/api/test_db.py tests/apps/api/
       test_api_routes.py tests/apps/api/test_runtime.py -v`，确认全部通过（GREEN
       checkpoint）
-- [ ] T024 [P] [US2] 在 `apps/web/components/ui/icons.tsx` 新增 `KeyIcon`（复用文件里已有
+- [X] T024 [P] [US2] 在 `apps/web/components/ui/icons.tsx` 新增 `KeyIcon`（复用文件里已有
       的 `Icon` 包装函数，lucide 风格钥匙图形）
-- [ ] T025 [P] [US2] 新增 `apps/web/lib/providers-api.ts`：`ProviderConfig`/
+- [X] T025 [P] [US2] 新增 `apps/web/lib/providers-api.ts`：`ProviderConfig`/
       `CreateProviderConfigInput` 类型（data-model.md）+ `createProviderConfig`/
       `listProviderConfigs`/`activateProviderConfig`/`updateProviderConfig`/
       `deleteProviderConfig` 函数，镜像 `lib/mcp-api.ts` 的 `fetchJson` 封装结构
-- [ ] T026 [US2] 新增 `apps/web/app/providers/page.tsx`：镜像 `app/mcp/page.tsx`
+- [X] T026 [US2] 新增 `apps/web/app/providers/page.tsx`：镜像 `app/mcp/page.tsx`
       的结构——已知具名 provider（`anthropic`/`openai`/`deepseek`/`moonshot`，前端硬编码,
       对应各自的 `backend`/默认 `base_url`）快捷新增卡片 + 通用新增表单（名字/用途选择
       chat 时额外出现后端类型下拉/服务地址/密钥/模型名）+ chat 用途配置列表（显示名字/后
       端类型/掩码密钥/激活状态，提供"激活"/删除按钮）+ 复用现状
       `ConfirmDeleteServerDialog` 模式新建 `ConfirmDeleteProviderDialog`（依赖 T024, T025）
-- [ ] T027 [US2] 更新 `apps/web/components/sidebar/Sidebar.tsx`：在现状 `/mcp` 链接附近新增
+- [X] T027 [US2] 更新 `apps/web/components/sidebar/Sidebar.tsx`：在现状 `/mcp` 链接附近新增
       `<Link href="/providers">`（`KeyIcon` + "Provider" 文案），写入
       `apps/web/components/sidebar/Sidebar.tsx`（依赖 T024）
-- [ ] T028 [US2] 更新 `apps/web/components/sidebar/SidebarClient.tsx`：`SidebarRail` 里新
+- [X] T028 [US2] 更新 `apps/web/components/sidebar/SidebarClient.tsx`：`SidebarRail` 里新
       增对应的 `<Link href="/providers">` 图标按钮，写入
       `apps/web/components/sidebar/SidebarClient.tsx`（依赖 T024）
-- [ ] T029 [US2] 新增 `apps/web/app/providers/page.test.ts`，镜像 `app/mcp/page.test.ts`
+- [X] T029 [US2] 新增 `apps/web/app/providers/page.test.ts`，镜像 `app/mcp/page.test.ts`
       的测试风格，覆盖新增/激活/删除交互；运行 `cd apps/web && npx vitest run
       app/providers/page.test.ts`，确认通过（GREEN checkpoint）
 

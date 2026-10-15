@@ -6,6 +6,7 @@ import json
 import sqlite3
 import uuid
 from pathlib import Path
+from typing import Any
 
 from memory import EmbeddingClient, EpisodicMemory, SemanticMemory
 
@@ -60,7 +61,27 @@ CREATE TABLE IF NOT EXISTS mcp_servers (
   cached_tools TEXT NOT NULL,    -- JSON 数组：[{name, description, input_schema}]
   last_error TEXT                -- 最近一次探测/刷新失败的错误信息；成功为 NULL
 );
+CREATE TABLE IF NOT EXISTS provider_configs (
+  id TEXT PRIMARY KEY,
+  created_at TEXT NOT NULL,
+  name TEXT NOT NULL,
+  purpose TEXT NOT NULL,         -- 'chat' | 'embedding'
+  backend TEXT,                  -- 'anthropic' | 'openai-compatible' | 'mock'；purpose='embedding' 时为 NULL
+  base_url TEXT,
+  api_key TEXT NOT NULL,         -- 数据库存明文；序列化成 dict 时必须掩码（见 _provider_config_row_to_dict）
+  model_name TEXT NOT NULL,
+  active INTEGER NOT NULL DEFAULT 0  -- 同一 purpose 下任意时刻最多一行为 1，由应用层保证
+);
 """
+
+_PROVIDER_CONFIG_PURPOSES = {"chat", "embedding"}
+_PROVIDER_CONFIG_CHAT_BACKENDS = {"anthropic", "openai-compatible", "mock"}
+
+
+def _mask_api_key(api_key: str) -> str:
+    if len(api_key) <= 4:
+        return "****"
+    return "*" * (len(api_key) - 4) + api_key[-4:]
 
 
 def _now() -> str:
@@ -369,6 +390,122 @@ class ChatStore:
         with self._connect() as conn:
             cursor = conn.execute("DELETE FROM mcp_servers WHERE id = ?", (server_id,))
             return cursor.rowcount > 0
+
+    def create_provider_config(
+        self, *, name: str, purpose: str, backend: str | None, base_url: str | None, api_key: str, model_name: str
+    ) -> dict:
+        if purpose not in _PROVIDER_CONFIG_PURPOSES:
+            raise ValueError(f"purpose 必须是 {_PROVIDER_CONFIG_PURPOSES} 之一，收到 {purpose!r}")
+        if purpose == "chat":
+            if backend not in _PROVIDER_CONFIG_CHAT_BACKENDS:
+                raise ValueError(f"purpose='chat' 时 backend 必须是 {_PROVIDER_CONFIG_CHAT_BACKENDS} 之一，收到 {backend!r}")
+        elif backend is not None:
+            raise ValueError("purpose='embedding' 时 backend 必须为空")
+
+        config_id = uuid.uuid4().hex
+        now = _now()
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO provider_configs (id, created_at, name, purpose, backend, base_url, api_key, model_name, active)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)",
+                (config_id, now, name, purpose, backend, base_url, api_key, model_name),
+            )
+        return self.get_provider_config(config_id)
+
+    @staticmethod
+    def _provider_config_row_to_dict(row: sqlite3.Row) -> dict:
+        return {
+            "id": row["id"],
+            "created_at": row["created_at"],
+            "name": row["name"],
+            "purpose": row["purpose"],
+            "backend": row["backend"],
+            "base_url": row["base_url"],
+            "api_key_masked": _mask_api_key(row["api_key"]),
+            "model_name": row["model_name"],
+            "active": bool(row["active"]),
+        }
+
+    def get_provider_config(self, config_id: str) -> dict | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM provider_configs WHERE id = ?", (config_id,)).fetchone()
+        return self._provider_config_row_to_dict(row) if row else None
+
+    def list_provider_configs(self, purpose: str | None = None) -> list[dict]:
+        with self._connect() as conn:
+            if purpose is not None:
+                rows = conn.execute(
+                    "SELECT * FROM provider_configs WHERE purpose = ? ORDER BY created_at DESC, rowid DESC",
+                    (purpose,),
+                ).fetchall()
+            else:
+                rows = conn.execute("SELECT * FROM provider_configs ORDER BY created_at DESC, rowid DESC").fetchall()
+        return [self._provider_config_row_to_dict(row) for row in rows]
+
+    def update_provider_config(
+        self,
+        config_id: str,
+        *,
+        name: str | None = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        model_name: str | None = None,
+    ) -> dict | None:
+        fields: list[str] = []
+        values: list[Any] = []
+        for column, value in (("name", name), ("base_url", base_url), ("api_key", api_key), ("model_name", model_name)):
+            if value is not None:
+                fields.append(f"{column} = ?")
+                values.append(value)
+        if not fields:
+            return self.get_provider_config(config_id)
+        values.append(config_id)
+        with self._connect() as conn:
+            cursor = conn.execute(f"UPDATE provider_configs SET {', '.join(fields)} WHERE id = ?", values)
+            if cursor.rowcount == 0:
+                return None
+        return self.get_provider_config(config_id)
+
+    def set_provider_config_active(self, config_id: str) -> dict | None:
+        """同一事务内先把目标行所属 purpose 的其余行 active 置 0，再把目标行置 1。"""
+        with self._connect() as conn:
+            target = conn.execute("SELECT purpose FROM provider_configs WHERE id = ?", (config_id,)).fetchone()
+            if target is None:
+                return None
+            conn.execute("UPDATE provider_configs SET active = 0 WHERE purpose = ?", (target["purpose"],))
+            conn.execute("UPDATE provider_configs SET active = 1 WHERE id = ?", (config_id,))
+        return self.get_provider_config(config_id)
+
+    def set_provider_config_inactive(self, config_id: str) -> dict | None:
+        with self._connect() as conn:
+            cursor = conn.execute("UPDATE provider_configs SET active = 0 WHERE id = ?", (config_id,))
+            if cursor.rowcount == 0:
+                return None
+        return self.get_provider_config(config_id)
+
+    def delete_provider_config(self, config_id: str) -> bool:
+        with self._connect() as conn:
+            cursor = conn.execute("DELETE FROM provider_configs WHERE id = ?", (config_id,))
+            return cursor.rowcount > 0
+
+    def get_active_provider_config(self, purpose: str) -> dict | None:
+        """内部使用：返回明文 `api_key` 的激活配置行（不经过掩码）。只供 `runtime.py`/
+        embedding 工厂这类需要真正构造客户端的调用方使用，绝不能通过 HTTP API 直接暴露。"""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM provider_configs WHERE purpose = ? AND active = 1", (purpose,)
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "id": row["id"],
+            "name": row["name"],
+            "purpose": row["purpose"],
+            "backend": row["backend"],
+            "base_url": row["base_url"],
+            "api_key": row["api_key"],
+            "model_name": row["model_name"],
+        }
 
     @staticmethod
     def _agent_row_to_dict(row: sqlite3.Row) -> dict:

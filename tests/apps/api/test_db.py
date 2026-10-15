@@ -433,3 +433,86 @@ class TestMCPServers:
     def test_delete_missing_returns_false(self, store: ChatStore) -> None:
         assert store.delete_mcp_server("no-such-id") is False
 
+
+class TestProviderConfigs:
+    def test_create_and_get_round_trip(self, store: ChatStore) -> None:
+        created = store.create_provider_config(
+            name="my-anthropic", purpose="chat", backend="anthropic",
+            base_url=None, api_key="sk-test", model_name="claude-sonnet-5",
+        )
+        assert created["name"] == "my-anthropic"
+        assert created["purpose"] == "chat"
+        assert created["backend"] == "anthropic"
+        assert created["model_name"] == "claude-sonnet-5"
+        assert created["active"] is False
+
+        fetched = store.get_provider_config(created["id"])
+        assert fetched == created
+
+    def test_list_filters_by_purpose(self, store: ChatStore) -> None:
+        chat = store.create_provider_config(
+            name="a", purpose="chat", backend="mock", base_url=None, api_key="k", model_name="m",
+        )
+        store.create_provider_config(
+            name="b", purpose="embedding", backend=None, base_url=None, api_key="k", model_name="m",
+        )
+        listed = store.list_provider_configs(purpose="chat")
+        assert [row["id"] for row in listed] == [chat["id"]]
+
+    def test_create_rejects_unknown_purpose(self, store: ChatStore) -> None:
+        with pytest.raises(ValueError):
+            store.create_provider_config(
+                name="a", purpose="bogus", backend=None, base_url=None, api_key="k", model_name="m",
+            )
+
+    def test_create_chat_requires_a_known_backend(self, store: ChatStore) -> None:
+        with pytest.raises(ValueError):
+            store.create_provider_config(
+                name="a", purpose="chat", backend=None, base_url=None, api_key="k", model_name="m",
+            )
+        with pytest.raises(ValueError):
+            store.create_provider_config(
+                name="a", purpose="chat", backend="bogus-backend", base_url=None, api_key="k", model_name="m",
+            )
+
+    def test_api_key_is_masked_in_dict_but_plaintext_in_db(self, store: ChatStore, tmp_path: Path) -> None:
+        created = store.create_provider_config(
+            name="a", purpose="chat", backend="mock", base_url=None, api_key="sk-abcdefgh1234", model_name="m",
+        )
+        assert created["api_key_masked"] == "*" * (len("sk-abcdefgh1234") - 4) + "1234"
+        assert "api_key" not in created
+
+        with sqlite3.connect(tmp_path / "chat.db") as conn:
+            row = conn.execute("SELECT api_key FROM provider_configs WHERE id = ?", (created["id"],)).fetchone()
+        assert row[0] == "sk-abcdefgh1234"
+
+    def test_api_key_short_key_is_fully_masked(self, store: ChatStore) -> None:
+        created = store.create_provider_config(
+            name="a", purpose="chat", backend="mock", base_url=None, api_key="ab", model_name="m",
+        )
+        assert created["api_key_masked"] == "****"
+
+    def test_activating_one_config_deactivates_the_previous_one_in_the_same_purpose(self, store: ChatStore) -> None:
+        first = store.create_provider_config(
+            name="a", purpose="chat", backend="mock", base_url=None, api_key="k", model_name="m",
+        )
+        second = store.create_provider_config(
+            name="b", purpose="chat", backend="mock", base_url=None, api_key="k", model_name="m",
+        )
+        store.set_provider_config_active(first["id"])
+        store.set_provider_config_active(second["id"])
+        assert store.get_provider_config(first["id"])["active"] is False
+        assert store.get_provider_config(second["id"])["active"] is True
+
+    def test_activating_a_config_does_not_affect_other_purposes(self, store: ChatStore) -> None:
+        chat = store.create_provider_config(
+            name="a", purpose="chat", backend="mock", base_url=None, api_key="k", model_name="m",
+        )
+        embedding = store.create_provider_config(
+            name="b", purpose="embedding", backend=None, base_url=None, api_key="k", model_name="m",
+        )
+        store.set_provider_config_active(chat["id"])
+        store.set_provider_config_active(embedding["id"])
+        assert store.get_provider_config(chat["id"])["active"] is True
+        assert store.get_provider_config(embedding["id"])["active"] is True
+
