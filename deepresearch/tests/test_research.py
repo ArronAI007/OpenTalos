@@ -6,11 +6,11 @@ from typing import Any
 import httpx
 import pytest
 from core.protocol import Completion
-from db import ChatStore
+from store import DeepResearchStore
 from websearch.client import TavilyClient
 from websearch.models import SearchResult
 
-from deepresearch import (
+from research import (
     PlanningError,
     _LiveRun,
     _live_runs,
@@ -27,8 +27,8 @@ from deepresearch import (
 
 
 @pytest.fixture
-def store(tmp_path: Path) -> ChatStore:
-    return ChatStore(tmp_path / "chat.db")
+def store(tmp_path: Path) -> DeepResearchStore:
+    return DeepResearchStore(tmp_path / "deepresearch.db")
 
 
 def _tavily_with_results(results: list[SearchResult]) -> TavilyClient:
@@ -158,11 +158,11 @@ class TestRunResearch:
         search_client = _tavily_with_results([
             SearchResult(title="标题", url="https://a.example", content="内容", score=0.9),
         ])
-        run = store.create_deepresearch_run("研究主题")
+        run = store.create_run("研究主题")
 
         await run_research(store, run["id"], client, search_client, "研究主题")
 
-        final = store.get_deepresearch_run(run["id"])
+        final = store.get_run(run["id"])
         assert final["status"] == "completed"
         assert final["report"] == "# 最终报告"
         assert len(final["todos"]) == 3
@@ -170,21 +170,21 @@ class TestRunResearch:
 
     async def test_planning_failure_marks_run_failed(self, store, scripted_client) -> None:
         client = scripted_client(completions=[Completion(text="不是数组", model_id="mock-model")])
-        run = store.create_deepresearch_run("研究主题")
+        run = store.create_run("研究主题")
 
         await run_research(store, run["id"], client, _tavily_erroring(), "研究主题")
 
-        final = store.get_deepresearch_run(run["id"])
+        final = store.get_run(run["id"])
         assert final["status"] == "failed"
         assert final["error"]
 
     async def test_all_todos_failing_marks_run_failed(self, store, scripted_client) -> None:
         client = scripted_client(completions=[Completion(text='["q1","q2","q3"]', model_id="mock-model")])
-        run = store.create_deepresearch_run("研究主题")
+        run = store.create_run("研究主题")
 
         await run_research(store, run["id"], client, _tavily_erroring(), "研究主题")
 
-        final = store.get_deepresearch_run(run["id"])
+        final = store.get_run(run["id"])
         assert final["status"] == "failed"
         assert all(t["status"] == "failed" for t in final["todos"])
 
@@ -199,7 +199,7 @@ class TestRunResearch:
         search_client = _tavily_with_results([
             SearchResult(title="标题", url="https://a.example", content="内容", score=0.9),
         ])
-        run = store.create_deepresearch_run("研究主题")
+        run = store.create_run("研究主题")
         start_live_run(run["id"])
         queue: asyncio.Queue = asyncio.Queue()
         _live_runs[run["id"]].subscribers.append(queue)
@@ -239,7 +239,7 @@ class TestRunResearch:
 
     async def test_broadcasts_run_done_failed_on_planning_failure(self, store, scripted_client) -> None:
         client = scripted_client(completions=[Completion(text="不是数组", model_id="mock-model")])
-        run = store.create_deepresearch_run("研究主题")
+        run = store.create_run("研究主题")
         start_live_run(run["id"])
         queue: asyncio.Queue = asyncio.Queue()
         _live_runs[run["id"]].subscribers.append(queue)
@@ -270,7 +270,7 @@ class TestRunResearch:
         search_client = _tavily_with_results([
             SearchResult(title="标题", url="https://a.example", content="内容", score=0.9),
         ])
-        run = store.create_deepresearch_run("研究主题")
+        run = store.create_run("研究主题")
         start_live_run(run["id"])
         queue: asyncio.Queue = asyncio.Queue()
         _live_runs[run["id"]].subscribers.append(queue)
@@ -284,7 +284,7 @@ class TestRunResearch:
         assert events[-1]["type"] == "run_done"
         assert events[-1]["status"] == "failed"
 
-        final = store.get_deepresearch_run(run["id"])
+        final = store.get_run(run["id"])
         assert final["report"] is None  # 半截文本不落库
 
 
@@ -327,8 +327,8 @@ class TestStreamRunEvents:
         assert events == [{"type": "error", "message": "run not found"}]
 
     async def test_terminal_run_yields_single_snapshot(self, store) -> None:
-        run = store.create_deepresearch_run("topic")
-        store.update_deepresearch_run(run["id"], status="completed", report="# 报告")
+        run = store.create_run("topic")
+        store.update_run(run["id"], status="completed", report="# 报告")
 
         events = [e async for e in stream_run_events(store, run["id"])]
 
@@ -338,7 +338,7 @@ class TestStreamRunEvents:
         assert events[0]["run"]["report"] == "# 报告"
 
     async def test_running_run_yields_snapshot_then_live_events_until_done(self, store) -> None:
-        run = store.create_deepresearch_run("topic")
+        run = store.create_run("topic")
         start_live_run(run["id"])
         live = _live_runs[run["id"]]
         live.partial_report = "部分"

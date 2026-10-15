@@ -1,15 +1,24 @@
-"""DeepResearch：规划 TODO 子任务 → 并行搜索+总结 → 合成带引用报告。应用层功能，定位同
-evaluation.py/suggest.py——不进 packages/*。"""
+"""DeepResearch：规划 TODO 子任务 → 并行搜索+总结 → 合成带引用报告。独立服务的核心编排逻
+辑——通过下面的 sys.path 注入复用仓库里 packages/ai（模型调用）和 packages/websearch（网页
+搜索）已有代码，不重新实现一遍（见 specs/006-extract-deepresearch-service/research.md
+Decision 1）。"""
 import asyncio
 import json
+import sys
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, AsyncIterator
 
-from ai.model import ModelClient
-from websearch.client import TavilyClient
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_PACKAGES_DIR = _REPO_ROOT / "packages"
+if str(_PACKAGES_DIR) not in sys.path:
+    sys.path.insert(0, str(_PACKAGES_DIR))
 
-from db import ChatStore
+from ai.model import ModelClient  # noqa: E402
+from websearch.client import TavilyClient  # noqa: E402
+
+from store import DeepResearchStore
 
 _MIN_TODOS = 3
 _MAX_TODOS = 5
@@ -75,7 +84,7 @@ def _snapshot_with_partial_report(run: dict, live: _LiveRun) -> dict:
     return {**run, "report": live.partial_report}
 
 
-async def stream_run_events(store: ChatStore, run_id: str) -> AsyncIterator[dict]:
+async def stream_run_events(store: DeepResearchStore, run_id: str) -> AsyncIterator[dict]:
     """SSE 端点背后的事件生成器——main.py 只负责把每个 yield 出来的 dict 套上 `_sse()` 格式。
 
     是否要挂起等待实时事件，只认这里刚读到的 DB status，不依赖 _live_runs 是否还有这个
@@ -84,7 +93,7 @@ async def stream_run_events(store: ChatStore, run_id: str) -> AsyncIterator[dict
     已经广播给当时在场的订阅者、_live_runs 条目还没删掉"这个缝隙里订阅进来，会订阅到一个
     再也不会收到任何事件的队列，永远挂起。status 字段是唯一不会有这种中间态的信号。
     """
-    run = await asyncio.to_thread(store.get_deepresearch_run, run_id)
+    run = await asyncio.to_thread(store.get_run, run_id)
     if run is None:
         yield {"type": "error", "message": "run not found"}
         return
@@ -204,18 +213,18 @@ async def _synthesize_report(
     return report.strip()
 
 
-async def _finish(store: ChatStore, run_id: str, **fields: object) -> None:
+async def _finish(store: DeepResearchStore, run_id: str, **fields: object) -> None:
     """统一收尾：落库终态 → 广播 run_done → 清理广播器条目。三条退出路径（规划失败/全部
     TODO 失败/报告合成失败/完整成功）都走这一个函数，避免某条路径漏清理 _live_runs 造成
     进程生命周期内的内存泄漏（不影响正确性——新连接判断"是否还在跑"只看 DB 的 status 字段，
     不依赖 _live_runs 是否还有这个 key——但长期运行会不断攒下已完成 run 的空壳条目）。"""
-    run = await asyncio.to_thread(store.update_deepresearch_run, run_id, **fields)
+    run = await asyncio.to_thread(store.update_run, run_id, **fields)
     _publish(run_id, {"type": "run_done", "status": run["status"], "report": run["report"], "error": run["error"]})
     _live_runs.pop(run_id, None)
 
 
 async def run_research(
-    store: ChatStore, run_id: str, client: ModelClient, search_client: TavilyClient, topic: str
+    store: DeepResearchStore, run_id: str, client: ModelClient, search_client: TavilyClient, topic: str
 ) -> None:
     """后台任务主体：规划 → 并行执行 → 合成报告 → 落库。main.py 的调用方是 fire-and-forget 的
     asyncio.create_task——这里必须吞掉所有异常并落成 status='failed'，否则调用方永远看不到。
@@ -231,7 +240,7 @@ async def run_research(
         {"id": i, "query": q, "status": "pending", "summary": None, "sources": []}
         for i, q in enumerate(queries)
     ]
-    await asyncio.to_thread(store.update_deepresearch_run_todos, run_id, todos)
+    await asyncio.to_thread(store.update_run_todos, run_id, todos)
     for todo in todos:
         _publish(run_id, {"type": "todo_update", **todo})
 
@@ -243,19 +252,19 @@ async def run_research(
 
     async def _execute(todo: dict) -> None:
         async with todo_lock:
-            await asyncio.to_thread(store.update_deepresearch_todo, run_id, todo["id"], status="running")
+            await asyncio.to_thread(store.update_todo, run_id, todo["id"], status="running")
             _publish(run_id, {
                 "type": "todo_update", "id": todo["id"], "query": todo["query"],
                 "status": "running", "summary": None, "sources": [],
             })
         result = await _run_todo(client, search_client, todo["query"])
         async with todo_lock:
-            await asyncio.to_thread(store.update_deepresearch_todo, run_id, todo["id"], **result)
+            await asyncio.to_thread(store.update_todo, run_id, todo["id"], **result)
             _publish(run_id, {"type": "todo_update", "id": todo["id"], "query": todo["query"], **result})
 
     await asyncio.gather(*(_execute(todo) for todo in todos))
 
-    final_run = await asyncio.to_thread(store.get_deepresearch_run, run_id)
+    final_run = await asyncio.to_thread(store.get_run, run_id)
 
     async def _on_chunk(delta: str) -> None:
         live = _live_runs.get(run_id)
