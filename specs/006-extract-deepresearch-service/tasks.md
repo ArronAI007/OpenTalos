@@ -250,13 +250,13 @@ MVP，即使 User Story 2/3 还没开始也有价值。
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
-- [ ] T021 [P] 运行全量回归：`.venv/bin/pytest`、`cd deepresearch && uv run pytest`、
+- [X] T021 [P] 运行全量回归：`.venv/bin/pytest`、`cd deepresearch && uv run pytest`、
       `.venv/bin/python scripts/check_core_boundary.py`、`cd apps/web && npx vitest run`，
       和 T001 记录的基线对比，确认 0 意外回归
-- [ ] T022 [P] 过一遍 quickstart.md 的全部 5 个验证场景（场景 1/2 在 Phase 3 已验证过，场景
+- [X] T022 [P] 过一遍 quickstart.md 的全部 5 个验证场景（场景 1/2 在 Phase 3 已验证过，场景
       3 在 Phase 4 已验证过，场景 4 在 Phase 5 已验证过——这里是最终汇总确认，场景 5 的全量
       回归命令和 T021 相同）
-- [ ] T023 [P] 更新项目 memory（`project_opentalos_python_rebuild.md` 追加本次 shipped 记
+- [X] T023 [P] 更新项目 memory（`project_opentalos_python_rebuild.md` 追加本次 shipped 记
       录 + `MEMORY.md` 索引行同步，记录"uv path dependency 的澄清标签 vs sys.path 注入的
       实际落地机制"这个值得记住的决策，供未来类似"独立服务复用现有包代码"的场景参考）
 
