@@ -294,17 +294,17 @@ User Story 1（纯粹的文件搬移 + 新 Protocol）的 TDD 落脚点是"新�
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
-- [ ] T037 [P] 安全检查（research.md 决策 9）：核对 `apps/api/main.py`/`apps/api/db.py`
+- [X] T037 [P] 安全检查（research.md 决策 9）：核对 `apps/api/main.py`/`apps/api/db.py`
       全部涉及 `api_key` 的代码路径，确认没有任何日志/trace/错误信息会意外带出完整或部分
       明文密钥；核对前端 `apps/web/app/providers/page.tsx`/`lib/providers-api.ts` 没有把
       密钥打印到 console 或遗留在网络请求的非预期字段里
-- [ ] T038 运行全量回归：`.venv/bin/pytest`、`.venv/bin/python
+- [X] T038 运行全量回归：`.venv/bin/pytest`、`.venv/bin/python
       scripts/check_core_boundary.py`、`cd apps/web && npx vitest run`，和 T001 记录的基
       线对比，确认 0 回归、测试数只增不减
-- [ ] T039 [P] 执行 quickstart.md 的全部 7 个验证场景（含真机验证：打开
+- [X] T039 [P] 执行 quickstart.md 的全部 7 个验证场景（含真机验证：打开
       http://localhost:3010/，核实侧边栏两处入口、新增/激活/删除交互、新任务确实使用激活
       配置）
-- [ ] T040 [P] 更新项目 memory（`project_opentalos_python_rebuild.md` 追加本次 shipped 记
+- [X] T040 [P] 更新项目 memory（`project_opentalos_python_rebuild.md` 追加本次 shipped 记
       录 + `MEMORY.md` 索引行同步）
 
 ---
