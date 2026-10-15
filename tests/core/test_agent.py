@@ -6,7 +6,7 @@ import pytest
 from context import TokenBudget
 from core.agent import Agent, RuntimeSettings
 from core.protocol import AgentEvent, ChatMessage, Completion, EventKind
-from core.model import FakeModelBackend, ModelClient
+from ai.model import FakeModelBackend, ModelClient
 from memory import WorkingMemory
 from observability import RunRecorder
 

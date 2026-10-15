@@ -10,7 +10,7 @@ import os
 import pytest
 
 from core.agent_loop import run_tool_turn
-from core.model import ModelClient
+from ai.model import ModelClient
 from core.protocol import AgentEvent, EventKind
 
 pytestmark = pytest.mark.skipif(

@@ -129,7 +129,7 @@ class TestRunCase:
         assert result.tokens_used == 123
 
     def test_estimates_tokens_from_reply_length_when_real_usage_is_unavailable(self, store, scripted_client, tmp_path) -> None:
-        # 流式调用真机不报 usage（见 packages/core/model.py 的注释），token_usage 留空时
+        # 流式调用真机不报 usage（见 packages/ai/model.py 的注释），token_usage 留空时
         # 退化为按回复字符数 / 4 估算，而不是死板地显示 0。
         client = scripted_client(
             tool_completions=[ToolCompletion(text="12345678", requested_tools=[], model_id="mock-model")],

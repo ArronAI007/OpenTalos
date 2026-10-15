@@ -1,7 +1,7 @@
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from core.model import ModelClient
+from ai.model import ModelClient
 from core.protocol import ToolInvocation
 from tool.outcome import ToolOutcome
 from tool.registry import ToolRegistry

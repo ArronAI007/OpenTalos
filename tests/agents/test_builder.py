@@ -1,6 +1,6 @@
 from agents.builder import build_agent
 from agents.react_agent import ReActAgent
-from core.model import ModelClient
+from ai.model import ModelClient
 
 
 def test_build_agent_constructs_a_react_agent():

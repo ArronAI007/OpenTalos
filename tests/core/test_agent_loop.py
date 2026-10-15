@@ -20,7 +20,7 @@ from core.errors import (
     OperationCancelled,
     OutputLimitError,
 )
-from core.model import FakeModelBackend, ModelClient
+from ai.model import FakeModelBackend, ModelClient
 from core.protocols import SteerQueue
 from tool.outcome import ToolOutcome
 from tool.registry import ToolRegistry

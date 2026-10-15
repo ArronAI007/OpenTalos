@@ -24,9 +24,9 @@ from .protocol import (
     TurnContext,
     TurnDecision,
 )
-from .model import ModelClient
 from .protocols import (
     MetricsSink,
+    ModelClientProtocol,
     NullMetricsSink,
     OutputTrimmerLike,
     SteerQueue,
@@ -213,7 +213,7 @@ def _record_usage(cancellation: CancellationToken | None, usage: dict[str, int])
 
 
 async def _complete_text(
-    model_client: ModelClient,
+    model_client: ModelClientProtocol,
     messages: list[dict[str, Any]],
     on_text_delta: Callable[[str], Awaitable[None]] | None,
     **kwargs: Any,
@@ -240,7 +240,7 @@ async def _complete_text(
 
 
 async def _call_model(
-    model_client: ModelClient,
+    model_client: ModelClientProtocol,
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]],
     *,
@@ -258,7 +258,7 @@ async def _call_model(
 
 
 async def execute_model_step(
-    model_client: ModelClient,
+    model_client: ModelClientProtocol,
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]],
     *,
@@ -509,7 +509,7 @@ async def execute_model_step(
 
 
 async def run_tool_turn(
-    model_client: ModelClient,
+    model_client: ModelClientProtocol,
     messages: list[dict[str, Any]],
     tool_registry: ToolExecutor | None,
     max_iterations: int,

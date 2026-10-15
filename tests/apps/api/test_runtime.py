@@ -7,7 +7,7 @@ from typing import Any
 import httpx
 import pytest
 from core.protocol import Completion, ToolCompletion, ToolInvocation
-from core.model import ModelClient
+from ai.model import ModelClient
 from db import ChatStore
 from memory import EmbeddingClient
 from runtime import ChatRuntime
@@ -975,7 +975,7 @@ async def test_compaction_token_limit_defaults_from_the_model_catalog_when_unset
     store, scripted_client, tmp_path
 ) -> None:
     """FR-008：未显式传 compaction_token_limit、model_name 命中目录时，用目录换算出的默认值。"""
-    from core.model_catalog import get_model_capabilities
+    from ai.model_catalog import get_model_capabilities
 
     client = scripted_client(tool_completions=[])
     client.model_name = "claude-sonnet-5"

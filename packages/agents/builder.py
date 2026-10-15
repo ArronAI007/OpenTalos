@@ -1,5 +1,5 @@
 from core.agent import Agent, RuntimeSettings
-from core.model import ModelClient
+from ai.model import ModelClient
 from tool.registry import ToolRegistry
 
 from .react_agent import ReActAgent

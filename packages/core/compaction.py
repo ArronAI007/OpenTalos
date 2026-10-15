@@ -1,5 +1,5 @@
 from .protocol import ChatMessage
-from .model import ModelClient
+from .protocols import ModelClientProtocol
 
 _SUMMARY_PROMPT = """You are compacting a long conversation so older turns can be safely dropped from context.
 Summarize the conversation below into a structured note with these sections:
@@ -30,7 +30,7 @@ Conversation:
 """
 
 
-async def summarize_history(model_client: ModelClient, messages: list[ChatMessage]) -> str:
+async def summarize_history(model_client: ModelClientProtocol, messages: list[ChatMessage]) -> str:
     """用固定的 Goal/Progress/Decisions/Next Steps 结构，让模型把一段历史总结成一条摘要。"""
     transcript = "\n".join(f"[{message.role}] {message.content}" for message in messages)
     prompt = _SUMMARY_PROMPT.format(transcript=transcript)

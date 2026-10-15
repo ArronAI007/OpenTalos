@@ -6,7 +6,7 @@ from typing import Any
 
 import uvicorn
 from agents.builder import build_agent
-from core.model import ModelClient
+from ai.model import ModelClient
 from core.protocol import ToolCompletion
 
 from a2apeer.server import build_a2a_app

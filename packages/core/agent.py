@@ -6,11 +6,11 @@ from typing import Any
 from pydantic import BaseModel
 
 from .compaction import summarize_history
-from .model import ModelClient
 from .protocol import AgentEvent, ChatMessage, EventKind, ToolInvocation
 from .protocols import (
     HistoryStore,
     MetricsSink,
+    ModelClientProtocol,
     NullMetricsSink,
     OutputTrimmerLike,
     TokenEstimator,
@@ -36,7 +36,7 @@ class Agent(ABC):
     def __init__(
         self,
         name: str,
-        model_client: ModelClient,
+        model_client: ModelClientProtocol,
         *,
         history: HistoryStore,
         token_estimator: TokenEstimator,

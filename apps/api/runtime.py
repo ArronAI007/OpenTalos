@@ -15,10 +15,10 @@ from typing import Any
 
 from agents.builder import build_agent
 from agents.subagent_tool import DispatchSubagentTool
+from ai.model import ModelClient
+from ai.model_catalog import default_compaction_token_limit
 from core.agent import Agent
 from core.cancellation import CancellationToken
-from core.model import ModelClient
-from core.model_catalog import default_compaction_token_limit
 from core.protocol import AgentEvent, ChatMessage, EventKind, ToolInvocation
 from memory import build_consolidation_messages, build_extraction_messages, parse_consolidation, parse_extraction
 from observability import metrics

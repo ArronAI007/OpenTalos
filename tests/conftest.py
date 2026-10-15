@@ -17,7 +17,7 @@ if str(_PACKAGES_DIR) not in sys.path:
     sys.path.insert(0, str(_PACKAGES_DIR))
 
 from core.protocol import Completion, ToolCompletion  # noqa: E402
-from core.model import ModelClient  # noqa: E402
+from ai.model import ModelClient  # noqa: E402
 from tool.outcome import ToolOutcome  # noqa: E402
 from tool.registry import ToolRegistry  # noqa: E402
 from tool.tool import Tool, ToolParameter  # noqa: E402

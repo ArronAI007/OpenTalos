@@ -1,5 +1,5 @@
 from core.compaction import summarize_history
-from core.model import ModelClient
+from ai.model import ModelClient
 from core.protocol import ChatMessage, Completion
 
 

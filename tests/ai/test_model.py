@@ -7,7 +7,7 @@ import pytest
 
 from core.protocol import Completion, ToolCompletion
 from core.errors import ModelError, SettingsError
-from core.model import (
+from ai.model import (
     ClaudeBackend,
     FakeModelBackend,
     ModelClient,
@@ -88,7 +88,7 @@ async def test_openai_compatible_backend_acomplete_parses_text_and_usage(monkeyp
     fake_client = SimpleNamespace(
         chat=SimpleNamespace(completions=SimpleNamespace(create=AsyncMock(return_value=fake_response)))
     )
-    monkeypatch.setattr("core.model.AsyncOpenAI", lambda **kwargs: fake_client)
+    monkeypatch.setattr("ai.model.AsyncOpenAI", lambda **kwargs: fake_client)
 
     backend = OpenAICompatibleBackend(api_key="k", base_url=None, timeout=60, model_name="gpt-test")
     result = await backend.acomplete([{"role": "user", "content": "hi"}])
@@ -104,7 +104,7 @@ async def test_openai_compatible_backend_acomplete_with_tools_parses_requested_t
     fake_client = SimpleNamespace(
         chat=SimpleNamespace(completions=SimpleNamespace(create=AsyncMock(return_value=fake_response)))
     )
-    monkeypatch.setattr("core.model.AsyncOpenAI", lambda **kwargs: fake_client)
+    monkeypatch.setattr("ai.model.AsyncOpenAI", lambda **kwargs: fake_client)
 
     backend = OpenAICompatibleBackend(api_key="k", base_url=None, timeout=60, model_name="gpt-test")
     result = await backend.acomplete_with_tools(
@@ -124,7 +124,7 @@ async def test_openai_compatible_backend_astream_yields_delta_text(monkeypatch):
     fake_client = SimpleNamespace(
         chat=SimpleNamespace(completions=SimpleNamespace(create=AsyncMock(return_value=fake_stream())))
     )
-    monkeypatch.setattr("core.model.AsyncOpenAI", lambda **kwargs: fake_client)
+    monkeypatch.setattr("ai.model.AsyncOpenAI", lambda **kwargs: fake_client)
 
     backend = OpenAICompatibleBackend(api_key="k", base_url=None, timeout=60, model_name="gpt-test")
     chunks = [chunk async for chunk in backend.astream([{"role": "user", "content": "hi"}])]
@@ -160,7 +160,7 @@ async def test_openai_compatible_backend_astream_with_tools_forwards_text_and_ac
     fake_client = SimpleNamespace(
         chat=SimpleNamespace(completions=SimpleNamespace(create=AsyncMock(return_value=fake_stream())))
     )
-    monkeypatch.setattr("core.model.AsyncOpenAI", lambda **kwargs: fake_client)
+    monkeypatch.setattr("ai.model.AsyncOpenAI", lambda **kwargs: fake_client)
 
     backend = OpenAICompatibleBackend(api_key="k", base_url=None, timeout=60, model_name="gpt-test")
     seen: list[str] = []
@@ -194,7 +194,7 @@ async def test_openai_compatible_backend_astream_with_tools_forwards_reasoning_d
     fake_client = SimpleNamespace(
         chat=SimpleNamespace(completions=SimpleNamespace(create=AsyncMock(return_value=fake_stream())))
     )
-    monkeypatch.setattr("core.model.AsyncOpenAI", lambda **kwargs: fake_client)
+    monkeypatch.setattr("ai.model.AsyncOpenAI", lambda **kwargs: fake_client)
 
     backend = OpenAICompatibleBackend(api_key="k", base_url=None, timeout=60, model_name="gpt-test")
     reasoning_seen: list[str] = []
@@ -272,7 +272,7 @@ def test_thinking_level_is_runtime_mutable_and_takes_effect_on_the_next_call(mon
 
 def test_claude_backend_uses_native_thinking_budget(monkeypatch):
     monkeypatch.delenv("MODEL_REASONING_EFFORT", raising=False)
-    monkeypatch.setattr("core.model.AsyncAnthropic", lambda **kwargs: SimpleNamespace())
+    monkeypatch.setattr("ai.model.AsyncAnthropic", lambda **kwargs: SimpleNamespace())
     client = ModelClient(provider="anthropic", api_key="k", model_name="claude-test")
     client.thinking_level = "high"
 
@@ -283,7 +283,7 @@ def test_claude_backend_uses_native_thinking_budget(monkeypatch):
 
 def test_claude_backend_thinking_budget_is_customizable(monkeypatch):
     monkeypatch.delenv("MODEL_REASONING_EFFORT", raising=False)
-    monkeypatch.setattr("core.model.AsyncAnthropic", lambda **kwargs: SimpleNamespace())
+    monkeypatch.setattr("ai.model.AsyncAnthropic", lambda **kwargs: SimpleNamespace())
     client = ModelClient(
         provider="anthropic", api_key="k", model_name="claude-test", thinking_budgets={"high": 99}
     )
@@ -294,14 +294,14 @@ def test_claude_backend_thinking_budget_is_customizable(monkeypatch):
 
 def test_claude_backend_thinking_level_off_omits_the_thinking_param(monkeypatch):
     monkeypatch.delenv("MODEL_REASONING_EFFORT", raising=False)
-    monkeypatch.setattr("core.model.AsyncAnthropic", lambda **kwargs: SimpleNamespace())
+    monkeypatch.setattr("ai.model.AsyncAnthropic", lambda **kwargs: SimpleNamespace())
     client = ModelClient(provider="anthropic", api_key="k", model_name="claude-test")
 
     assert "thinking" not in client._build_call_kwargs({})
 
 
 def test_create_model_backend_returns_openai_compatible_backend_for_that_provider(monkeypatch):
-    monkeypatch.setattr("core.model.AsyncOpenAI", lambda **kwargs: SimpleNamespace())
+    monkeypatch.setattr("ai.model.AsyncOpenAI", lambda **kwargs: SimpleNamespace())
     backend = create_model_backend("openai-compatible", api_key="k", base_url=None, timeout=60, model_name="gpt-test")
     assert isinstance(backend, OpenAICompatibleBackend)
 
@@ -340,7 +340,7 @@ class _FakeClaudeStream:
 async def test_claude_backend_acomplete_parses_text_and_splits_system_message(monkeypatch):
     fake_response = _fake_claude_message("hello from claude")
     fake_client = SimpleNamespace(messages=SimpleNamespace(create=AsyncMock(return_value=fake_response)))
-    monkeypatch.setattr("core.model.AsyncAnthropic", lambda **kwargs: fake_client)
+    monkeypatch.setattr("ai.model.AsyncAnthropic", lambda **kwargs: fake_client)
 
     backend = ClaudeBackend(api_key="k", base_url=None, timeout=60, model_name="claude-test")
     result = await backend.acomplete([{"role": "system", "content": "be nice"}, {"role": "user", "content": "hi"}])
@@ -356,7 +356,7 @@ async def test_claude_backend_acomplete_with_tools_parses_tool_use_blocks(monkey
     tool_block = SimpleNamespace(type="tool_use", id="call_1", name="search", input={"q": "x"})
     fake_response = _fake_claude_message("", tool_use_blocks=[tool_block])
     fake_client = SimpleNamespace(messages=SimpleNamespace(create=AsyncMock(return_value=fake_response)))
-    monkeypatch.setattr("core.model.AsyncAnthropic", lambda **kwargs: fake_client)
+    monkeypatch.setattr("ai.model.AsyncAnthropic", lambda **kwargs: fake_client)
 
     backend = ClaudeBackend(api_key="k", base_url=None, timeout=60, model_name="claude-test")
     result = await backend.acomplete_with_tools([{"role": "user", "content": "hi"}], tools=[{"name": "search"}])
@@ -370,7 +370,7 @@ async def test_claude_backend_acomplete_with_tools_parses_tool_use_blocks(monkey
 async def test_claude_backend_astream_yields_text_chunks(monkeypatch):
     fake_stream = _FakeClaudeStream(["he", "llo"], SimpleNamespace(input_tokens=1, output_tokens=2))
     fake_client = SimpleNamespace(messages=SimpleNamespace(stream=Mock(return_value=fake_stream)))
-    monkeypatch.setattr("core.model.AsyncAnthropic", lambda **kwargs: fake_client)
+    monkeypatch.setattr("ai.model.AsyncAnthropic", lambda **kwargs: fake_client)
 
     backend = ClaudeBackend(api_key="k", base_url=None, timeout=60, model_name="claude-test")
     chunks = [chunk async for chunk in backend.astream([{"role": "user", "content": "hi"}])]
@@ -385,7 +385,7 @@ async def test_claude_backend_astream_with_tools_forwards_text_and_parses_tool_u
     fake_stream = _FakeClaudeStream(["he", "llo"], final_message.usage)
     fake_stream.get_final_message = AsyncMock(return_value=final_message)
     fake_client = SimpleNamespace(messages=SimpleNamespace(stream=Mock(return_value=fake_stream)))
-    monkeypatch.setattr("core.model.AsyncAnthropic", lambda **kwargs: fake_client)
+    monkeypatch.setattr("ai.model.AsyncAnthropic", lambda **kwargs: fake_client)
 
     backend = ClaudeBackend(api_key="k", base_url=None, timeout=60, model_name="claude-test")
     seen: list[str] = []
@@ -405,7 +405,7 @@ async def test_claude_backend_astream_with_tools_forwards_text_and_parses_tool_u
 
 
 def test_create_model_backend_returns_claude_backend_for_anthropic_provider(monkeypatch):
-    monkeypatch.setattr("core.model.AsyncAnthropic", lambda **kwargs: SimpleNamespace())
+    monkeypatch.setattr("ai.model.AsyncAnthropic", lambda **kwargs: SimpleNamespace())
     backend = create_model_backend("anthropic", api_key="k", base_url=None, timeout=60, model_name="claude-test")
     assert isinstance(backend, ClaudeBackend)
 
@@ -531,7 +531,7 @@ async def test_openai_backend_acomplete_captures_finish_reason(monkeypatch):
     fake_client = SimpleNamespace(
         chat=SimpleNamespace(completions=SimpleNamespace(create=AsyncMock(return_value=fake_response)))
     )
-    monkeypatch.setattr("core.model.AsyncOpenAI", lambda **kwargs: fake_client)
+    monkeypatch.setattr("ai.model.AsyncOpenAI", lambda **kwargs: fake_client)
 
     backend = OpenAICompatibleBackend(api_key="k", base_url=None, timeout=60, model_name="gpt-test")
     result = await backend.acomplete([{"role": "user", "content": "hi"}])
@@ -544,7 +544,7 @@ async def test_openai_backend_acomplete_with_tools_captures_finish_reason(monkey
     fake_client = SimpleNamespace(
         chat=SimpleNamespace(completions=SimpleNamespace(create=AsyncMock(return_value=fake_response)))
     )
-    monkeypatch.setattr("core.model.AsyncOpenAI", lambda **kwargs: fake_client)
+    monkeypatch.setattr("ai.model.AsyncOpenAI", lambda **kwargs: fake_client)
 
     backend = OpenAICompatibleBackend(api_key="k", base_url=None, timeout=60, model_name="gpt-test")
     result = await backend.acomplete_with_tools([{"role": "user", "content": "hi"}], tools=[])
@@ -561,7 +561,7 @@ async def test_openai_backend_astream_captures_usage_and_finish_reason(monkeypat
     fake_client = SimpleNamespace(
         chat=SimpleNamespace(completions=SimpleNamespace(create=AsyncMock(return_value=fake_stream())))
     )
-    monkeypatch.setattr("core.model.AsyncOpenAI", lambda **kwargs: fake_client)
+    monkeypatch.setattr("ai.model.AsyncOpenAI", lambda **kwargs: fake_client)
 
     backend = OpenAICompatibleBackend(api_key="k", base_url=None, timeout=60, model_name="gpt-test")
     chunks = [chunk async for chunk in backend.astream([{"role": "user", "content": "hi"}])]
@@ -587,7 +587,7 @@ async def test_openai_backend_astream_with_tools_captures_usage_and_finish_reaso
     fake_client = SimpleNamespace(
         chat=SimpleNamespace(completions=SimpleNamespace(create=AsyncMock(return_value=fake_stream())))
     )
-    monkeypatch.setattr("core.model.AsyncOpenAI", lambda **kwargs: fake_client)
+    monkeypatch.setattr("ai.model.AsyncOpenAI", lambda **kwargs: fake_client)
 
     backend = OpenAICompatibleBackend(api_key="k", base_url=None, timeout=60, model_name="gpt-test")
     result = await backend.astream_with_tools([{"role": "user", "content": "hi"}], tools=[])
@@ -609,7 +609,7 @@ async def test_openai_backend_falls_back_when_stream_options_are_rejected(monkey
         return fake_stream()
 
     fake_client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
-    monkeypatch.setattr("core.model.AsyncOpenAI", lambda **kwargs: fake_client)
+    monkeypatch.setattr("ai.model.AsyncOpenAI", lambda **kwargs: fake_client)
 
     backend = OpenAICompatibleBackend(api_key="k", base_url=None, timeout=60, model_name="gpt-test")
     chunks = [chunk async for chunk in backend.astream([{"role": "user", "content": "hi"}])]
@@ -627,7 +627,7 @@ async def test_openai_backend_falls_back_when_stream_options_are_rejected(monkey
 async def test_claude_backend_captures_stop_reason_as_finish_reason(monkeypatch):
     fake_response = _fake_claude_message("done", stop_reason="max_tokens")
     fake_client = SimpleNamespace(messages=SimpleNamespace(create=AsyncMock(return_value=fake_response)))
-    monkeypatch.setattr("core.model.AsyncAnthropic", lambda **kwargs: fake_client)
+    monkeypatch.setattr("ai.model.AsyncAnthropic", lambda **kwargs: fake_client)
 
     backend = ClaudeBackend(api_key="k", base_url=None, timeout=60, model_name="claude-test")
     result = await backend.acomplete([{"role": "user", "content": "hi"}])
@@ -637,7 +637,7 @@ async def test_claude_backend_captures_stop_reason_as_finish_reason(monkeypatch)
 
 async def test_openai_backend_aclose_closes_the_underlying_client(monkeypatch):
     fake_client = SimpleNamespace(close=AsyncMock())
-    monkeypatch.setattr("core.model.AsyncOpenAI", lambda **kwargs: fake_client)
+    monkeypatch.setattr("ai.model.AsyncOpenAI", lambda **kwargs: fake_client)
 
     backend = OpenAICompatibleBackend(api_key="k", base_url=None, timeout=60, model_name="gpt-test")
     await backend.aclose()
@@ -752,7 +752,7 @@ async def test_backoff_honours_the_retry_after_header(monkeypatch):
     async def fake_sleep(seconds):
         delays.append(seconds)
 
-    monkeypatch.setattr("core.model.asyncio.sleep", fake_sleep)
+    monkeypatch.setattr("ai.model.asyncio.sleep", fake_sleep)
     calls = {"n": 0}
 
     async def flaky(messages, **kwargs):
@@ -860,7 +860,7 @@ class TestDeclarativeProviderQuirks:
             return fake_stream()
 
         fake_client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
-        monkeypatch.setattr("core.model.AsyncOpenAI", lambda **kwargs: fake_client)
+        monkeypatch.setattr("ai.model.AsyncOpenAI", lambda **kwargs: fake_client)
 
         backend = OpenAICompatibleBackend(
             api_key="k", base_url=None, timeout=60, model_name="m", supports_stream_usage=False
@@ -886,7 +886,7 @@ class TestDeclarativeProviderQuirks:
             return fake_stream()
 
         fake_client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
-        monkeypatch.setattr("core.model.AsyncOpenAI", lambda **kwargs: fake_client)
+        monkeypatch.setattr("ai.model.AsyncOpenAI", lambda **kwargs: fake_client)
 
         backend = OpenAICompatibleBackend(
             api_key="k", base_url=None, timeout=60, model_name="m", supports_stream_usage=None
@@ -898,7 +898,7 @@ class TestDeclarativeProviderQuirks:
         assert "stream_options" not in calls[1]
 
     def test_reasoning_param_name_override_changes_the_request_field_name(self, monkeypatch) -> None:
-        from core.providers import ProviderPreset
+        from ai.providers import ProviderPreset
 
         monkeypatch.delenv("MODEL_REASONING_EFFORT", raising=False)
         client = ModelClient(provider="mock", reasoning_effort="low")
@@ -934,11 +934,11 @@ class TestNamedProviderKeyAndBaseUrlResolution:
     def test_only_generic_model_api_key_set_matches_current_behavior(self, monkeypatch) -> None:
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         monkeypatch.setenv("MODEL_API_KEY", "generic-key")
-        monkeypatch.setattr("core.model.AsyncAnthropic", lambda **kwargs: SimpleNamespace())
+        monkeypatch.setattr("ai.model.AsyncAnthropic", lambda **kwargs: SimpleNamespace())
         client = ModelClient(provider="anthropic", model_name="claude-sonnet-5")
         assert client.api_key == "generic-key"
 
-        monkeypatch.setattr("core.model.AsyncOpenAI", lambda **kwargs: SimpleNamespace())
+        monkeypatch.setattr("ai.model.AsyncOpenAI", lambda **kwargs: SimpleNamespace())
         compatible = ModelClient(provider="openai-compatible", model_name="m", base_url="http://x")
         assert compatible.api_key == "generic-key"
 
@@ -960,7 +960,7 @@ class TestNamedProviderKeyAndBaseUrlResolution:
 
     def test_named_providers_use_their_own_default_base_url(self, monkeypatch) -> None:
         monkeypatch.delenv("MODEL_BASE_URL", raising=False)
-        monkeypatch.setattr("core.model.AsyncOpenAI", lambda **kwargs: SimpleNamespace())
+        monkeypatch.setattr("ai.model.AsyncOpenAI", lambda **kwargs: SimpleNamespace())
 
         openai_client = ModelClient(provider="openai", model_name="gpt-4o", api_key="k")
         assert openai_client.base_url is None  # 用 OpenAI SDK 自己的默认端点

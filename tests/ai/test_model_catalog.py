@@ -2,7 +2,7 @@
 import ast
 from pathlib import Path
 
-from core.model_catalog import (
+from ai.model_catalog import (
     _LEGACY_DEFAULT_COMPACTION_TOKEN_LIMIT,
     ModelCapabilities,
     default_compaction_token_limit,
@@ -38,7 +38,7 @@ class TestNoPriceData:
         assert field_names == {"context_window", "supports_tools", "supports_thinking"}
 
     def test_model_catalog_does_not_import_pricing(self) -> None:
-        source = Path("packages/core/model_catalog.py").read_text()
+        source = Path("packages/ai/model_catalog.py").read_text()
         tree = ast.parse(source)
         imported_modules = set()
         for node in ast.walk(tree):

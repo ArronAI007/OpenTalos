@@ -9,7 +9,7 @@ FakeModelBackend），这里只决定"用哪个默认 base_url、密钥读哪个
 from dataclasses import dataclass
 from typing import Literal
 
-from .errors import SettingsError
+from core.errors import SettingsError
 
 
 @dataclass(frozen=True)

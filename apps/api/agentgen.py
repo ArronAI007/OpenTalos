@@ -7,7 +7,7 @@ import asyncio
 import json
 from dataclasses import dataclass
 
-from core.model import ModelClient
+from ai.model import ModelClient
 
 _TIMEOUT_S = 60.0
 _NAME_MAX = 20

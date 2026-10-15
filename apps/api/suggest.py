@@ -6,7 +6,7 @@ import asyncio
 import json
 from typing import Any
 
-from core.model import ModelClient
+from ai.model import ModelClient
 
 FOLLOWUP_COUNT = 3
 # 整体超时独立于客户端默认（60s）：推荐不能拖住流收尾

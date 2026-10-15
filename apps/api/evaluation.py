@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from core.cancellation import CancellationToken
-from core.model import ModelClient
+from ai.model import ModelClient
 from pydantic import BaseModel
 
 if TYPE_CHECKING:

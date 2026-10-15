@@ -2,7 +2,7 @@
 import pytest
 
 from core.errors import SettingsError
-from core.providers import get_provider_preset
+from ai.providers import get_provider_preset
 
 
 class TestGetProviderPreset:

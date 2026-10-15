@@ -4,7 +4,7 @@
 （`packages/agents`、`apps/api/runtime.py`）构造好之后注入，不需要显式继承这里的任何类型。
 """
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol, runtime_checkable
+from typing import Any, AsyncIterator, Awaitable, Callable, Literal, Protocol, runtime_checkable
 
 ToolExecutionMode = Literal["sequential", "parallel"]
 
@@ -108,3 +108,26 @@ class SteerQueue(Protocol):
     """
 
     def drain(self) -> list[str]: ...
+
+
+@runtime_checkable
+class ModelClientProtocol(Protocol):
+    """模型调用的最小契约；由 `ai.model.ModelClient` 结构性满足。真正的 provider 配置、重试、
+    供应商适配细节都在 `packages/ai` 里，`packages/core` 只认这六个成员的形状。
+    """
+
+    model_name: str
+    last_stream_summary: Any
+
+    async def acomplete(self, messages: list[dict[str, Any]], **kwargs: Any) -> Any: ...
+    async def astream(self, messages: list[dict[str, Any]], **kwargs: Any) -> AsyncIterator[str]: ...
+    async def acomplete_with_tools(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]], **kwargs: Any) -> Any: ...
+    async def astream_with_tools(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        *,
+        on_text_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_reasoning_delta: Callable[[str], Awaitable[None]] | None = None,
+        **kwargs: Any,
+    ) -> Any: ...

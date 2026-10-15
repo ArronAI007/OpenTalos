@@ -19,8 +19,9 @@ from anthropic import APIConnectionError as AnthropicConnectionError, AsyncAnthr
 from dotenv import load_dotenv
 from openai import APIConnectionError as OpenAIConnectionError, AsyncOpenAI
 
-from .errors import ModelError, SettingsError
-from .protocol import Completion, DEFAULT_THINKING_BUDGETS, StreamSummary, ThinkingLevel, ToolCompletion, ToolInvocation
+from core.errors import ModelError, SettingsError
+from core.protocol import Completion, DEFAULT_THINKING_BUDGETS, StreamSummary, ThinkingLevel, ToolCompletion, ToolInvocation
+
 from .providers import get_provider_preset
 
 # reasoning_effort（旧扁平机制）的三个字面量档位和 thinking_level 七档之间的等价映射：

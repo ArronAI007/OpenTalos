@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
 
-from core.model import ModelClient
+from ai.model import ModelClient
 from websearch.client import TavilyClient
 
 from db import ChatStore

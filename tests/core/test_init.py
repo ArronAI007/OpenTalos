@@ -13,7 +13,6 @@ def test_core_package_exports_public_api():
         "AgentEvent",
         "EventKind",
         "PhaseCallback",
-        "ModelClient",
         "Completion",
         "ToolCompletion",
         "StreamSummary",

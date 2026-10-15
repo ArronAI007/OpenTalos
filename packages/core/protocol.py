@@ -107,8 +107,8 @@ DEFAULT_THINKING_BUDGETS: dict[ThinkingLevel, int] = {
 @dataclass
 class RequestOverrides:
     """`prepare_request`/`prepare_next_turn` 钩子的共同返回类型——局部覆写，`None` 字段保留
-    原值。`model` 字段类型标注为 `Any`（实际是 `core.model.ModelClient` 实例）——`protocol.py`
-    不能导入 `.model`，那边反过来导入了这个文件，会造成循环导入。
+    原值。`model` 字段类型标注为 `Any`（实际是 `ai.model.ModelClient` 实例，或任何结构性满足
+    `ModelClientProtocol` 的对象）——`packages/core` 不能导入 `packages/ai`，否则会违反边界。
     """
 
     context: list[dict[str, Any]] | None = None

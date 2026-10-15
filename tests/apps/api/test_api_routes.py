@@ -7,7 +7,7 @@ from typing import Any
 import httpx
 import pytest
 from core.protocol import Completion, ToolCompletion
-from core.model import ModelClient
+from ai.model import ModelClient
 from db import ChatStore
 from main import _sse, create_app
 from runtime import ChatRuntime

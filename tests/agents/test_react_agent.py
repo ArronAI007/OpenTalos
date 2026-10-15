@@ -5,7 +5,7 @@ import pytest
 from core.cancellation import CancellationToken
 from core.protocol import AfterCallResult, AgentEvent, BeforeCallResult, EventKind, ToolCompletion, ToolInvocation
 from core.errors import EmptyModelResponse, OperationCancelled, OutputLimitError
-from core.model import ModelClient
+from ai.model import ModelClient
 from tool.outcome import ToolOutcome
 from tool.registry import ToolRegistry
 from tool.tool import Tool, ToolParameter
