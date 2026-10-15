@@ -8,6 +8,7 @@ import {
   listDeepResearchRuns,
   deleteDeepResearchRun,
   deepResearchStreamUrl,
+  DEEPRESEARCH_URL,
   type DeepResearchRun,
   type DeepResearchTodo,
 } from "@/lib/deepresearch-api";
@@ -72,12 +73,18 @@ export default function DeepResearchPage() {
   const [expandedTodoId, setExpandedTodoId] = useState<number | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState(false);
   const streamsRef = useRef<Map<string, EventSource>>(new Map());
 
   useEffect(() => {
+    // DeepResearch 服务是独立的（默认 :8441），没起时会直接连不上。没有 catch 会留下未处理
+    // 的 Promise 且 runs 永远是 null，页面就卡在骨架屏——这里降级成"服务不可达"提示。
     listDeepResearchRuns()
       .then(setRuns)
-      .catch(() => setRuns([]));
+      .catch(() => {
+        setRuns([]);
+        setLoadError(true);
+      });
   }, []);
 
   // 四个 helper 都只闭包 setRuns（React 保证跨渲染稳定），用 useCallback 固定引用——这样
@@ -175,6 +182,17 @@ export default function DeepResearchPage() {
       <p className="mb-4 text-sm text-text-secondary">
         输入一个研究主题，自动拆解成若干子任务并行搜索、总结，最后合成一份带来源引用的报告。
       </p>
+
+      {loadError && (
+        <div className="mb-6 rounded-xl border border-red-500/40 bg-red-500/10 p-4 text-sm">
+          <p className="font-medium text-red-500">无法连接 DeepResearch 服务（{DEEPRESEARCH_URL}）。</p>
+          <p className="mt-1 text-text-secondary">
+            请确认 DeepResearch 服务已启动（<code className="mx-1 rounded bg-sidebar px-1">uv run --directory
+            deepresearch uvicorn main:app --port 8441</code>，或用 <code className="mx-1 rounded bg-sidebar px-1">
+            ./scripts/start.sh</code> 一键启动）。
+          </p>
+        </div>
+      )}
 
       <div className="mb-6 rounded-xl border border-border bg-surface p-4">
         <h2 className="mb-3 text-sm font-medium">研究主题</h2>

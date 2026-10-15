@@ -221,23 +221,23 @@ MVP，即使 User Story 2/3 还没开始也有价值。
 
 **Independent Test**：见 spec.md User Story 3 的 Independent Test。
 
-- [ ] T017 [US3] 编辑 `apps/web/lib/deepresearch-api.ts`：新增 `export const
+- [X] T017 [US3] 编辑 `apps/web/lib/deepresearch-api.ts`：新增 `export const
       DEEPRESEARCH_URL = process.env.NEXT_PUBLIC_DEEPRESEARCH_URL ||
       "http://localhost:8441"`；`createDeepResearchRun`/`listDeepResearchRuns`/
       `getDeepResearchRun`/`deleteDeepResearchRun`/`deepResearchStreamUrl` 五个函数的
       `API_URL` 全部换成 `DEEPRESEARCH_URL`，路径 `/api/deepresearch/runs...` 全部改成
       `/runs...`（`DeepResearchRun`/`DeepResearchTodo`/`DeepResearchSource` 三个
       TypeScript 接口字段不变）（依赖 Phase 3 完成，新路由契约已就位）
-- [ ] T018 [US3] 编辑 `apps/web/app/deepresearch/page.tsx`：仿照
+- [X] T018 [US3] 编辑 `apps/web/app/deepresearch/page.tsx`：仿照
       `apps/web/app/agentrl/page.tsx` 现状的 `loadError` 状态写法（第 96-108 行附近），给
       现状 `listDeepResearchRuns().then(setRuns).catch(() => setRuns([]))` 这个
       `useEffect` 补上 `setLoadError(true)` + 一段"DeepResearch 服务不可达"的用户可见提示
       文案渲染（新增 `const [loadError, setLoadError] = useState(false)` 状态）
-- [ ] T019 [US3] GREEN checkpoint：运行 `cd apps/web && npx tsc --noEmit --pretty false`
+- [X] T019 [US3] GREEN checkpoint：运行 `cd apps/web && npx tsc --noEmit --pretty false`
       确认类型检查通过；运行 `npx vitest run` 确认既有测试全部通过（这两个改动都是薄的请
       求包装/状态渲染，不新增独立单元测试，和现状 `mcp-api.ts`/`providers-api.ts`/
       `agentrl-api.ts` 零测试覆盖的既有惯例一致）
-- [ ] T020 [US3] 真机 checkpoint（quickstart.md 场景 4）：`deepresearch` 服务和 web 都启动
+- [X] T020 [US3] 真机 checkpoint（quickstart.md 场景 4）：`deepresearch` 服务和 web 都启动
       后，打开 `http://localhost:3010/deepresearch`，新建一个研究任务，确认进度实时更新
       （`todo_update`/`report_chunk` 事件）、最终报告正常展示；浏览器 Network 面板确认请
       求落在 `:8441`；停掉 `deepresearch` 服务后刷新页面，确认出现"服务未启动"提示而不是

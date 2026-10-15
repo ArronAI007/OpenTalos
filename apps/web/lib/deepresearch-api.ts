@@ -1,4 +1,4 @@
-import { API_URL } from "./api";
+export const DEEPRESEARCH_URL = process.env.NEXT_PUBLIC_DEEPRESEARCH_URL || "http://localhost:8441";
 
 export interface DeepResearchSource {
   title: string;
@@ -30,7 +30,7 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export async function createDeepResearchRun(topic: string): Promise<DeepResearchRun> {
-  return fetchJson<DeepResearchRun>(`${API_URL}/api/deepresearch/runs`, {
+  return fetchJson<DeepResearchRun>(`${DEEPRESEARCH_URL}/runs`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ topic }),
@@ -38,20 +38,20 @@ export async function createDeepResearchRun(topic: string): Promise<DeepResearch
 }
 
 export async function listDeepResearchRuns(): Promise<DeepResearchRun[]> {
-  return fetchJson<{ runs: DeepResearchRun[] }>(`${API_URL}/api/deepresearch/runs`, { cache: "no-store" }).then(
+  return fetchJson<{ runs: DeepResearchRun[] }>(`${DEEPRESEARCH_URL}/runs`, { cache: "no-store" }).then(
     (d) => d.runs
   );
 }
 
 export async function getDeepResearchRun(id: string): Promise<DeepResearchRun> {
-  return fetchJson<DeepResearchRun>(`${API_URL}/api/deepresearch/runs/${id}`, { cache: "no-store" });
+  return fetchJson<DeepResearchRun>(`${DEEPRESEARCH_URL}/runs/${id}`, { cache: "no-store" });
 }
 
 export async function deleteDeepResearchRun(id: string): Promise<void> {
-  const res = await fetch(`${API_URL}/api/deepresearch/runs/${id}`, { method: "DELETE" });
+  const res = await fetch(`${DEEPRESEARCH_URL}/runs/${id}`, { method: "DELETE" });
   if (!res.ok) throw new Error(`API ${res.status} ${res.statusText}`);
 }
 
 export function deepResearchStreamUrl(id: string): string {
-  return `${API_URL}/api/deepresearch/runs/${id}/stream`;
+  return `${DEEPRESEARCH_URL}/runs/${id}/stream`;
 }
