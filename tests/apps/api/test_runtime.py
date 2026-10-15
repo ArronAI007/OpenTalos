@@ -971,6 +971,49 @@ async def test_evict_closes_the_task_s_mcp_tool_connections(store, scripted_clie
     assert task["id"] not in runtime._task_mcp_tools
 
 
+async def test_compaction_token_limit_defaults_from_the_model_catalog_when_unset(
+    store, scripted_client, tmp_path
+) -> None:
+    """FR-008：未显式传 compaction_token_limit、model_name 命中目录时，用目录换算出的默认值。"""
+    from core.model_catalog import get_model_capabilities
+
+    client = scripted_client(tool_completions=[])
+    client.model_name = "claude-sonnet-5"
+    runtime = _runtime(store, client, tmp_path)  # 不传 compaction_token_limit
+    task = store.create_task("react")
+
+    agent = await runtime._get_agent(task)
+
+    expected = int(get_model_capabilities("claude-sonnet-5").context_window * 0.5)
+    assert agent.compaction_token_limit == expected
+
+
+async def test_compaction_token_limit_falls_back_to_legacy_default_for_unknown_model(
+    store, scripted_client, tmp_path
+) -> None:
+    client = scripted_client(tool_completions=[])
+    client.model_name = "some-unregistered-model"
+    runtime = _runtime(store, client, tmp_path)
+    task = store.create_task("react")
+
+    agent = await runtime._get_agent(task)
+
+    assert agent.compaction_token_limit == 16000
+
+
+async def test_explicit_compaction_token_limit_is_not_overridden_by_the_catalog(
+    store, scripted_client, tmp_path
+) -> None:
+    client = scripted_client(tool_completions=[])
+    client.model_name = "claude-sonnet-5"
+    runtime = _runtime(store, client, tmp_path, compaction_token_limit=5000)
+    task = store.create_task("react")
+
+    agent = await runtime._get_agent(task)
+
+    assert agent.compaction_token_limit == 5000
+
+
 async def test_a2a_peer_tool_absent_without_url(store, scripted_client, tmp_path) -> None:
     client = scripted_client(tool_completions=[])
     runtime = ChatRuntime(

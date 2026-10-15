@@ -166,7 +166,11 @@ def create_app(runtime: ChatRuntime | None = None, eval_cases_path: Path | None 
             tavily_api_key=os.environ.get("TAVILY_API_KEY"),
             a2a_peer_url=os.environ.get("A2A_PEER_URL"),
             trace_dir=_REPO_ROOT / ".data" / "traces",
-            compaction_token_limit=int(os.environ.get("COMPACTION_TOKEN_LIMIT", "16000")),
+            # 未设置时传 None（而不是硬编码兜底），让 ChatRuntime._get_agent() 按模型能力目录
+            # 算一个默认值（未知模型回退到和改动前相同的 16000，见 model_catalog.py）。
+            compaction_token_limit=(
+                int(os.environ["COMPACTION_TOKEN_LIMIT"]) if os.environ.get("COMPACTION_TOKEN_LIMIT") else None
+            ),
             # 工具可靠性安全网（各工具自身超时更短，这里只是兵底）：空值回退到默认。
             tool_timeout_seconds=float(os.environ.get("TOOL_TIMEOUT_SECONDS") or 120),
             circuit_failure_threshold=int(os.environ.get("TOOL_CIRCUIT_FAILURE_THRESHOLD") or 3),

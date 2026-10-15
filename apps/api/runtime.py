@@ -18,6 +18,7 @@ from agents.subagent_tool import DispatchSubagentTool
 from core.agent import Agent
 from core.cancellation import CancellationToken
 from core.model import ModelClient
+from core.model_catalog import default_compaction_token_limit
 from core.protocol import AgentEvent, ChatMessage, EventKind, ToolInvocation
 from memory import build_consolidation_messages, build_extraction_messages, parse_consolidation, parse_extraction
 from observability import metrics
@@ -369,13 +370,19 @@ class ChatRuntime:
         await self._ensure_skills()
         await self._ensure_mcp_tools()
         suffix = await self._suffix_for(task)
+        model_client = self._client()
+        # 未显式指定压缩阈值时，用模型能力目录按上下文窗口给一个默认值（已知模型）；模型不在目
+        # 录里时回退到改动前的硬编码默认值，不回归（FR-008）。
+        effective_compaction_limit = self._compaction_token_limit
+        if effective_compaction_limit is None:
+            effective_compaction_limit = default_compaction_token_limit(model_client.model_name)
         agent = build_agent(
-            f"task-{task['id'][:8]}", self._client(),
+            f"task-{task['id'][:8]}", model_client,
             tool_registry=self._build_registry(task["id"]),
             system_prompt_suffix=suffix,
             trace_dir=str(self._trace_dir) if self._trace_dir else None,
             trace_metadata={"task_id": task["id"]},
-            compaction_token_limit=self._compaction_token_limit,
+            compaction_token_limit=effective_compaction_limit,
             approval_gate=self._gate_for(task["id"]),
         )
         # 这次 _ensure_mcp_tools() 构造出的 MCPTool 实例现在各自持有一个持久连接（见

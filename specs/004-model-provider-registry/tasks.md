@@ -120,18 +120,18 @@
 
 ### Tests for User Story 2 ⚠️ 先写，确认失败，再实现
 
-- [ ] T014 [P] [US2] 失败测试：`get_model_capabilities("claude-sonnet-5")` 等已登记模型名返回
+- [X] T014 [P] [US2] 失败测试：`get_model_capabilities("claude-sonnet-5")` 等已登记模型名返回
       完整的 `ModelCapabilities`（`context_window`/`supports_tools`/`supports_thinking` 三个
       字段都有值）；`get_model_capabilities("some-unregistered-model")` 返回 `None`，写入
       `tests/core/test_model_catalog.py`
-- [ ] T015 [P] [US2] 失败测试：`default_compaction_token_limit("claude-sonnet-5")` 等已登记模
+- [X] T015 [P] [US2] 失败测试：`default_compaction_token_limit("claude-sonnet-5")` 等已登记模
       型返回 `int(该模型 context_window * 0.5)`；`default_compaction_token_limit(
       "some-unregistered-model")` 返回 `16000`（和改动前 `apps/api/main.py` 的硬编码默认值完
       全一致），写入 `tests/core/test_model_catalog.py`
-- [ ] T016 [P] [US2] 失败测试：`ModelCapabilities` dataclass 的字段集合里不包含任何价格/成本相
+- [X] T016 [P] [US2] 失败测试：`ModelCapabilities` dataclass 的字段集合里不包含任何价格/成本相
       关字段；`packages/core/model_catalog.py` 和 `packages/core/pricing.py` 互不 import，写入
       `tests/core/test_model_catalog.py`
-- [ ] T017 [P] [US2] 失败测试：构造 `ChatRuntime` 不传 `compaction_token_limit`，
+- [X] T017 [P] [US2] 失败测试：构造 `ChatRuntime` 不传 `compaction_token_limit`，
       `model_client.model_name` 命中目录（如 `"claude-sonnet-5"`），触发一次 `_get_agent()`
       后，构造出的 `Agent.compaction_token_limit` 等于目录换算值；`model_name` 不在目录里时等
       于 `16000`；显式传 `compaction_token_limit=5000` 时该值优先、不被目录数据覆盖，写入
@@ -139,29 +139,29 @@
 
 ### Implementation for User Story 2
 
-- [ ] T018 [US2] 实现 `ModelCapabilities` dataclass（`frozen=True`；字段：`context_window:
+- [X] T018 [US2] 实现 `ModelCapabilities` dataclass（`frozen=True`；字段：`context_window:
       int`、`supports_tools: bool`、`supports_thinking: bool`，不含任何价格字段）+ 模块级
       `_CATALOG: dict[str, ModelCapabilities]`（按 research.md 决策 4 登记首批模型数据：
       `claude-sonnet-5`/`claude-opus-5`/`gpt-4o`/`deepseek-chat`/`moonshot-v1-128k`）+
       `get_model_capabilities(model_name: str) -> ModelCapabilities | None`，写入
       `packages/core/model_catalog.py`（依赖 T014）
-- [ ] T019 [US2] 实现 `_LEGACY_DEFAULT_COMPACTION_TOKEN_LIMIT = 16000` 常量 +
+- [X] T019 [US2] 实现 `_LEGACY_DEFAULT_COMPACTION_TOKEN_LIMIT = 16000` 常量 +
       `default_compaction_token_limit(model_name: str) -> int`（已知模型返回
       `int(capabilities.context_window * 0.5)`，未知模型返回
       `_LEGACY_DEFAULT_COMPACTION_TOKEN_LIMIT`），写入 `packages/core/model_catalog.py`（依赖
       T018, T015）
-- [ ] T020 [US2] 改造 `apps/api/runtime.py` 的 `_get_agent()`：在调用 `build_agent(...,
+- [X] T020 [US2] 改造 `apps/api/runtime.py` 的 `_get_agent()`：在调用 `build_agent(...,
       compaction_token_limit=self._compaction_token_limit, ...)` 之前，若
       `self._compaction_token_limit is None`，用 `default_compaction_token_limit(self._client
       ().model_name)` 算出一个非 `None` 的 `effective_limit` 并传给 `build_agent`（`self.
       _client()` 的调用顺序必须保证在这个判断之前已经执行过，确保 `model_name` 已知），写入
       `apps/api/runtime.py`（依赖 T019, T017）
-- [ ] T021 [US2] 改造 `apps/api/main.py` 的 `create_app()`：`compaction_token_limit` 参数不再
+- [X] T021 [US2] 改造 `apps/api/main.py` 的 `create_app()`：`compaction_token_limit` 参数不再
       无条件传 `int(os.environ.get("COMPACTION_TOKEN_LIMIT", "16000"))`；改成
       `int(os.environ["COMPACTION_TOKEN_LIMIT"]) if os.environ.get("COMPACTION_TOKEN_LIMIT")
       else None`（环境变量未设置时传 `None`，把决定权交给 T020 的新逻辑；显式设置时行为不
       变），写入 `apps/api/main.py`（依赖 T020）
-- [ ] T022 [US2] 运行 `.venv/bin/pytest tests/core/test_model_catalog.py
+- [X] T022 [US2] 运行 `.venv/bin/pytest tests/core/test_model_catalog.py
       tests/apps/api/test_runtime.py tests/apps/api/test_api_routes.py -v`，确认全部通过
       （GREEN checkpoint）
 
