@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from db import ChatStore
+from memory import EmbeddingClient
 
 
 @pytest.fixture
@@ -515,4 +516,48 @@ class TestProviderConfigs:
         store.set_provider_config_active(embedding["id"])
         assert store.get_provider_config(chat["id"])["active"] is True
         assert store.get_provider_config(embedding["id"])["active"] is True
+
+
+class TestEmbeddingProviderLiveReload:
+    def test_resolve_embedding_client_uses_the_active_embedding_config(self, tmp_path: Path) -> None:
+        from db import _resolve_embedding_client
+
+        store = ChatStore(tmp_path / "chat.db")
+        created = store.create_provider_config(
+            name="my-embedder", purpose="embedding", backend=None,
+            base_url="https://embed.example.com", api_key="sk-embed-key", model_name="embed-model",
+        )
+        store.set_provider_config_active(created["id"])
+
+        client = _resolve_embedding_client(store)
+
+        assert client.model_name == "embed-model"
+        assert client.api_key == "sk-embed-key"
+        assert client.base_url == "https://embed.example.com"
+
+    def test_resolve_embedding_client_falls_back_to_env_when_nothing_is_active(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        from db import _resolve_embedding_client
+
+        monkeypatch.setenv("EMBED_MODEL_NAME", "env-embed-model")
+        monkeypatch.setenv("EMBED_API_KEY", "env-embed-key")
+        store = ChatStore(tmp_path / "chat.db")
+
+        client = _resolve_embedding_client(store)
+
+        assert client.model_name == "env-embed-model"
+        assert client.api_key == "env-embed-key"
+
+    def test_explicit_embedder_injection_bypasses_db_lookup(self, tmp_path: Path) -> None:
+        injected = EmbeddingClient(model_name="injected-model", api_key="injected-key")
+        store = ChatStore(tmp_path / "chat.db", embedder=injected)
+        store.create_provider_config(
+            name="should-be-ignored", purpose="embedding", backend=None,
+            base_url=None, api_key="sk-ignored", model_name="ignored-model",
+        )
+        config = store.list_provider_configs(purpose="embedding")[0]
+        store.set_provider_config_active(config["id"])
+
+        assert store.semantic._embedder() is injected
 

@@ -257,34 +257,34 @@ User Story 1（纯粹的文件搬移 + 新 Protocol）的 TDD 落脚点是"新�
 
 ### Tests for User Story 3 ⚠️ 先写，确认失败，再实现
 
-- [ ] T030 [P] [US3] 失败测试：`SemanticMemory.__init__` 接收一个零参可调用对象（而不是具
+- [X] T030 [P] [US3] 失败测试：`SemanticMemory.__init__` 接收一个零参可调用对象（而不是具
       体 `EmbeddingClient` 实例）作为 `embedder`；两次调用触发 embed 的方法之间，如果这个
       工厂函数返回了不同的 `EmbeddingClient` 实例，`SemanticMemory` 必须每次都用最新返回的
       那个（不缓存第一次的结果），写入 `tests/memory/test_semantic.py`
-- [ ] T031 [P] [US3] 失败测试：`apps/api/db.py` 的默认 embedding 工厂函数（名称见 T032）在
+- [X] T031 [P] [US3] 失败测试：`apps/api/db.py` 的默认 embedding 工厂函数（名称见 T032）在
       `provider_configs` 表存在 `purpose="embedding"` 且 `active=1` 的行时，返回一个用该
       行字段构造的 `EmbeddingClient`；没有该行时返回 `EmbeddingClient()`（无参，读环境变
       量），写入 `tests/apps/api/test_db.py`
-- [ ] T032 [P] [US3] 失败测试：`ChatStore(path, embedder=<某个具体 EmbeddingClient 实例>)`
+- [X] T032 [P] [US3] 失败测试：`ChatStore(path, embedder=<某个具体 EmbeddingClient 实例>)`
       （现状测试的既有构造方式）之后，`SemanticMemory` 内部每次调用那个工厂函数都返回同一
       个传入的实例（不会意外去查数据库）——验证非回归，写入 `tests/apps/api/test_db.py`
 
 ### Implementation for User Story 3
 
-- [ ] T033 [US3] 改造 `packages/memory/semantic.py`：`SemanticMemory.__init__` 的
+- [X] T033 [US3] 改造 `packages/memory/semantic.py`：`SemanticMemory.__init__` 的
       `embedder` 参数类型从 `EmbeddingClient` 改成 `Callable[[], EmbeddingClient]`；4 处
       `self._embedder.embed(...)` 调用点改成 `self._embedder().embed(...)`，写入
       `packages/memory/semantic.py`（依赖 T030）
-- [ ] T034 [US3] 在 `apps/api/db.py` 实现 `_resolve_embedding_client()`（查
+- [X] T034 [US3] 在 `apps/api/db.py` 实现 `_resolve_embedding_client()`（查
       `provider_configs` 表 `purpose="embedding"` 且 `active=1` 的行，有则用其
       `model_name`/`api_key`/`base_url` 构造 `EmbeddingClient`，没有则 `EmbeddingClient()`
       无参构造）；`ChatStore.__init__` 构造 `SemanticMemory` 时，显式传入 `embedder` 存在
       则包成 `lambda: embedder`，否则传 `_resolve_embedding_client`，写入
       `apps/api/db.py`（依赖 T033, T031, T032）
-- [ ] T035 [US3] 更新 `apps/web/app/providers/page.tsx`：embedding 用途分组改为功能完整
+- [X] T035 [US3] 更新 `apps/web/app/providers/page.tsx`：embedding 用途分组改为功能完整
       （新增表单在 `purpose="embedding"` 时隐藏后端类型下拉，只保留模型名/密钥/可选服务地
       址），写入 `apps/web/app/providers/page.tsx`（依赖 T026, T034）
-- [ ] T036 [US3] 运行 `.venv/bin/pytest tests/memory/test_semantic.py
+- [X] T036 [US3] 运行 `.venv/bin/pytest tests/memory/test_semantic.py
       tests/apps/api/test_db.py -v`，确认全部通过（GREEN checkpoint）
 
 **Checkpoint**：全部 3 个 User Story 独立可用，chat 和 embedding 两种用途的 provider 都能通

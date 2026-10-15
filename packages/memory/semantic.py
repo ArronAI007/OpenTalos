@@ -6,6 +6,7 @@ import asyncio
 import datetime
 import json
 import sqlite3
+from collections.abc import Callable
 from pathlib import Path
 
 from .embedding import EmbeddingClient
@@ -36,7 +37,7 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
 
 
 class SemanticMemory:
-    def __init__(self, path: Path, embedder: EmbeddingClient) -> None:
+    def __init__(self, path: Path, embedder: Callable[[], EmbeddingClient]) -> None:
         self._path = Path(path)
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._embedder = embedder
@@ -72,7 +73,7 @@ class SemanticMemory:
 
     async def remember(self, content: str, importance: float = 0.5) -> dict:
         # 同内容 upsert：重复提取不叠加，只刷新 updated_at/importance（和旧的 remember_memory 行为一致）。
-        embedding = await self._embedder.embed(content)
+        embedding = await self._embedder().embed(content)
         return await asyncio.to_thread(self._insert_or_touch, content, embedding, importance)
 
     def list_memories(self) -> list[dict]:
@@ -115,13 +116,13 @@ class SemanticMemory:
             conn.execute("UPDATE memories SET embedding = ? WHERE id = ?", (json.dumps(embedding), memory_id))
 
     async def recall(self, query: str, limit: int = 5) -> list[str]:
-        query_vector = await self._embedder.embed(query)
+        query_vector = await self._embedder().embed(query)
         rows = await asyncio.to_thread(self.list_memories)
         scored: list[tuple[float, str]] = []
         for row in rows:
             if row["embedding"] is None:
                 # 懒补齐：升级前就存在、还没算过 embedding 的旧行，现算一次存回去。
-                vector = await self._embedder.embed(row["content"])
+                vector = await self._embedder().embed(row["content"])
                 await asyncio.to_thread(self._save_embedding, row["id"], vector)
             else:
                 vector = json.loads(row["embedding"])
@@ -170,7 +171,7 @@ class SemanticMemory:
         return dict(row)
 
     async def replace_with_merged(self, old_ids: list[int], merged_content: str, importance: float) -> dict:
-        embedding = await self._embedder.embed(merged_content)
+        embedding = await self._embedder().embed(merged_content)
         return await asyncio.to_thread(
             self._replace_with_merged_sync, old_ids, merged_content, embedding, importance
         )

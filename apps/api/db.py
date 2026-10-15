@@ -96,7 +96,10 @@ class ChatStore:
             conn.executescript(_SCHEMA)
             self._migrate(conn)
         self.episodic = EpisodicMemory(self._path)
-        self.semantic = SemanticMemory(self._path, embedder or EmbeddingClient())
+        # 显式传入的 embedder（测试/脚本路径）永远返回它自己，不查 provider_configs；
+        # 否则每次调用都重新解析一次激活的 embedding 配置（免重启生效）。
+        embedder_factory = (lambda: embedder) if embedder is not None else (lambda: _resolve_embedding_client(self))
+        self.semantic = SemanticMemory(self._path, embedder_factory)
 
     # 轻量迁移清单：CREATE TABLE IF NOT EXISTS 不会改造既有表，旧库缺列时逐条 ALTER 补上。
     # 仅列级变更需要登记在此；新表（如 projects）由 _SCHEMA 的 CREATE TABLE IF NOT EXISTS
@@ -545,3 +548,11 @@ class ChatStore:
         with self._connect() as conn:
             cursor = conn.execute("DELETE FROM agents WHERE id = ?", (agent_id,))
             return cursor.rowcount > 0
+
+
+def _resolve_embedding_client(store: ChatStore) -> EmbeddingClient:
+    """查一次 provider_configs 表的激活 embedding 配置；没有则回退现状的环境变量构造方式。"""
+    active = store.get_active_provider_config("embedding")
+    if active is None:
+        return EmbeddingClient()
+    return EmbeddingClient(model_name=active["model_name"], api_key=active["api_key"], base_url=active["base_url"])
