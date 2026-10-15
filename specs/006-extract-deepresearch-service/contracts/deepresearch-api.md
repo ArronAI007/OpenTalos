@@ -74,6 +74,6 @@ found"}` 后立即结束流（不是 HTTP 404——现状行为如此，SSE 连�
 - 不启动 `apps/api`/`apps/web`，只用 `deepresearch/` 自己的测试套件（`uv run --directory
   deepresearch pytest`）验证全部路由 + `research.py` 内部逻辑（见 research.md Decision 7 的
   测试文件清单）。
-- 真机验证：`scripts/start.sh` 启动后，`curl http://localhost:8440/health`、
-  `curl -X POST http://localhost:8440/runs -d '{"topic": "..."}'`、在浏览器打开
+- 真机验证：`scripts/start.sh` 启动后，`curl http://localhost:8441/health`、
+  `curl -X POST http://localhost:8441/runs -d '{"topic": "..."}'`、在浏览器打开
   DeepResearch 页面走一遍完整交互（见 quickstart.md）。

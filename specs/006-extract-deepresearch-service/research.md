@@ -134,7 +134,7 @@ DEEPRESEARCH_URL` 传给 web）。
 ## Decision 6：前端接入——新增 `NEXT_PUBLIC_DEEPRESEARCH_URL`，页面本身留在 `apps/web`
 
 **Decision**：`apps/web/lib/deepresearch-api.ts` 新增 `export const DEEPRESEARCH_URL =
-process.env.NEXT_PUBLIC_DEEPRESEARCH_URL || "http://localhost:8440"`（镜像 `agentrl-api.ts`
+process.env.NEXT_PUBLIC_DEEPRESEARCH_URL || "http://localhost:8441"`（镜像 `agentrl-api.ts`
 的 `AGENTRL_URL` 写法），5 个请求函数的 base URL 从 `API_URL` 换成 `DEEPRESEARCH_URL`，路径
 从 `/api/deepresearch/runs...` 换成 `/runs...`（对应 Decision 2）。`apps/web/app/
 deepresearch/page.tsx` 本身不搬家，只是现状 `.catch(() => setRuns([]))` 这行需要补一个和

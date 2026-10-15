@@ -10,7 +10,7 @@
 
 把 DeepResearch（主题规划→并行搜索总结→合成带引用报告）从 `apps/api` 里整体抽取成仓库根目
 录下一个独立目录 `deepresearch/`，镜像 `agentrl/` 的组织方式（自己的 `pyproject.toml`、自己
-的虚拟环境、自己的 FastAPI 入口、自己的独立端口 `:8440`、自己的 SQLite 存储）。技术方案：新
+的虚拟环境、自己的 FastAPI 入口、自己的独立端口 `:8441`、自己的 SQLite 存储）。技术方案：新
 目录通过 sys.path 注入（而非字面意义的 uv path dependency，见 research.md Decision 1）复用
 `packages/ai`（模型调用）和 `packages/websearch`（网页搜索）已有代码，不重新实现一遍；路由
 路径改为镜像 AgentRL 的扁平约定（`/runs` 而非 `/api/deepresearch/runs`）；历史数据不迁移。

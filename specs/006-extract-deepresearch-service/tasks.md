@@ -176,15 +176,15 @@ MVP，即使 User Story 2/3 还没开始也有价值。
 
 **Independent Test**：见 spec.md User Story 2 的 Independent Test。
 
-- [ ] T013 [US2] 编辑 `scripts/start.sh`：顶部"可调参数"区新增
-      `DEEPRESEARCH_PORT="${DEEPRESEARCH_PORT:-8440}"`、
+- [X] T013 [US2] 编辑 `scripts/start.sh`：顶部"可调参数"区新增
+      `DEEPRESEARCH_PORT="${DEEPRESEARCH_PORT:-8441}"`、
       `AUTO_SYNC_DEEPRESEARCH="${AUTO_SYNC_DEEPRESEARCH:-1}"`、
       `SKIP_DEEPRESEARCH="${SKIP_DEEPRESEARCH:-0}"`（紧邻现状 `AGENTRL_PORT`/
       `AUTO_SYNC_AGENTRL`/`SKIP_AGENTRL` 那几行之后）；新增
       `DEEPRESEARCH_URL="http://localhost:${DEEPRESEARCH_PORT}"`（紧邻
       `AGENTRL_URL` 那行之后）；新增 `DEEPRESEARCH_UP=1`（紧邻 `AGENTRL_UP=1` 那行之
       后）（依赖 Phase 3 完成，`deepresearch/pyproject.toml` 已存在）
-- [ ] T014 [US2] 继续编辑 `scripts/start.sh`：在现状 agentrl 的 sync-guard 代码块
+- [X] T014 [US2] 继续编辑 `scripts/start.sh`：在现状 agentrl 的 sync-guard 代码块
       （`AGENTRL_ENABLED`/`AGENTRL_UNSUPPORTED` 那一段，第 249-270 行附近）之后，新增一段
       结构完全对等的 `DEEPRESEARCH_ENABLED`/`SKIP_DEEPRESEARCH`/
       `AUTO_SYNC_DEEPRESEARCH` 守卫块（`uv sync --directory deepresearch` 失败只打印警告
@@ -196,16 +196,16 @@ MVP，即使 User Story 2/3 还没开始也有价值。
       deepresearch uvicorn main:app --host "$HOST" --port "$DEEPRESEARCH_PORT" ||
       DEEPRESEARCH_UP=0`（包在 `if [ "$DEEPRESEARCH_ENABLED" = "1" ]` 判断里，否则直接
       `DEEPRESEARCH_UP=0`，结构对等现状 agentrl 那几行）
-- [ ] T015 [US2] 继续编辑 `scripts/start.sh`：web 进程启动那行的环境变量列表里追加
+- [X] T015 [US2] 继续编辑 `scripts/start.sh`：web 进程启动那行的环境变量列表里追加
       `NEXT_PUBLIC_DEEPRESEARCH_URL="$DEEPRESEARCH_URL"`（紧邻现状
       `NEXT_PUBLIC_AGENTRL_URL="$AGENTRL_URL"` 之后）；汇总打印块里新增一段对等的
       `if [ "$DEEPRESEARCH_UP" = "1" ]; then echo "  deepresearch  $DEEPRESEARCH_URL"; else
       echo "  deepresearch  (skipped)"; fi`（紧邻现状 agentrl 那段汇总打印之后）；末尾日志
       提示行 `logs: tail -f $LOG_DIR/{api,agentrl,a2apeer,web}.log` 追加 `deepresearch`
       变成 `{api,agentrl,a2apeer,deepresearch,web}.log`
-- [ ] T016 [US2] 真机 checkpoint（quickstart.md 场景 3）：运行 `./scripts/start.sh
-      restart`，确认汇总输出里出现 `deepresearch  http://localhost:8440` 一行，
-      `curl http://localhost:8440/health` 返回 `{"status":"ok"}`；运行 `./scripts/
+- [X] T016 [US2] 真机 checkpoint（quickstart.md 场景 3）：运行 `./scripts/start.sh
+      restart`，确认汇总输出里出现 `deepresearch  http://localhost:8441` 一行，
+      `curl http://localhost:8441/health` 返回 `{"status":"ok"}`；运行 `./scripts/
       start.sh stop` 确认 deepresearch 进程被连带停掉；临时把
       `deepresearch/pyproject.toml` 改名制造依赖装不上的场景，确认 `./scripts/start.sh
       restart` 只打印警告跳过 deepresearch、其余服务仍然正常启动、命令本身不报错退出，验
@@ -223,7 +223,7 @@ MVP，即使 User Story 2/3 还没开始也有价值。
 
 - [ ] T017 [US3] 编辑 `apps/web/lib/deepresearch-api.ts`：新增 `export const
       DEEPRESEARCH_URL = process.env.NEXT_PUBLIC_DEEPRESEARCH_URL ||
-      "http://localhost:8440"`；`createDeepResearchRun`/`listDeepResearchRuns`/
+      "http://localhost:8441"`；`createDeepResearchRun`/`listDeepResearchRuns`/
       `getDeepResearchRun`/`deleteDeepResearchRun`/`deepResearchStreamUrl` 五个函数的
       `API_URL` 全部换成 `DEEPRESEARCH_URL`，路径 `/api/deepresearch/runs...` 全部改成
       `/runs...`（`DeepResearchRun`/`DeepResearchTodo`/`DeepResearchSource` 三个
@@ -240,7 +240,7 @@ MVP，即使 User Story 2/3 还没开始也有价值。
 - [ ] T020 [US3] 真机 checkpoint（quickstart.md 场景 4）：`deepresearch` 服务和 web 都启动
       后，打开 `http://localhost:3010/deepresearch`，新建一个研究任务，确认进度实时更新
       （`todo_update`/`report_chunk` 事件）、最终报告正常展示；浏览器 Network 面板确认请
-      求落在 `:8440`；停掉 `deepresearch` 服务后刷新页面，确认出现"服务未启动"提示而不是
+      求落在 `:8441`；停掉 `deepresearch` 服务后刷新页面，确认出现"服务未启动"提示而不是
       白屏/未处理异常
 
 **Checkpoint**：全部 3 个 User Story 独立可用，"统一管理 DeepResearch 为独立服务"的完整范围

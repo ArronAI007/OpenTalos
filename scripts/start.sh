@@ -28,6 +28,7 @@ WEB_PORT="${WEB_PORT:-${PORT:-3010}}"     # 兼容旧的 PORT 变量
 API_PORT="${API_PORT:-8400}"
 AGENTRL_PORT="${AGENTRL_PORT:-8420}"
 A2APEER_PORT="${A2APEER_PORT:-8430}"
+DEEPRESEARCH_PORT="${DEEPRESEARCH_PORT:-8441}"
 HOST="${HOST:-0.0.0.0}"
 
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-90}"          # 后端服务健康检查窗口（秒）
@@ -36,6 +37,8 @@ SYNC_TIMEOUT="${SYNC_TIMEOUT:-1800}"            # 依赖/前端安装兜底超�
 AUTO_SYNC="${AUTO_SYNC:-1}"                     # 启动前是否自动 `uv sync`（0 关闭）
 AUTO_SYNC_AGENTRL="${AUTO_SYNC_AGENTRL:-1}"     # agentrl 依赖很重（torch 等），默认自动 sync 以保证服务能起来
 SKIP_AGENTRL="${SKIP_AGENTRL:-0}"               # 设为 1 时完全跳过 agentrl（不 sync、不启动）
+AUTO_SYNC_DEEPRESEARCH="${AUTO_SYNC_DEEPRESEARCH:-1}"  # 和 agentrl 同款约定，deepresearch 依赖较轻但仍默认自动 sync
+SKIP_DEEPRESEARCH="${SKIP_DEEPRESEARCH:-0}"     # 设为 1 时完全跳过 deepresearch（不 sync、不启动）
 SKIP_WEB="${SKIP_WEB:-0}"                       # 设为 1 时只起后端服务，跳过 web 前端（CI/无头场景）
 WEB_PREWARM="${WEB_PREWARM:-1}"                 # dev 下后台预热各页面路由，避免侧栏首次切换时当场编译卡顿
 LOG_TAIL_LINES="${LOG_TAIL_LINES:-30}"          # 失败时回显日志尾部的行数
@@ -43,12 +46,14 @@ LOG_TAIL_LINES="${LOG_TAIL_LINES:-30}"          # 失败时回显日志尾部的
 API_URL="http://localhost:${API_PORT}"
 AGENTRL_URL="http://localhost:${AGENTRL_PORT}"
 A2APEER_URL="http://localhost:${A2APEER_PORT}"
+DEEPRESEARCH_URL="http://localhost:${DEEPRESEARCH_PORT}"
 WEB_URL="http://localhost:${WEB_PORT}"
 
 LOG_DIR=".data/logs"
 PID_DIR=".data/pids"
 MAX_LOG_BYTES=$((10 * 1024 * 1024))
 AGENTRL_UP=1
+DEEPRESEARCH_UP=1
 
 # CORS 白名单默认跟随 web 端口（API 端按 Origin 精确匹配）。注意：若复用已在跑的旧 API 进程，
 # CORS 以旧进程启动时的值为准。
@@ -271,6 +276,27 @@ elif [ ! -d agentrl/.venv ]; then
   AGENTRL_ENABLED=0
 fi
 
+# deepresearch 同样是独立 uv 项目（自带 pyproject.toml/.venv），但依赖较轻（没有 agentrl 那种
+# 平台受限的重型 ML 依赖），不需要 AGENTRL_UNSUPPORTED 那种"装不上就告知前端降级"的机制——装
+# 不上直接警告跳过即可。
+DEEPRESEARCH_ENABLED=1
+if [ "$SKIP_DEEPRESEARCH" = "1" ]; then
+  echo "SKIP_DEEPRESEARCH=1 — skipping deepresearch"
+  DEEPRESEARCH_ENABLED=0
+elif [ ! -f deepresearch/pyproject.toml ]; then
+  echo "warning: deepresearch project not found at deepresearch/ — skipping deepresearch" >&2
+  DEEPRESEARCH_ENABLED=0
+elif [ "$AUTO_SYNC_DEEPRESEARCH" = "1" ]; then
+  echo "syncing deepresearch dependencies (uv sync --directory deepresearch) ..."
+  if ! run_with_timeout "$SYNC_TIMEOUT" uv sync --directory deepresearch; then
+    echo "warning: deepresearch dependencies failed to install — skipping deepresearch." >&2
+    DEEPRESEARCH_ENABLED=0
+  fi
+elif [ ! -d deepresearch/.venv ]; then
+  echo "warning: AUTO_SYNC_DEEPRESEARCH=0 but deepresearch/.venv is missing — skipping deepresearch" >&2
+  DEEPRESEARCH_ENABLED=0
+fi
+
 ensure_service "api" "$API_PORT" "$API_URL/health" healthy_status "$LOG_DIR/api.log" 1 \
   env PYTHONPATH=packages uv run --no-sync uvicorn main:app --app-dir apps/api --host "$HOST" --port "$API_PORT"
 
@@ -285,6 +311,15 @@ fi
 
 ensure_service "a2apeer" "$A2APEER_PORT" "$A2APEER_URL/health" healthy_status "$LOG_DIR/a2apeer.log" 1 \
   env PYTHONPATH=packages uv run --no-sync uvicorn a2apeer.main:app --host "$HOST" --port "$A2APEER_PORT"
+
+if [ "$DEEPRESEARCH_ENABLED" = "1" ]; then
+  # deepresearch 启动失败也只降级（DEEPRESEARCH_UP=0），不影响其余服务。
+  ensure_service "deepresearch" "$DEEPRESEARCH_PORT" "$DEEPRESEARCH_URL/health" healthy_status "$LOG_DIR/deepresearch.log" 0 \
+    uv run --no-sync --directory deepresearch uvicorn main:app --host "$HOST" --port "$DEEPRESEARCH_PORT" \
+    || DEEPRESEARCH_UP=0
+else
+  DEEPRESEARCH_UP=0
+fi
 
 # web：next dev 无 /health，首页可访问即视为就绪；首次编译可能几十秒。
 if [ "$SKIP_WEB" = "1" ]; then
@@ -310,6 +345,7 @@ else
     cd apps/web
     NEXT_PUBLIC_API_URL="$API_URL" NEXT_PUBLIC_AGENTRL_URL="$AGENTRL_URL" \
     NEXT_PUBLIC_AGENTRL_UNSUPPORTED="$AGENTRL_UNSUPPORTED" \
+    NEXT_PUBLIC_DEEPRESEARCH_URL="$DEEPRESEARCH_URL" \
       pnpm dev -p "$WEB_PORT"
   ) >>"$LOG_DIR/web.log" 2>&1 &
   web_pid=$!
@@ -347,5 +383,10 @@ else
   echo "  agentrl  (skipped)"
 fi
 echo "  a2apeer  $A2APEER_URL"
+if [ "$DEEPRESEARCH_UP" = "1" ]; then
+  echo "  deepresearch  $DEEPRESEARCH_URL"
+else
+  echo "  deepresearch  (skipped)"
+fi
 echo "  skills   in-process (repo ./skills, no separate service)"
-echo "logs: tail -f $LOG_DIR/{api,agentrl,a2apeer,web}.log    stop: ./scripts/start.sh stop"
+echo "logs: tail -f $LOG_DIR/{api,agentrl,a2apeer,deepresearch,web}.log    stop: ./scripts/start.sh stop"

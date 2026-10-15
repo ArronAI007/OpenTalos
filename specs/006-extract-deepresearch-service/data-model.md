@@ -86,7 +86,7 @@
 ## `apps/web/lib/deepresearch-api.ts`（改动，不新建）
 
 - 新增 `export const DEEPRESEARCH_URL = process.env.NEXT_PUBLIC_DEEPRESEARCH_URL ||
-  "http://localhost:8440"`。
+  "http://localhost:8441"`。
 - 5 个函数的 `API_URL` 换成 `DEEPRESEARCH_URL`，路径去掉 `/api/deepresearch` 前缀
   （`/api/deepresearch/runs` → `/runs`，其余同理）。
 - `DeepResearchRun`/`DeepResearchTodo`/`DeepResearchSource` 三个 TypeScript 接口字段不变

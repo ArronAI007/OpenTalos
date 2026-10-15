@@ -15,13 +15,13 @@ test -f deepresearch/pyproject.toml && echo "deepresearch project exists"
 ```bash
 cd deepresearch
 uv sync
-uv run uvicorn main:app --port 8440 &
+uv run uvicorn main:app --port 8441 &
 sleep 2
-curl -s http://localhost:8440/health
-curl -s -X POST http://localhost:8440/runs -H "Content-Type: application/json" \
+curl -s http://localhost:8441/health
+curl -s -X POST http://localhost:8441/runs -H "Content-Type: application/json" \
   -d '{"topic": "quickstart smoke test"}'
 # 记下返回的 id，轮询直到 status 不是 running
-curl -s http://localhost:8440/runs/<id>
+curl -s http://localhost:8441/runs/<id>
 kill %1
 ```
 
@@ -42,7 +42,7 @@ grep -rn "^from db import\|^from runtime import\|from apps\." deepresearch/*.py
 
 ```bash
 ./scripts/start.sh restart
-# 预期输出里出现一行 "deepresearch  http://localhost:8440" 风格的地址
+# 预期输出里出现一行 "deepresearch  http://localhost:8441" 风格的地址
 ./scripts/start.sh stop
 # 预期 deepresearch 进程被连带停掉
 ```
@@ -59,10 +59,10 @@ mv deepresearch/pyproject.toml.bak deepresearch/pyproject.toml
 ## 场景 4：Web 前端指向新服务（User Story 3）
 
 ```bash
-# 需要 deepresearch :8440 + apps/web :3010 都在跑（./scripts/start.sh 即可）
+# 需要 deepresearch :8441 + apps/web :3010 都在跑（./scripts/start.sh 即可）
 # 1. 打开 http://localhost:3010/deepresearch
 # 2. 新建一个研究任务，确认进度实时更新（todo_update/report_chunk 事件）、最终报告正常展示
-# 3. 确认浏览器 Network 面板里这些请求打在 :8440 而不是 :8400
+# 3. 确认浏览器 Network 面板里这些请求打在 :8441 而不是 :8400
 # 4. 停掉 deepresearch 服务（kill 或 ./scripts/start.sh stop 对应进程），刷新页面，
 #    确认出现"服务未启动"类提示，不是白屏或未处理异常
 ```
