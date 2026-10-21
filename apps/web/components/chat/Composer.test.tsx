@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { Composer } from "./Composer";
 
@@ -51,5 +52,82 @@ describe("Composer", () => {
   it("stays disabled while busy without an onStop (e.g. creating a task)", () => {
     render(<Composer onSend={() => {}} disabled />);
     expect(screen.getByLabelText("输入消息")).toBeDisabled();
+  });
+
+  it("shows the bound agent tag and removes it on demand", async () => {
+    const onSelectAgent = vi.fn();
+    render(
+      <Composer
+        onSend={() => {}}
+        disabled={false}
+        agent={{ id: "a1", name: "周报助手" }}
+        agents={[{ id: "a1", name: "周报助手" }]}
+        onSelectAgent={onSelectAgent}
+      />,
+    );
+    const user = userEvent.setup();
+
+    expect(screen.getByText("@周报助手")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "移除智能体 周报助手" }));
+    expect(onSelectAgent).toHaveBeenCalledWith(null);
+  });
+
+  it("opens the picker on @, binds the picked agent and strips the @query", async () => {
+    const onSelectAgent = vi.fn();
+
+    function Harness() {
+      const [draft, setDraft] = useState("");
+      return (
+        <Composer
+          onSend={() => {}}
+          disabled={false}
+          value={draft}
+          onChange={setDraft}
+          agents={[
+            { id: "a1", name: "周报助手" },
+            { id: "a2", name: "代码审查员" },
+          ]}
+          onSelectAgent={onSelectAgent}
+        />
+      );
+    }
+
+    render(<Harness />);
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText("输入消息"), "@周");
+    await user.click(await screen.findByRole("option", { name: "@周报助手" }));
+
+    expect(onSelectAgent).toHaveBeenCalledWith({ id: "a1", name: "周报助手" });
+    expect(screen.getByLabelText("输入消息")).toHaveValue("");
+  });
+
+  it("does not render an @ trigger by default", () => {
+    render(
+      <Composer
+        onSend={() => {}}
+        disabled={false}
+        agents={[{ id: "a1", name: "周报助手" }]}
+        onSelectAgent={() => {}}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "选择智能体" })).not.toBeInTheDocument();
+    expect(screen.queryByText("@")).not.toBeInTheDocument();
+  });
+
+  it("does not open the picker while busy so the binding cannot change mid-run", async () => {
+    render(
+      <Composer
+        onSend={() => {}}
+        disabled
+        onStop={() => {}}
+        agents={[{ id: "a1", name: "周报助手" }]}
+        onSelectAgent={() => {}}
+      />,
+    );
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText("输入消息"), "@");
+    expect(screen.queryByRole("option")).not.toBeInTheDocument();
   });
 });

@@ -77,6 +77,9 @@ class UpdateTaskRequest(BaseModel):
     starred: bool | None = None
     archived: bool | None = None
     project_id: str | None = None
+    # 显式传 null = 解绑自建 Agent 退回默认；与 project_id 一样用 model_fields_set 区分
+    # "未提供"与"显式清空"。
+    agent_id: str | None = None
 
 
 class CreateProjectRequest(BaseModel):
@@ -311,6 +314,7 @@ def create_app(runtime: ChatRuntime | None = None, eval_cases_path: Path | None 
             request.title is None
             and all(getattr(request, field) is None for field in _FLAG_FIELDS)
             and "project_id" not in request.model_fields_set
+            and "agent_id" not in request.model_fields_set
         ):
             raise HTTPException(422, "no updatable field provided")
         # 收集式装配待更新字段：title 去首尾空白，flag 布尔统一转 SQLite 0/1。
@@ -329,9 +333,19 @@ def create_app(runtime: ChatRuntime | None = None, eval_cases_path: Path | None 
             if request.project_id is not None and store.get_project(request.project_id) is None:
                 raise HTTPException(400, "project not found")
             fields["project_id"] = request.project_id  # 显式 null → 置 NULL 移出项目
+        agent_changed = "agent_id" in request.model_fields_set
+        if agent_changed:
+            # 与创建任务同口径：未知 Agent 返回 404，不写库。显式 null → 解绑退回默认 Agent。
+            if request.agent_id is not None and store.get_agent(request.agent_id) is None:
+                raise HTTPException(404, "agent not found")
+            fields["agent_id"] = request.agent_id
         updated = store.update_task(task_id, **fields)
         if updated is None:
             raise HTTPException(404, "task not found")
+        # 换绑 Agent 后必须逐出缓存：否则下一轮仍复用按旧 system_prompt 装配好的 Agent。
+        # 逐出要求当前无进行中的流——前端在 busy 时禁用了换绑入口，此处是防御性一致。
+        if agent_changed:
+            await runtime.evict(task_id)
         return updated
 
     @app.get("/api/projects")

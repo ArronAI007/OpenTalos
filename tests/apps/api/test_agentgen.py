@@ -81,6 +81,31 @@ async def test_empty_prompt_and_unknown_agent_rejected(api) -> None:
     assert (await http.delete("/api/agents/nope")).status_code == 404
 
 
+async def test_rebind_task_agent_via_patch(api) -> None:
+    """输入框里 @ 指定/移除 Agent：PATCH agent_id 换绑，显式 null 解绑退回默认。"""
+    http, _ = api
+    agent = (await http.post("/api/agents/generate", json={"prompt": "帮我写周报"})).json()
+    task = (await http.post("/api/tasks", json={})).json()
+    assert task["agent_id"] is None
+
+    resp = await http.patch(f"/api/tasks/{task['id']}", json={"agent_id": agent["id"]})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["agent_id"] == agent["id"]
+    assert body["agent_name"] == "周报助手"  # 换绑后回带名字供前端标签展示
+    # 持久化：重新 GET 仍是绑定后的 Agent
+    assert (await http.get(f"/api/tasks/{task['id']}")).json()["agent_name"] == "周报助手"
+
+    cleared = await http.patch(f"/api/tasks/{task['id']}", json={"agent_id": None})
+    assert cleared.status_code == 200
+    assert cleared.json()["agent_id"] is None
+    assert cleared.json()["agent_name"] is None
+
+    # 未知 Agent 404；空 body 仍 422（agent_id 显式 null 不算"无有效字段"）
+    assert (await http.patch(f"/api/tasks/{task['id']}", json={"agent_id": "nope"})).status_code == 404
+    assert (await http.patch(f"/api/tasks/{task['id']}", json={})).status_code == 422
+
+
 async def test_generation_failure_is_502(tmp_path, scripted_client) -> None:
     client = scripted_client(completions=[Completion(text="不是 JSON", model_id="mock-model")])
     runtime = ChatRuntime(ChatStore(tmp_path / "chat.db"), model_client=client, trace_dir=tmp_path / "t")

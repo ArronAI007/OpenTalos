@@ -2,9 +2,9 @@
 
 import { useEffect, use, useState } from "react";
 import { MessageList } from "@/components/chat/MessageList";
-import { Composer } from "@/components/chat/Composer";
+import { Composer, type AgentOption } from "@/components/chat/Composer";
 import { takePendingMessage } from "@/lib/pending-message";
-import { getTask } from "@/lib/api";
+import { getTask, listCustomAgents, updateTask } from "@/lib/api";
 import { useChat } from "@/lib/use-chat";
 
 export default function TaskPage({ params }: { params: Promise<{ taskId: string }> }) {
@@ -20,16 +20,35 @@ function TaskChat({ taskId }: { taskId: string }) {
   const [draft, setDraft] = useState("");
   // 回填后聚焦的触发计数：同一内容再次编辑也要重新聚焦，用 nonce 而非直接比对 draft
   const [focusNonce, setFocusNonce] = useState(0);
-  // 用户自建 Agent 的名字（默认 Agent 为 null）；取不到只是不显示标签，不影响对话
-  const [agentName, setAgentName] = useState<string | null>(null);
+  // 用户自建 Agent 的绑定（默认 Agent 为 null）；取不到只是不显示标签，不影响对话
+  const [agent, setAgent] = useState<AgentOption | null>(null);
+  // 可 @ 选择的自建 Agent 列表
+  const [agents, setAgents] = useState<AgentOption[]>([]);
 
   useEffect(() => {
     let cancelled = false;
     getTask(taskId)
-      .then((task) => { if (!cancelled) setAgentName(task.agent_name ?? null); })
+      .then((task) => {
+        if (cancelled) return;
+        setAgent(task.agent_id && task.agent_name ? { id: task.agent_id, name: task.agent_name } : null);
+      })
+      .catch(() => undefined);
+    listCustomAgents()
+      .then((list) => {
+        if (!cancelled) setAgents(list.map((a) => ({ id: a.id, name: a.name })));
+      })
       .catch(() => undefined);
     return () => { cancelled = true; };
   }, [taskId]);
+
+  // 换绑/解绑 Agent：PATCH 任务后按服务端返回的 agent_name 落状态，失败保持原绑定不变。
+  const handleSelectAgent = (next: AgentOption | null) => {
+    void updateTask(taskId, { agent_id: next?.id ?? null })
+      .then((task) =>
+        setAgent(task.agent_id && task.agent_name ? { id: task.agent_id, name: task.agent_name } : null),
+      )
+      .catch(() => undefined);
+  };
 
   // 首页首发消息交接：先取（取即删）再发，StrictMode 双跑 effect 时第二次 take 返回 null，
   // 不会重复发送。send 引用稳定（useCallback 仅依赖 taskId），列入 deps 满足 exhaustive-deps。
@@ -71,7 +90,9 @@ function TaskChat({ taskId }: { taskId: string }) {
           value={draft}
           onChange={setDraft}
           focusNonce={focusNonce}
-          agentName={agentName}
+          agent={agent}
+          agents={agents}
+          onSelectAgent={handleSelectAgent}
         />
       </div>
     </section>

@@ -194,6 +194,21 @@ def test_update_task_sets_and_clears_project(store: ChatStore) -> None:
     assert store.get_task(task["id"])["project_id"] is None
 
 
+def test_update_task_sets_and_clears_agent(store: ChatStore) -> None:
+    task = store.create_task("react")
+    agent = store.create_agent(
+        name="周报助手", description="d", system_prompt="s", skills=[], source_prompt="p"
+    )
+    bound = store.update_task(task["id"], agent_id=agent["id"])
+    assert bound is not None
+    assert bound["agent_id"] == agent["id"]
+    assert bound["agent_name"] == "周报助手"  # get_task 关联出名字，供前端 @ 标签展示
+    cleared = store.update_task(task["id"], agent_id=None)  # 显式 None = 退回默认 Agent
+    assert cleared is not None
+    assert cleared["agent_id"] is None
+    assert cleared["agent_name"] is None
+
+
 def test_legacy_db_without_projects_table_creates_it(tmp_path: Path) -> None:
     db_path = tmp_path / "legacy.db"
     # 构造旧库：仅 tasks 表，无 projects 表。_SCHEMA 在每次构造时整段执行，

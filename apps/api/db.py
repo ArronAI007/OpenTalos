@@ -172,11 +172,11 @@ class ChatStore:
     def update_task(self, task_id: str, **fields: str | int | None) -> dict | None:
         """通用字段更新通道，返回更新后的任务；任务不存在返回 None。
 
-        落地 title / pinned / starred / archived / project_id 列；后续新字段经同一通道扩展：
-        在 _UPDATABLE_COLUMNS 白名单中加列名即可（列名须已存在于 schema）。白名单同时
-        保证 SQL 列名不可注入。project_id 可传 None，置 NULL 表示移出项目。
+        落地 title / pinned / starred / archived / project_id / agent_id 列；后续新字段经同一通道
+        扩展：在 _UPDATABLE_COLUMNS 白名单中加列名即可（列名须已存在于 schema）。白名单同时
+        保证 SQL 列名不可注入。project_id / agent_id 可传 None：前者移出项目，后者退回默认 Agent。
         """
-        _UPDATABLE_COLUMNS = {"title", "pinned", "starred", "archived", "project_id"}
+        _UPDATABLE_COLUMNS = {"title", "pinned", "starred", "archived", "project_id", "agent_id"}
         updates = {k: v for k, v in fields.items() if k in _UPDATABLE_COLUMNS}
         if not updates:
             return self.get_task(task_id)
