@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import type { Project, Task } from "@/lib/api";
 import { ArchiveIcon, CheckIcon, ChevronDownIcon, ChevronRightIcon, ExternalLinkIcon, FolderIcon, FolderMinusIcon, PencilSquareIcon, PinIcon, ShareIcon, StarIcon, TrashIcon } from "@/components/ui/icons";
 
@@ -36,30 +37,53 @@ function MenuItem({ icon, danger = false, onClick, children }: MenuItemProps) {
   );
 }
 
-// 任务行 ··· 下拉菜单：绝对定位于所属 <li data-task-row>（relative）内，浮于右侧内容之上。
+// 任务行 ··· 下拉菜单：经 portal 挂到 body、以固定定位浮在行右侧之上。
+// 必须脱离侧栏滚动容器：其 overflow-y-auto 会同时裁剪 x/y 方向，靠顶/底行的菜单会被切掉。
 // 开合由 TaskList 控制（同时最多一个）；点击菜单外或 Esc 由 TaskList 的全局监听关闭。
 export function TaskListMenu({ task, projects, onShare, onClose, onRename, onOpenInNewTab, onTogglePin, onToggleStar, onMoveToProject, onCreateProjectAndMove, onArchive, onDelete }: TaskListMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
-  const [flipUp, setFlipUp] = useState(false);
+  // 先隐藏测量尺寸，再定位，避免首帧闪一下错位。
+  const [position, setPosition] = useState<CSSProperties>({ position: "fixed", top: 0, left: 0, visibility: "hidden" });
   // 分享反馈状态自管于菜单内部：分享是唯一"点击后不立即关菜单"的项，其余项由父层一键关闭，
   // 状态上移父层反而要为单次反馈维护 per-task 状态与复位逻辑。菜单开合即条件渲染重挂载，
   // shareState 随卸载天然复位，无需外部复位；关闭动作经 onClose 回传父层。
   const [shareState, setShareState] = useState<"idle" | "copied" | "failed">("idle");
   const shareTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
-  // 「移动到项目」子区：必须就地在菜单内纵向展开——侧栏 overflow 容器会裁剪 x 方向溢出，
-  // 右侧 flyout 不可行。creatingProject = 新建项目行内输入态。
+  // 「移动到项目」子区：就地纵向展开（单一滚动面，不引 flyout）；
+  // creatingProject = 新建项目行内输入态。
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [creatingProject, setCreatingProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
 
-  // 菜单位于 overflow-y-auto 滚动容器内，靠底任务的菜单会被裁剪：渲染后测量，
-  // 下沿溢出视口则向上翻转（bottom-full）。子区展开会改变菜单高度，其开合态需入依赖重测一次；
-  // useLayoutEffect 在绘制前纠位，避免先闪一帧错位。
+  // 固定定位：优先贴在行下方，下方空间不足则上翻；右对齐锚点并夹在视口内。
+  // 锚点每次定位时按行现查 DOM（而非缓存元素）：行因标题/排序更新重渲染后旧节点会脱离文档，
+  // 缓存的元素 getBoundingClientRect 归零会把菜单甩到左上角。
+  // 依赖 projectMenuOpen——子区展开会改变菜单高度，需重算一次。
+  // 监听 scroll（capture 捕获任意滚动容器）/resize 实时纠位，避免侧栏滚动后菜单悬空错位。
   useLayoutEffect(() => {
-    const rect = menuRef.current?.getBoundingClientRect();
-    if (rect && rect.bottom > window.innerHeight) setFlipUp(true);
-  }, [projectMenuOpen]);
+    const selector = `[data-task-row="${task.id}"] button[aria-haspopup="menu"]`;
+    const place = () => {
+      const el = menuRef.current;
+      const anchor = document.querySelector<HTMLElement>(selector);
+      if (!el || !anchor) return;
+      const a = anchor.getBoundingClientRect();
+      const rect = el.getBoundingClientRect();
+      const gap = 4;
+      const spaceBelow = window.innerHeight - a.bottom;
+      const openUp = spaceBelow < rect.height + gap && a.top > rect.height + gap;
+      const top = openUp ? a.top - rect.height - gap : a.bottom + gap;
+      const left = Math.max(8, Math.min(a.right - rect.width, window.innerWidth - rect.width - 8));
+      setPosition({ position: "fixed", top, left, visibility: "visible" });
+    };
+    place();
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    };
+  }, [task.id, projectMenuOpen]);
 
   // 卸载时双保险，防旧菜单的 onClose 误关其他任务的菜单：
   // ① 清已存在的延时定时器（菜单先行关闭/切换的场景）；② mountedRef 置 false，挡住 await 返回后
@@ -83,12 +107,14 @@ export function TaskListMenu({ task, projects, onShare, onClose, onRename, onOpe
 
   const subItemCls = "flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm hover:bg-sidebar";
 
-  return (
+  return createPortal(
     <div
       ref={menuRef}
       role="menu"
+      data-task-menu={task.id}
       aria-label={`任务「${task.title || "未命名任务"}」操作`}
-      className={`absolute right-2 z-10 w-44 rounded-lg border border-border bg-surface p-1 shadow-lg ${flipUp ? "bottom-full mb-1" : "top-full mt-1"}`}
+      style={position}
+      className="z-50 w-44 rounded-lg border border-border bg-surface p-1 shadow-lg"
     >
       <MenuItem
         icon={shareState === "copied" ? <CheckIcon /> : <ShareIcon />}
@@ -166,6 +192,7 @@ export function TaskListMenu({ task, projects, onShare, onClose, onRename, onOpe
       </div>
       <MenuItem icon={<ArchiveIcon />} onClick={onArchive}>归档</MenuItem>
       <MenuItem icon={<TrashIcon />} danger onClick={onDelete}>删除</MenuItem>
-    </div>
+    </div>,
+    document.body,
   );
 }

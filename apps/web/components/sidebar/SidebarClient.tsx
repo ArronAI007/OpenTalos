@@ -200,7 +200,10 @@ export function TaskList() {
     if (openMenuId === null) return;
     const onDown = (e: MouseEvent) => {
       const target = e.target as HTMLElement | null;
-      if (target && !target.closest(`[data-task-row="${openMenuId}"]`)) setOpenMenuId(null);
+      // 菜单已 portal 到 body，不再是行的后代：两个选择器都要算"内部"。
+      if (target && !target.closest(`[data-task-row="${openMenuId}"], [data-task-menu="${openMenuId}"]`)) {
+        setOpenMenuId(null);
+      }
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpenMenuId(null);
