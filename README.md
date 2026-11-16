@@ -4,16 +4,22 @@
 
 安装包已内置 Python、Node.js 和 Next.js 运行时，下载后不需要单独安装开发环境。
 
-| 平台 | 架构 | 直接下载 | SHA-256 |
-|---|---|---|---|
-| macOS | Intel `x86_64` | [OpenTalos-macos-x86_64.dmg](https://github.com/ArronAI007/OpenTalos/releases/latest/download/OpenTalos-macos-x86_64.dmg) | [校验文件](https://github.com/ArronAI007/OpenTalos/releases/latest/download/OpenTalos-macos-x86_64.dmg.sha256) |
-| macOS | Apple Silicon `arm64` | [OpenTalos-macos-arm64.dmg](https://github.com/ArronAI007/OpenTalos/releases/latest/download/OpenTalos-macos-arm64.dmg) | [校验文件](https://github.com/ArronAI007/OpenTalos/releases/latest/download/OpenTalos-macos-arm64.dmg.sha256) |
-| Windows | `x86_64` | [OpenTalos-windows-x86_64-setup.exe](https://github.com/ArronAI007/OpenTalos/releases/latest/download/OpenTalos-windows-x86_64-setup.exe) | [校验文件](https://github.com/ArronAI007/OpenTalos/releases/latest/download/OpenTalos-windows-x86_64-setup.exe.sha256) |
-| Linux | `x86_64` | [OpenTalos-linux-x86_64.deb](https://github.com/ArronAI007/OpenTalos/releases/latest/download/OpenTalos-linux-x86_64.deb) | [校验文件](https://github.com/ArronAI007/OpenTalos/releases/latest/download/OpenTalos-linux-x86_64.deb.sha256) |
+**安装包发布状态**：当前仓库尚未发布带二进制资产的 GitHub Release，因此
+`releases/latest/download/...` 直链会返回 404。请通过 Releases 页面确认并下载
+最新可用安装包。
 
-[查看全部 Releases](https://github.com/ArronAI007/OpenTalos/releases/latest)
+[打开 Releases 下载安装包](https://github.com/ArronAI007/OpenTalos/releases)
 
-### Install
+正式发布后，每个版本会提供以下版本无关的稳定资产名及对应 `.sha256` 文件：
+
+| 平台 | 架构 | Release 资产名 |
+|---|---|---|
+| macOS | Intel `x86_64` | `OpenTalos-macos-x86_64.dmg` |
+| macOS | Apple Silicon `arm64` | `OpenTalos-macos-arm64.dmg` |
+| Windows | `x86_64` | `OpenTalos-windows-x86_64-setup.exe` |
+| Linux | `x86_64` | `OpenTalos-linux-x86_64.deb` |
+
+### Install From A Published Release
 
 - **macOS**：打开 `.dmg`，将 `OpenTalos.app` 拖入 `Applications`。官方 CI
   构建会执行 Developer ID 签名和 Apple notarization。
@@ -29,8 +35,8 @@
 本地数据；彻底删除数据可使用 `OpenTalos --uninstall --purge --yes`。发行构建、
 签名和自动更新说明见 [release/README.md](release/README.md)。
 
-> `latest/download` 链接始终指向最新正式 Release；如果尚未发布对应平台资产，
-> 页面会返回 404，请通过上方“查看全部 Releases”确认可用版本。
+如果 Releases 页面暂时没有安装包，可按
+[`release/README.md`](release/README.md) 在本机生成当前平台的安装包。
 
 An experimental agent framework in Python: a small, dependency-clean core runtime plus
 building blocks for tool calling, context engineering, script-execution skills, a
@@ -357,6 +363,7 @@ starting the API, e.g. `CORS_ORIGINS=http://localhost:3010 PORT=3010 ./scripts/s
 
 ```bash
 uv run pytest tests/
+uv run python scripts/check_readme_links.py
 ```
 
 Every `packages/*` and `apps/*` directory has a matching `tests/` counterpart. Skill
