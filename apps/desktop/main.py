@@ -118,16 +118,20 @@ def main(argv: list[str] | None = None) -> int:
                 controller.tray = tray
                 controller.refresh_status()
 
-        if args.tray_only and controller.tray is None:
-            controller.show_main()
-        elif not args.tray_only and not args.smoke_test:
-            controller.show_main()
-        if pending_activations:
-            controller.show_main()
-
         if args.smoke_test:
             threading.Timer(1.0, window.destroy).start()
-        webview.start(debug=args.debug, private_mode=False)
+
+        def after_gui_start() -> None:
+            if args.tray_only and controller.tray is None:
+                controller.show_main()
+            if pending_activations:
+                controller.show_main()
+
+        webview.start(
+            func=after_gui_start,
+            debug=args.debug,
+            private_mode=False,
+        )
     finally:
         listener.stop()
         if controller is not None:
