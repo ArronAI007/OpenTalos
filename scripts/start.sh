@@ -26,6 +26,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 # ---------------------------------------------------------------------------
 WEB_PORT="${WEB_PORT:-${PORT:-3010}}"     # 兼容旧的 PORT 变量
 API_PORT="${API_PORT:-8400}"
+GATEWAY_PORT="${GATEWAY_PORT:-3425}"
 AGENTRL_PORT="${AGENTRL_PORT:-8420}"
 A2APEER_PORT="${A2APEER_PORT:-8430}"
 DEEPRESEARCH_PORT="${DEEPRESEARCH_PORT:-8441}"
@@ -44,6 +45,7 @@ WEB_PREWARM="${WEB_PREWARM:-1}"                 # dev 下后台预热各页面�
 LOG_TAIL_LINES="${LOG_TAIL_LINES:-30}"          # 失败时回显日志尾部的行数
 
 API_URL="http://localhost:${API_PORT}"
+GATEWAY_URL="http://localhost:${GATEWAY_PORT}"
 AGENTRL_URL="http://localhost:${AGENTRL_PORT}"
 A2APEER_URL="http://localhost:${A2APEER_PORT}"
 DEEPRESEARCH_URL="http://localhost:${DEEPRESEARCH_PORT}"
@@ -300,6 +302,9 @@ fi
 ensure_service "api" "$API_PORT" "$API_URL/health" healthy_status "$LOG_DIR/api.log" 1 \
   env PYTHONPATH=packages uv run --no-sync uvicorn main:app --app-dir apps/api --host "$HOST" --port "$API_PORT"
 
+ensure_service "gateway" "$GATEWAY_PORT" "$GATEWAY_URL/health" healthy_status "$LOG_DIR/gateway.log" 1 \
+  env PYTHONPATH=packages uv run --no-sync uvicorn main:app --app-dir apps/gateway --host "$HOST" --port "$GATEWAY_PORT"
+
 if [ "$AGENTRL_ENABLED" = "1" ]; then
   # agentrl 启动失败也只降级（AGENTRL_UP=0），不影响 api/a2apeer/web。
   ensure_service "agentrl" "$AGENTRL_PORT" "$AGENTRL_URL/health" healthy_status "$LOG_DIR/agentrl.log" 0 \
@@ -343,7 +348,8 @@ else
   # -p 固定端口，被占即 fail-fast；子 shell 整体后台，日志入文件
   (
     cd apps/web
-    NEXT_PUBLIC_API_URL="$API_URL" NEXT_PUBLIC_AGENTRL_URL="$AGENTRL_URL" \
+    NEXT_PUBLIC_API_URL="$API_URL" NEXT_PUBLIC_GATEWAY_URL="$GATEWAY_URL" \
+    NEXT_PUBLIC_AGENTRL_URL="$AGENTRL_URL" \
     NEXT_PUBLIC_AGENTRL_UNSUPPORTED="$AGENTRL_UNSUPPORTED" \
     NEXT_PUBLIC_DEEPRESEARCH_URL="$DEEPRESEARCH_URL" \
       pnpm dev -p "$WEB_PORT"
@@ -377,6 +383,7 @@ else
   echo "  web      http://localhost:$WEB_PORT"
 fi
 echo "  api      $API_URL"
+echo "  gateway  $GATEWAY_URL/v1"
 if [ "$AGENTRL_UP" = "1" ]; then
   echo "  agentrl  $AGENTRL_URL"
 else
@@ -389,4 +396,4 @@ else
   echo "  deepresearch  (skipped)"
 fi
 echo "  skills   in-process (repo ./skills, no separate service)"
-echo "logs: tail -f $LOG_DIR/{api,agentrl,a2apeer,deepresearch,web}.log    stop: ./scripts/start.sh stop"
+echo "logs: tail -f $LOG_DIR/{api,gateway,agentrl,a2apeer,deepresearch,web}.log    stop: ./scripts/start.sh stop"

@@ -64,6 +64,7 @@ class DesktopController:
             return
         status = self.supervisor.status() if self.supervisor is not None else {
             "api": False,
+            "gateway": False,
             "web": False,
         }
         self.tray.update_status(status)

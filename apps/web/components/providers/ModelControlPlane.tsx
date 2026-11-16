@@ -39,6 +39,9 @@ const EMPTY_FORM: AccountForm = {
   proxyUrl: "",
 };
 
+const GATEWAY_URL =
+  process.env.NEXT_PUBLIC_GATEWAY_URL ?? "http://127.0.0.1:3425";
+
 export function ModelControlPlane() {
   const [presets, setPresets] = useState<ProviderPreset[]>([]);
   const [accounts, setAccounts] = useState<ProviderAccount[]>([]);
@@ -209,6 +212,11 @@ export function ModelControlPlane() {
         >
           导入旧配置
         </button>
+      </div>
+
+      <div className="mb-5 rounded-lg border border-border bg-sidebar px-3 py-2 font-mono text-xs">
+        <div className="text-text-secondary">OpenAI-compatible gateway</div>
+        <div className="mt-1 select-all text-text">{GATEWAY_URL}/v1</div>
       </div>
 
       <div className="mb-5 grid gap-2 sm:grid-cols-2">

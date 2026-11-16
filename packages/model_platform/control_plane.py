@@ -247,6 +247,21 @@ class ControlPlaneStore:
             ).fetchall()
         return [_model_row(row) for row in rows]
 
+    def list_routable_models(self) -> list[dict[str, Any]]:
+        """Internal gateway view including plaintext credentials for upstream calls."""
+
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT a.id AS account_id, a.provider, a.name AS account_name,"
+                " a.backend, a.base_url, a.api_key, a.proxy_url,"
+                " m.model_id, m.protocol"
+                " FROM control_provider_accounts a"
+                " JOIN control_models m ON m.account_id = a.id"
+                " WHERE a.enabled = 1"
+                " ORDER BY a.created_at, a.rowid, m.model_id"
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def import_legacy_configs(self, configs: list[dict[str, Any]]) -> int:
         imported = 0
         for config in configs:

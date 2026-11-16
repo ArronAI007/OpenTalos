@@ -32,6 +32,7 @@ class DesktopConfig:
 
     root: Path
     api_port: int
+    gateway_port: int
     web_port: int
     host: str
     web_mode: str
@@ -48,6 +49,7 @@ class DesktopConfig:
         source = dict(os.environ if env is None else env)
         repo_root = Path(root or Path(__file__).resolve().parents[2]).resolve()
         api_port = _read_int(source, "API_PORT", 8400)
+        gateway_port = _read_int(source, "GATEWAY_PORT", 3425)
         web_port = _read_int(source, "WEB_PORT", 3010)
         host = source.get("OPENTALOS_DESKTOP_HOST", "127.0.0.1")
 
@@ -70,6 +72,7 @@ class DesktopConfig:
         return cls(
             root=repo_root,
             api_port=api_port,
+            gateway_port=gateway_port,
             web_port=web_port,
             host=host,
             web_mode=web_mode,
@@ -86,6 +89,10 @@ class DesktopConfig:
     @property
     def web_url(self) -> str:
         return f"http://{self.host}:{self.web_port}"
+
+    @property
+    def gateway_url(self) -> str:
+        return f"http://{self.host}:{self.gateway_port}"
 
     @property
     def web_executable(self) -> Path:
@@ -123,6 +130,20 @@ class DesktopConfig:
             str(self.web_port),
         )
 
+    def gateway_command(self) -> tuple[str, ...]:
+        return (
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "main:app",
+            "--app-dir",
+            str(self.root / "apps" / "gateway"),
+            "--host",
+            self.host,
+            "--port",
+            str(self.gateway_port),
+        )
+
     def api_environment(self) -> dict[str, str]:
         environment = os.environ.copy()
         pythonpath = str(self.root / "packages")
@@ -141,11 +162,24 @@ class DesktopConfig:
     def web_environment(self) -> dict[str, str]:
         environment = os.environ.copy()
         environment["NEXT_PUBLIC_API_URL"] = self.api_url
+        environment["NEXT_PUBLIC_GATEWAY_URL"] = self.gateway_url
         environment.setdefault("NEXT_PUBLIC_AGENTRL_URL", "http://localhost:8420")
         environment.setdefault("NEXT_PUBLIC_DEEPRESEARCH_URL", "http://localhost:8441")
         return environment
 
-    def services(self) -> tuple[ServiceSpec, ServiceSpec]:
+    def gateway_environment(self) -> dict[str, str]:
+        environment = os.environ.copy()
+        pythonpath = str(self.root / "packages")
+        current = environment.get("PYTHONPATH")
+        environment["PYTHONPATH"] = (
+            f"{pythonpath}{os.pathsep}{current}" if current else pythonpath
+        )
+        environment["GATEWAY_CORS_ORIGINS"] = ",".join(
+            (self.web_url, f"http://localhost:{self.web_port}")
+        )
+        return environment
+
+    def services(self) -> tuple[ServiceSpec, ServiceSpec, ServiceSpec]:
         return (
             ServiceSpec(
                 name="api",
@@ -153,6 +187,15 @@ class DesktopConfig:
                 cwd=self.root,
                 environment=self.api_environment(),
                 health_url=f"{self.api_url}/health",
+                expect_json=True,
+                startup_timeout=self.startup_timeout,
+            ),
+            ServiceSpec(
+                name="gateway",
+                command=self.gateway_command(),
+                cwd=self.root,
+                environment=self.gateway_environment(),
+                health_url=f"{self.gateway_url}/health",
                 expect_json=True,
                 startup_timeout=self.startup_timeout,
             ),

@@ -82,10 +82,15 @@ def test_supervisor_starts_and_stops_api_then_web(tmp_path: Path) -> None:
 
     supervisor.start()
 
-    assert [process.command[0].split("/")[-1] for process in factory.processes] == ["python", "next"]
+    assert [process.command[0].split("/")[-1] for process in factory.processes] == [
+        "python",
+        "python",
+        "next",
+    ]
     assert "apps/api" in " ".join(factory.processes[0].command)
-    assert "dev" in factory.processes[1].command
-    assert supervisor.managed_services == ("api", "web")
+    assert "apps/gateway" in " ".join(factory.processes[1].command)
+    assert "dev" in factory.processes[2].command
+    assert supervisor.managed_services == ("api", "gateway", "web")
 
     supervisor.stop()
 
@@ -103,4 +108,5 @@ def test_supervisor_status_reports_process_health(tmp_path: Path) -> None:
     status = supervisor.status()
 
     assert status["api"] is True
+    assert status["gateway"] is True
     assert status["web"] is False

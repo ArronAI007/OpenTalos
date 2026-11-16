@@ -18,7 +18,7 @@ class DesktopTray:
     def __init__(self, config: DesktopConfig, controller: DesktopController) -> None:
         self.config = config
         self.controller = controller
-        self._status = {"api": False, "web": False}
+        self._status = {"api": False, "gateway": False, "web": False}
         self._icon = pystray.Icon(
             "opentalos",
             _tray_image(config.root),
@@ -35,8 +35,9 @@ class DesktopTray:
     def update_status(self, status: dict[str, bool]) -> None:
         self._status = status
         api = "ready" if status.get("api") else "offline"
+        gateway = "ready" if status.get("gateway") else "offline"
         web = "ready" if status.get("web") else "offline"
-        self._icon.title = f"OpenTalos\nAPI: {api}\nWeb: {web}"
+        self._icon.title = f"OpenTalos\nAPI: {api}\nGateway: {gateway}\nWeb: {web}"
         try:
             self._icon.update_menu()
         except Exception:
@@ -46,6 +47,7 @@ class DesktopTray:
         return pystray.Menu(
             pystray.MenuItem("Open OpenTalos", self._open, default=True),
             pystray.MenuItem(self._api_label, None, enabled=False),
+            pystray.MenuItem(self._gateway_label, None, enabled=False),
             pystray.MenuItem(self._web_label, None, enabled=False),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Restart services", self._restart),
@@ -66,6 +68,9 @@ class DesktopTray:
 
     def _web_label(self, _item: Any) -> str:
         return f"Web: {'ready' if self._status.get('web') else 'offline'}"
+
+    def _gateway_label(self, _item: Any) -> str:
+        return f"Gateway: {'ready' if self._status.get('gateway') else 'offline'}"
 
 
 def _tray_image(root: Path) -> Image.Image:
