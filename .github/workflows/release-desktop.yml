@@ -124,6 +124,24 @@ jobs:
             libwebkit2gtk-4.1-dev \
             pkg-config
 
+      - name: Require Apple signing credentials for release
+        if: matrix.signing == 'apple' && env.ALLOW_UNSIGNED != 'true'
+        shell: bash
+        env:
+          CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          SIGNING_IDENTITY: ${{ secrets.OPENTALOS_MACOS_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          for value in CERTIFICATE CERTIFICATE_PASSWORD SIGNING_IDENTITY APPLE_ID APPLE_APP_PASSWORD APPLE_TEAM_ID; do
+            if [[ -z "${!value}" ]]; then
+              echo "::error::Missing Apple signing secret $value"
+              exit 1
+            fi
+          done
+
       - name: Import Apple signing certificate
         if: matrix.signing == 'apple' && secrets.APPLE_CERTIFICATE_P12_BASE64 != ''
         shell: bash
@@ -146,16 +164,23 @@ jobs:
           security list-keychains -d user -s "$keychain"
           echo "OPENTALOS_MACOS_SIGNING_IDENTITY=$OPENTALOS_MACOS_SIGNING_IDENTITY" >> "$GITHUB_ENV"
 
+      - name: Require Windows signing credentials for release
+        if: matrix.signing == 'windows' && env.ALLOW_UNSIGNED != 'true'
+        shell: powershell
+        env:
+          CERTIFICATE: ${{ secrets.OPENTALOS_WINDOWS_CERT_PFX_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.OPENTALOS_WINDOWS_CERT_PASSWORD }}
+        run: |
+          if (-not $env:CERTIFICATE -or -not $env:CERTIFICATE_PASSWORD) {
+            throw "Missing Windows Authenticode signing secrets"
+          }
+
       - name: Derive signed update verification key
         if: env.ALLOW_UNSIGNED != 'true'
         shell: bash
         env:
           OPENTALOS_UPDATE_PRIVATE_KEY: ${{ secrets.OPENTALOS_UPDATE_PRIVATE_KEY }}
         run: |
-          if [[ -z "$OPENTALOS_UPDATE_PRIVATE_KEY" ]]; then
-            echo "::warning::Update signing key is not configured; publishing unsigned builds."
-            exit 0
-          fi
           uv run python scripts/sign_release_manifest.py \
             --derive-public-key-env OPENTALOS_UPDATE_PRIVATE_KEY \
             --public-key-out release/update-public-key.pem
@@ -224,8 +249,8 @@ jobs:
           OPENTALOS_UPDATE_PRIVATE_KEY: ${{ secrets.OPENTALOS_UPDATE_PRIVATE_KEY }}
         run: |
           if [[ -z "$OPENTALOS_UPDATE_PRIVATE_KEY" ]]; then
-            echo "::warning::Skipping signed update manifest because the key is not configured."
-            exit 0
+            echo "::error::Missing OPENTALOS_UPDATE_PRIVATE_KEY"
+            exit 1
           fi
           artifact="$(find dist/releases -maxdepth 1 -type f \
             \( -name '*.dmg' -o -name '*.exe' -o -name '*.deb' \) -print -quit)"
