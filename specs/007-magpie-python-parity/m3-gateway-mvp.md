@@ -6,7 +6,7 @@
 
 ## 已实现
 
-- 独立 FastAPI Gateway，默认端口 `3425`。
+- 独立 FastAPI Gateway，默认端口 `3421`。
 - `GET /health`
 - `GET /v1/models`
 - `POST /v1/chat/completions`
@@ -16,7 +16,7 @@
 - Anthropic `thinking` 到 OpenAI `reasoning_content` 转换。
 - OpenAI/Anthropic 工具定义、tool call、tool result 转换。
 - Mock 上游，便于无外部依赖验证。
-- SQLite 请求日志：`:3425/v1/magpie/requests`。
+- SQLite 请求日志：`:3421/v1/magpie/requests`。
 - 桌面服务监督器同时启动 API、Gateway 和 Web。
 - `scripts/start.sh` 纳入 Gateway 生命周期。
 - Provider 控制面页面显示 Gateway Base URL。
@@ -34,12 +34,12 @@
 ## 使用方式
 
 ```bash
-export OPENAI_BASE_URL=http://127.0.0.1:3425/v1
+export OPENAI_BASE_URL=http://127.0.0.1:3421/v1
 export OPENAI_API_KEY=local
 ```
 
 ```bash
-curl http://127.0.0.1:3425/v1/chat/completions \
+curl http://127.0.0.1:3421/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "openai/gpt-4o",
@@ -50,7 +50,7 @@ curl http://127.0.0.1:3425/v1/chat/completions \
 流式：
 
 ```bash
-curl -N http://127.0.0.1:3425/v1/chat/completions \
+curl -N http://127.0.0.1:3421/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "openai/gpt-4o",
@@ -104,4 +104,4 @@ uv run python -m apps.desktop --no-tray --smoke-test
 - 前端 Vitest：`22` 个文件、`176 passed`
 - ESLint、TypeScript、Next.js production build：通过
 - API + Gateway + Next.js + Desktop WebView 烟测：通过
-- 临时 Gateway `:13425` 与 API/Web 端口在退出后均释放
+- 临时 Gateway `:13421` 与 API/Web 端口在退出后均释放

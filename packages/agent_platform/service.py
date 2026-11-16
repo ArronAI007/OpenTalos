@@ -29,7 +29,7 @@ class AgentPlatformService:
         catalog: Sequence[AgentDefinition] | None = None,
         discovery: AgentDiscovery | None = None,
         config_manager: AgentConfigManager | None = None,
-        gateway_url: str = "http://127.0.0.1:3425/v1",
+        gateway_url: str = "http://127.0.0.1:3421/v1",
         command_runner: Callable[[list[str]], subprocess.CompletedProcess[str]] | None = None,
     ) -> None:
         self.store = store

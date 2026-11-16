@@ -69,7 +69,7 @@ class DesktopConfig:
             env=source,
         )
         api_port = _read_int(source, "API_PORT", 8400)
-        gateway_port = _read_int(source, "GATEWAY_PORT", 3425)
+        gateway_port = _read_int(source, "GATEWAY_PORT", 3421)
         web_port = _read_int(source, "WEB_PORT", 3010)
         host = source.get("OPENTALOS_DESKTOP_HOST", "127.0.0.1")
 

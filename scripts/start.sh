@@ -26,7 +26,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 # ---------------------------------------------------------------------------
 WEB_PORT="${WEB_PORT:-${PORT:-3010}}"     # 兼容旧的 PORT 变量
 API_PORT="${API_PORT:-8400}"
-GATEWAY_PORT="${GATEWAY_PORT:-3425}"
+GATEWAY_PORT="${GATEWAY_PORT:-3421}"
 AGENTRL_PORT="${AGENTRL_PORT:-8420}"
 A2APEER_PORT="${A2APEER_PORT:-8430}"
 DEEPRESEARCH_PORT="${DEEPRESEARCH_PORT:-8441}"

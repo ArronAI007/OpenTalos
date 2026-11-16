@@ -31,7 +31,7 @@ def test_json_config_preview_and_apply_preserve_user_keys(tmp_path: Path) -> Non
         encoding="utf-8",
     )
     store = AgentPlatformStore(tmp_path / "platform.db")
-    manager = AgentConfigManager(store, gateway_url="http://127.0.0.1:3425/v1")
+    manager = AgentConfigManager(store, gateway_url="http://127.0.0.1:3421/v1")
     definition = _definition(tmp_path)
 
     preview = manager.preview(definition, model="group/coding")
@@ -46,7 +46,7 @@ def test_json_config_preview_and_apply_preserve_user_keys(tmp_path: Path) -> Non
     assert payload["theme"] == "dark"
     assert payload["env"]["KEEP"] == "yes"
     assert payload["env"]["ANTHROPIC_MODEL"] == "group/coding"
-    assert payload["env"]["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:3425/v1"
+    assert payload["env"]["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:3421/v1"
     assert payload["env"]["ANTHROPIC_AUTH_TOKEN"] == "opentalos-local"
 
 
@@ -57,7 +57,7 @@ def test_codex_toml_updates_top_level_model_and_provider_block(tmp_path: Path) -
         encoding="utf-8",
     )
     store = AgentPlatformStore(tmp_path / "platform.db")
-    manager = AgentConfigManager(store, gateway_url="http://127.0.0.1:3425/v1")
+    manager = AgentConfigManager(store, gateway_url="http://127.0.0.1:3421/v1")
     definition = _definition(tmp_path, config_format="codex-toml")
 
     manager.apply(definition, model="group/coding")
@@ -68,7 +68,7 @@ def test_codex_toml_updates_top_level_model_and_provider_block(tmp_path: Path) -
     assert 'model_provider = "opentalos"' in rendered
     assert "[features]" in rendered
     assert "[model_providers.opentalos]" in rendered
-    assert 'base_url = "http://127.0.0.1:3425/v1"' in rendered
+    assert 'base_url = "http://127.0.0.1:3421/v1"' in rendered
 
 
 def test_failed_atomic_replace_rolls_back_without_partial_write(tmp_path: Path) -> None:
@@ -82,7 +82,7 @@ def test_failed_atomic_replace_rolls_back_without_partial_write(tmp_path: Path) 
 
     manager = AgentConfigManager(
         store,
-        gateway_url="http://127.0.0.1:3425/v1",
+        gateway_url="http://127.0.0.1:3421/v1",
         replace=fail_replace,
     )
 
@@ -101,7 +101,7 @@ def test_restore_recovers_exact_original_bytes_and_removes_created_file(
     original = b'{\n  "theme": "dark"\n}\n'
     config.write_bytes(original)
     store = AgentPlatformStore(tmp_path / "platform.db")
-    manager = AgentConfigManager(store, gateway_url="http://127.0.0.1:3425/v1")
+    manager = AgentConfigManager(store, gateway_url="http://127.0.0.1:3421/v1")
     definition = _definition(tmp_path)
 
     manager.apply(definition, model="group/coding")
@@ -131,7 +131,7 @@ def test_library_instructions_use_managed_block_without_removing_user_content(
     config.write_text("{}\n", encoding="utf-8")
     instructions.write_text("# User instructions\n\nKeep me.\n", encoding="utf-8")
     store = AgentPlatformStore(tmp_path / "platform.db")
-    manager = AgentConfigManager(store, gateway_url="http://127.0.0.1:3425/v1")
+    manager = AgentConfigManager(store, gateway_url="http://127.0.0.1:3421/v1")
     base = _definition(tmp_path)
     definition = AgentDefinition(
         **{
@@ -161,7 +161,7 @@ def test_library_mcp_server_is_merged_and_removed_from_json(tmp_path: Path) -> N
     config = tmp_path / "settings.json"
     config.write_text('{"owned": true}\n', encoding="utf-8")
     store = AgentPlatformStore(tmp_path / "platform.db")
-    manager = AgentConfigManager(store, gateway_url="http://127.0.0.1:3425/v1")
+    manager = AgentConfigManager(store, gateway_url="http://127.0.0.1:3421/v1")
     definition = _definition(tmp_path)
     item = store.create_library_item(
         kind="mcp",
@@ -188,7 +188,7 @@ def test_library_command_is_written_to_a_namespaced_native_file(
     config = tmp_path / "settings.json"
     config.write_text("{}\n", encoding="utf-8")
     store = AgentPlatformStore(tmp_path / "platform.db")
-    manager = AgentConfigManager(store, gateway_url="http://127.0.0.1:3425/v1")
+    manager = AgentConfigManager(store, gateway_url="http://127.0.0.1:3421/v1")
     base = _definition(tmp_path)
     definition = AgentDefinition(
         **{

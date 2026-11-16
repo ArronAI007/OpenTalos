@@ -63,7 +63,7 @@ async def agent_platform_api(tmp_path: Path, scripted_client):
         platform_store,
         control_store,
         catalog=[_definition(tmp_path)],
-        gateway_url="http://127.0.0.1:3425/v1",
+        gateway_url="http://127.0.0.1:3421/v1",
     )
     service.discovery = type(
         "Discovery",

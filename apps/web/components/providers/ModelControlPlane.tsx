@@ -51,7 +51,7 @@ const EMPTY_FORM: AccountForm = {
 };
 
 const GATEWAY_URL =
-  process.env.NEXT_PUBLIC_GATEWAY_URL ?? "http://127.0.0.1:3425";
+  process.env.NEXT_PUBLIC_GATEWAY_URL ?? "http://127.0.0.1:3421";
 
 export function ModelControlPlane() {
   const [presets, setPresets] = useState<ProviderPreset[]>([]);

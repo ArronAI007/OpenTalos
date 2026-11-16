@@ -25,11 +25,11 @@ def test_default_config_builds_loopback_services(tmp_path: Path) -> None:
     config = DesktopConfig.from_env(root=tmp_path, env={})
 
     assert config.api_url == "http://127.0.0.1:8400"
-    assert config.gateway_url == "http://127.0.0.1:3425"
+    assert config.gateway_url == "http://127.0.0.1:3421"
     assert config.web_url == "http://127.0.0.1:3010"
     assert config.web_mode == "start"
     assert config.api_command()[-2:] == ("--port", "8400")
-    assert config.gateway_command()[-2:] == ("--port", "3425")
+    assert config.gateway_command()[-2:] == ("--port", "3421")
     assert config.web_command()[-5:] == ("start", "-H", "127.0.0.1", "-p", "3010")
 
     api_env = config.api_environment()

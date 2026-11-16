@@ -97,8 +97,12 @@ class GatewayAccessStore:
                 "INSERT OR IGNORE INTO gateway_sharing_config"
                 " (id, enabled, bind_host, port, exposure_warning_acknowledged,"
                 " tls_mode, cert_file, key_file, ca_file, require_client_cert, updated_at)"
-                " VALUES (1, 0, '127.0.0.1', 3425, 0, 'off', NULL, NULL, NULL, 0, ?)",
+                " VALUES (1, 0, '127.0.0.1', 3421, 0, 'off', NULL, NULL, NULL, 0, ?)",
                 (_now(),),
+            )
+            connection.execute(
+                "UPDATE gateway_sharing_config SET port = 3421"
+                " WHERE id = 1 AND enabled = 0 AND port = 3425"
             )
 
     def create_key(

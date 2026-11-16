@@ -284,7 +284,7 @@ def create_app(
             gateway_url=(
                 gateway_url
                 or os.environ.get("OPENTALOS_GATEWAY_URL")
-                or "http://127.0.0.1:3425/v1"
+                or "http://127.0.0.1:3421/v1"
             ),
         )
     app.state.agent_platform_service = agent_platform_service

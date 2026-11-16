@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { getSharingConfig, type SharingConfig } from "@/lib/m7-api";
 
 const GATEWAY_URL =
-  process.env.NEXT_PUBLIC_GATEWAY_URL ?? "http://127.0.0.1:3425";
+  process.env.NEXT_PUBLIC_GATEWAY_URL ?? "http://127.0.0.1:3421";
 
 export function SidebarGatewayStatus({ onNavigate }: { onNavigate: () => void }) {
   const [healthy, setHealthy] = useState<boolean | null>(null);
