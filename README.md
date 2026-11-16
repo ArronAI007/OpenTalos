@@ -1,5 +1,37 @@
 # OpenTalos
 
+## Download OpenTalos Desktop
+
+安装包已内置 Python、Node.js 和 Next.js 运行时，下载后不需要单独安装开发环境。
+
+| 平台 | 架构 | 直接下载 | SHA-256 |
+|---|---|---|---|
+| macOS | Intel `x86_64` | [OpenTalos-macos-x86_64.dmg](https://github.com/ArronAI007/OpenTalos/releases/latest/download/OpenTalos-macos-x86_64.dmg) | [校验文件](https://github.com/ArronAI007/OpenTalos/releases/latest/download/OpenTalos-macos-x86_64.dmg.sha256) |
+| macOS | Apple Silicon `arm64` | [OpenTalos-macos-arm64.dmg](https://github.com/ArronAI007/OpenTalos/releases/latest/download/OpenTalos-macos-arm64.dmg) | [校验文件](https://github.com/ArronAI007/OpenTalos/releases/latest/download/OpenTalos-macos-arm64.dmg.sha256) |
+| Windows | `x86_64` | [OpenTalos-windows-x86_64-setup.exe](https://github.com/ArronAI007/OpenTalos/releases/latest/download/OpenTalos-windows-x86_64-setup.exe) | [校验文件](https://github.com/ArronAI007/OpenTalos/releases/latest/download/OpenTalos-windows-x86_64-setup.exe.sha256) |
+| Linux | `x86_64` | [OpenTalos-linux-x86_64.deb](https://github.com/ArronAI007/OpenTalos/releases/latest/download/OpenTalos-linux-x86_64.deb) | [校验文件](https://github.com/ArronAI007/OpenTalos/releases/latest/download/OpenTalos-linux-x86_64.deb.sha256) |
+
+[查看全部 Releases](https://github.com/ArronAI007/OpenTalos/releases/latest)
+
+### Install
+
+- **macOS**：打开 `.dmg`，将 `OpenTalos.app` 拖入 `Applications`。官方 CI
+  构建会执行 Developer ID 签名和 Apple notarization。
+- **Windows**：运行 `OpenTalos-windows-x86_64-setup.exe`，安装器会创建开始菜单
+  和桌面入口。
+- **Linux**：
+
+  ```bash
+  sudo apt install ./OpenTalos-linux-x86_64.deb
+  ```
+
+应用内可从 **设置 → 应用更新** 检查、下载并重启安装新版本。卸载时默认保留
+本地数据；彻底删除数据可使用 `OpenTalos --uninstall --purge --yes`。发行构建、
+签名和自动更新说明见 [release/README.md](release/README.md)。
+
+> `latest/download` 链接始终指向最新正式 Release；如果尚未发布对应平台资产，
+> 页面会返回 404，请通过上方“查看全部 Releases”确认可用版本。
+
 An experimental agent framework in Python: a small, dependency-clean core runtime plus
 building blocks for tool calling, context engineering, script-execution skills, a
 ReAct agent (plus user-defined agents generated from one sentence), and execution tracing — with a Manus-style web chat on top

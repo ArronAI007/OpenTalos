@@ -16,6 +16,8 @@ uv run python scripts/build_release.py
 ```
 
 The default output is `dist/releases/OpenTalos-0.1.0-macos-<arch>.dmg`.
+Each build also writes a version-independent `latest/download` alias, such as
+`OpenTalos-macos-<arch>.dmg`, with its own `.sha256` file.
 
 Linux and Windows use the same command on their native build hosts. Packaging
 requires `dpkg-deb` on Linux and Inno Setup 6 on Windows.

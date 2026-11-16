@@ -101,7 +101,10 @@ def main() -> int:
 
     for artifact in artifacts:
         _write_checksum(artifact)
+        alias = _write_download_alias(artifact, platform_name, arch)
+        _write_checksum(alias)
         print(f"artifact: {artifact}")
+        print(f"download alias: {alias}")
     return 0
 
 
@@ -464,6 +467,20 @@ def _write_checksum(artifact: Path) -> Path:
             hasher.update(chunk)
     target = artifact.with_suffix(f"{artifact.suffix}.sha256")
     target.write_text(f"{hasher.hexdigest()}  {artifact.name}\n", encoding="utf-8")
+    return target
+
+
+def _write_download_alias(artifact: Path, platform_name: str, arch: str) -> Path:
+    if platform_name == "darwin":
+        filename = f"OpenTalos-macos-{arch}.dmg"
+    elif platform_name == "win32":
+        filename = f"OpenTalos-windows-{arch}-setup.exe"
+    elif platform_name == "linux":
+        filename = f"OpenTalos-linux-{arch}.deb"
+    else:
+        raise SystemExit(f"unsupported release platform: {platform_name}")
+    target = artifact.parent / filename
+    shutil.copy2(artifact, target)
     return target
 
 
