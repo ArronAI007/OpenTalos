@@ -143,13 +143,17 @@ jobs:
           done
 
       - name: Import Apple signing certificate
-        if: matrix.signing == 'apple' && secrets.APPLE_CERTIFICATE_P12_BASE64 != ''
+        if: matrix.signing == 'apple'
         shell: bash
         env:
           APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           OPENTALOS_MACOS_SIGNING_IDENTITY: ${{ secrets.OPENTALOS_MACOS_SIGNING_IDENTITY }}
         run: |
+          if [[ -z "$APPLE_CERTIFICATE_P12_BASE64" ]]; then
+            echo "Apple certificate is not configured for this run."
+            exit 0
+          fi
           keychain="$RUNNER_TEMP/opentalos-signing.keychain-db"
           keychain_password="$(openssl rand -hex 24)"
           certificate="$RUNNER_TEMP/opentalos-signing.p12"
@@ -186,12 +190,16 @@ jobs:
             --public-key-out release/update-public-key.pem
 
       - name: Import Windows signing certificate
-        if: matrix.signing == 'windows' && secrets.OPENTALOS_WINDOWS_CERT_PFX_BASE64 != ''
+        if: matrix.signing == 'windows'
         shell: powershell
         env:
           OPENTALOS_WINDOWS_CERT_PFX_BASE64: ${{ secrets.OPENTALOS_WINDOWS_CERT_PFX_BASE64 }}
           OPENTALOS_WINDOWS_CERT_PASSWORD: ${{ secrets.OPENTALOS_WINDOWS_CERT_PASSWORD }}
         run: |
+          if (-not $env:OPENTALOS_WINDOWS_CERT_PFX_BASE64) {
+            Write-Host "Windows certificate is not configured for this run."
+            exit 0
+          }
           $pfx = Join-Path $env:RUNNER_TEMP "opentalos-signing.pfx"
           [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:OPENTALOS_WINDOWS_CERT_PFX_BASE64))
           $secure = ConvertTo-SecureString $env:OPENTALOS_WINDOWS_CERT_PASSWORD -AsPlainText -Force
