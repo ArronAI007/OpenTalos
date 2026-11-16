@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=OpenTalos
+Comment=Local-first agent desktop
+Exec=opentalos
+Icon=opentalos
+Terminal=false
+Categories=Development;Utility;
+StartupWMClass=OpenTalos

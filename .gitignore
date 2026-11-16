@@ -1,5 +1,7 @@
 node_modules
 dist
+build
+.pnpm-store
 .turbo
 *.tsbuildinfo
 .claude/
@@ -30,6 +32,7 @@ __pycache__/
 .pytest_cache/
 /tool-output
 traces/
+release/update-private-key.pem
 
 # Runtime data (SQLite chat DB, traces)
 .data/

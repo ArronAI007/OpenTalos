@@ -8,9 +8,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from apps.runtime_paths import resource_root
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-_CATALOG_PATH = _REPO_ROOT / "specs" / "007-magpie-python-parity" / "agent-catalog.json"
+_RESOURCE_ROOT = resource_root()
+_CATALOG_PATH = _RESOURCE_ROOT / "specs" / "007-magpie-python-parity" / "agent-catalog.json"
 
 _ALL_PLATFORMS = ("darwin", "linux", "win32")
 

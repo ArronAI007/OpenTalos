@@ -1,0 +1,302 @@
+name: Release Desktop
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing tag to build, for example v0.1.0
+        required: true
+        type: string
+      unsigned:
+        description: Build unsigned CI artifacts without publishing
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+env:
+  NODE_VERSION: "24"
+  PYTHON_VERSION: "3.12"
+  RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+  ALLOW_UNSIGNED: ${{ inputs.unsigned || false }}
+
+jobs:
+  validate:
+    runs-on: ubuntu-22.04
+    outputs:
+      release_version: ${{ steps.version.outputs.release_version }}
+    steps:
+      - name: Validate release version
+        id: version
+        shell: bash
+        run: |
+          version="${RELEASE_TAG#v}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Release tag must look like v1.2.3"
+            exit 1
+          fi
+          echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
+          echo "release_version=$version" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            platform: darwin
+            arch: x86_64
+            signing: apple
+          - runner: macos-15
+            platform: darwin
+            arch: arm64
+            signing: apple
+          - runner: windows-2022
+            platform: win32
+            arch: x86_64
+            signing: windows
+          - runner: ubuntu-24.04
+            platform: linux
+            arch: x86_64
+            signing: none
+    runs-on: ${{ matrix.runner }}
+    env:
+      RELEASE_VERSION: ${{ needs.validate.outputs.release_version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "12.3.4"
+          run_install: false
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.9.2"
+
+      - name: Install Python dependencies
+        run: uv sync --group dev
+
+      - name: Install web dependencies
+        run: pnpm -C apps/web install --frozen-lockfile
+
+      - name: Verify runner architecture
+        shell: bash
+        run: |
+          actual="$(uname -m)"
+          case "$actual" in
+            x86_64|amd64) actual="x86_64" ;;
+            arm64|aarch64) actual="arm64" ;;
+          esac
+          if [[ "$actual" != "${{ matrix.arch }}" ]]; then
+            echo "::error::Expected ${{ matrix.arch }} runner, got $actual"
+            exit 1
+          fi
+
+      - name: Install Inno Setup
+        if: matrix.platform == 'win32'
+        shell: powershell
+        run: choco install innosetup --no-progress -y
+
+      - name: Install Linux WebView build dependencies
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libcairo2-dev \
+            libgirepository-2.0-dev \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            pkg-config
+
+      - name: Require Apple signing credentials for release
+        if: matrix.signing == 'apple' && env.ALLOW_UNSIGNED != 'true'
+        shell: bash
+        env:
+          CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          SIGNING_IDENTITY: ${{ secrets.OPENTALOS_MACOS_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          for value in CERTIFICATE CERTIFICATE_PASSWORD SIGNING_IDENTITY APPLE_ID APPLE_APP_PASSWORD APPLE_TEAM_ID; do
+            if [[ -z "${!value}" ]]; then
+              echo "::error::Missing Apple signing secret $value"
+              exit 1
+            fi
+          done
+
+      - name: Import Apple signing certificate
+        if: matrix.signing == 'apple' && secrets.APPLE_CERTIFICATE_P12_BASE64 != ''
+        shell: bash
+        env:
+          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          OPENTALOS_MACOS_SIGNING_IDENTITY: ${{ secrets.OPENTALOS_MACOS_SIGNING_IDENTITY }}
+        run: |
+          keychain="$RUNNER_TEMP/opentalos-signing.keychain-db"
+          keychain_password="$(openssl rand -hex 24)"
+          certificate="$RUNNER_TEMP/opentalos-signing.p12"
+          printf '%s' "$APPLE_CERTIFICATE_P12_BASE64" | base64 --decode > "$certificate"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$certificate" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain"
+          security default-keychain -s "$keychain"
+          security list-keychains -d user -s "$keychain"
+          echo "OPENTALOS_MACOS_SIGNING_IDENTITY=$OPENTALOS_MACOS_SIGNING_IDENTITY" >> "$GITHUB_ENV"
+
+      - name: Require Windows signing credentials for release
+        if: matrix.signing == 'windows' && env.ALLOW_UNSIGNED != 'true'
+        shell: powershell
+        env:
+          CERTIFICATE: ${{ secrets.OPENTALOS_WINDOWS_CERT_PFX_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.OPENTALOS_WINDOWS_CERT_PASSWORD }}
+        run: |
+          if (-not $env:CERTIFICATE -or -not $env:CERTIFICATE_PASSWORD) {
+            throw "Missing Windows Authenticode signing secrets"
+          }
+
+      - name: Derive signed update verification key
+        if: env.ALLOW_UNSIGNED != 'true'
+        shell: bash
+        env:
+          OPENTALOS_UPDATE_PRIVATE_KEY: ${{ secrets.OPENTALOS_UPDATE_PRIVATE_KEY }}
+        run: |
+          uv run python scripts/sign_release_manifest.py \
+            --derive-public-key-env OPENTALOS_UPDATE_PRIVATE_KEY \
+            --public-key-out release/update-public-key.pem
+
+      - name: Import Windows signing certificate
+        if: matrix.signing == 'windows' && secrets.OPENTALOS_WINDOWS_CERT_PFX_BASE64 != ''
+        shell: powershell
+        env:
+          OPENTALOS_WINDOWS_CERT_PFX_BASE64: ${{ secrets.OPENTALOS_WINDOWS_CERT_PFX_BASE64 }}
+          OPENTALOS_WINDOWS_CERT_PASSWORD: ${{ secrets.OPENTALOS_WINDOWS_CERT_PASSWORD }}
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP "opentalos-signing.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:OPENTALOS_WINDOWS_CERT_PFX_BASE64))
+          $secure = ConvertTo-SecureString $env:OPENTALOS_WINDOWS_CERT_PASSWORD -AsPlainText -Force
+          $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $secure
+          "OPENTALOS_WINDOWS_CERT_THUMBPRINT=$($cert.Thumbprint)" >> $env:GITHUB_ENV
+
+      - name: Build macOS app and DMG
+        if: matrix.platform == 'darwin'
+        shell: bash
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          OPENTALOS_UPDATE_PUBLIC_KEY_FILE: ${{ github.workspace }}/release/update-public-key.pem
+        run: |
+          args=(
+            --version "$RELEASE_VERSION"
+            --platform darwin
+            --arch "${{ matrix.arch }}"
+          )
+          if [[ -n "${OPENTALOS_MACOS_SIGNING_IDENTITY:-}" ]]; then
+            args+=(--sign-macos)
+          fi
+          if [[ -n "$APPLE_ID" ]]; then
+            args+=(--notarize-macos)
+          fi
+          uv run python scripts/build_release.py "${args[@]}"
+
+      - name: Build Windows EXE installer
+        if: matrix.platform == 'win32'
+        shell: powershell
+        env:
+          OPENTALOS_UPDATE_PUBLIC_KEY_FILE: ${{ github.workspace }}\release\update-public-key.pem
+        run: >
+          uv run python scripts/build_release.py
+          --version "$env:RELEASE_VERSION"
+          --platform win32
+          --arch "${{ matrix.arch }}"
+
+      - name: Build Linux DEB
+        if: matrix.platform == 'linux'
+        shell: bash
+        env:
+          OPENTALOS_UPDATE_PUBLIC_KEY_FILE: ${{ github.workspace }}/release/update-public-key.pem
+        run: |
+          uv run python scripts/build_release.py \
+            --version "$RELEASE_VERSION" \
+            --platform linux \
+            --arch "${{ matrix.arch }}"
+
+      - name: Create signed update manifest
+        if: env.ALLOW_UNSIGNED != 'true'
+        shell: bash
+        env:
+          OPENTALOS_UPDATE_PRIVATE_KEY: ${{ secrets.OPENTALOS_UPDATE_PRIVATE_KEY }}
+        run: |
+          if [[ -z "$OPENTALOS_UPDATE_PRIVATE_KEY" ]]; then
+            echo "::error::Missing OPENTALOS_UPDATE_PRIVATE_KEY"
+            exit 1
+          fi
+          artifact="$(find dist/releases -maxdepth 1 -type f \
+            \( -name '*.dmg' -o -name '*.exe' -o -name '*.deb' \) -print -quit)"
+          name="$(basename "$artifact")"
+          url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/${name}"
+          manifest="dist/releases/OpenTalos-update-${{ matrix.platform }}-${{ matrix.arch }}.json"
+          uv run python scripts/sign_release_manifest.py \
+            --artifact "$artifact" \
+            --version "$RELEASE_VERSION" \
+            --platform "${{ matrix.platform }}" \
+            --arch "${{ matrix.arch }}" \
+            --url "$url" \
+            --private-key-env OPENTALOS_UPDATE_PRIVATE_KEY \
+            --checksums "dist/releases/SHA256SUMS-${{ matrix.platform }}-${{ matrix.arch }}.txt" \
+            --output "$manifest"
+
+      - name: Attest release artifacts
+        if: env.ALLOW_UNSIGNED != 'true'
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/releases/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OpenTalos-${{ matrix.platform }}-${{ matrix.arch }}
+          path: dist/releases/*
+          if-no-files-found: error
+
+  publish:
+    if: github.event_name == 'push' || inputs.unsigned == false
+    needs: build
+    runs-on: ubuntu-22.04
+    env:
+      RELEASE_VERSION: ${{ needs.validate.outputs.release_version }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: OpenTalos-*
+          path: dist/releases
+          merge-multiple: true
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: OpenTalos ${{ env.RELEASE_TAG }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: dist/releases/*

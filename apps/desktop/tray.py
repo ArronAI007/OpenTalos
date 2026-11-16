@@ -21,7 +21,7 @@ class DesktopTray:
         self._status = {"api": False, "gateway": False, "web": False}
         self._icon = pystray.Icon(
             "opentalos",
-            _tray_image(config.root),
+            _tray_image(config.resource_root),
             "OpenTalos",
             menu=self._menu(),
         )
@@ -74,7 +74,7 @@ class DesktopTray:
 
 
 def _tray_image(root: Path) -> Image.Image:
-    icon_path = root / "apps" / "web" / "app" / "favicon.ico"
+    icon_path = root / "assets" / "icon" / "opentalos.png"
     try:
         return Image.open(icon_path).convert("RGBA")
     except Exception:

@@ -29,6 +29,14 @@ import {
 } from "@/lib/model-control-api";
 import { fetchGatewayHealth, GATEWAY_URL } from "@/lib/gateway-api";
 import { LEGACY_NAV_ITEMS } from "@/lib/navigation";
+import {
+  checkForUpdate,
+  downloadUpdate,
+  fetchReleaseInfo,
+  installStagedUpdate,
+  type ReleaseInfo,
+  type UpdateCheckResult,
+} from "@/lib/release-api";
 
 const LEGACY_ICONS = {
   "/skills": ChartBarIcon,
@@ -45,6 +53,10 @@ export default function SettingsPage() {
   const [accounts, setAccounts] = useState<ProviderAccount[]>([]);
   const [agentCount, setAgentCount] = useState(0);
   const [gatewayHealthy, setGatewayHealthy] = useState<boolean | null>(null);
+  const [release, setRelease] = useState<ReleaseInfo | null>(null);
+  const [update, setUpdate] = useState<UpdateCheckResult | null>(null);
+  const [updateBusy, setUpdateBusy] = useState(false);
+  const [updateMessage, setUpdateMessage] = useState<string | null>(null);
 
   useEffect(() => {
     Promise.allSettled([
@@ -52,13 +64,59 @@ export default function SettingsPage() {
       listProviderAccounts(),
       listCustomAgents(),
       fetchGatewayHealth(),
-    ]).then(([configResult, accountResult, agentResult, gatewayResult]) => {
+      fetchReleaseInfo(),
+    ]).then(([configResult, accountResult, agentResult, gatewayResult, releaseResult]) => {
       if (configResult.status === "fulfilled") setConfig(configResult.value);
       if (accountResult.status === "fulfilled") setAccounts(accountResult.value);
       if (agentResult.status === "fulfilled") setAgentCount(agentResult.value.length);
       setGatewayHealthy(gatewayResult.status === "fulfilled");
+      if (releaseResult.status === "fulfilled") setRelease(releaseResult.value);
     });
   }, []);
+
+  async function handleUpdateCheck() {
+    setUpdateBusy(true);
+    setUpdateMessage(null);
+    try {
+      const result = await checkForUpdate();
+      setUpdate(result);
+      setUpdateMessage(
+        result.available
+          ? `发现新版本 ${result.manifest.version}`
+          : `当前已是最新版本 ${result.current_version}`,
+      );
+    } catch (error) {
+      setUpdateMessage(error instanceof Error ? error.message : "检查更新失败");
+    } finally {
+      setUpdateBusy(false);
+    }
+  }
+
+  async function handleUpdateDownload() {
+    setUpdateBusy(true);
+    setUpdateMessage(null);
+    try {
+      const pending = await downloadUpdate();
+      setRelease((current) => (current ? { ...current, pending } : current));
+      setUpdateMessage(`版本 ${pending.version} 已下载并校验`);
+    } catch (error) {
+      setUpdateMessage(error instanceof Error ? error.message : "下载更新失败");
+    } finally {
+      setUpdateBusy(false);
+    }
+  }
+
+  async function handleUpdateInstall() {
+    setUpdateBusy(true);
+    setUpdateMessage(null);
+    try {
+      await installStagedUpdate();
+      setUpdateMessage("正在重启并安装更新…");
+    } catch (error) {
+      setUpdateBusy(false);
+      setUpdateMessage(error instanceof Error ? error.message : "启动安装失败");
+    }
+  }
 
   return (
     <section className="p-6">
@@ -121,6 +179,62 @@ export default function SettingsPage() {
           </div>
         </section>
       </div>
+
+      <section className="mt-6 rounded-lg border border-border bg-surface p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-medium">应用更新</h2>
+            <p className="mt-1 text-xs text-text-secondary">
+              {release
+                ? `OpenTalos ${release.version} · ${release.platform}/${release.arch}`
+                : "正在读取客户端版本"}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleUpdateCheck}
+              disabled={updateBusy || !release?.configured}
+              className="rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-sidebar disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              检查更新
+            </button>
+            {update?.available && (
+              <button
+                type="button"
+                onClick={handleUpdateDownload}
+                disabled={updateBusy}
+                className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                下载更新
+              </button>
+            )}
+            {release?.pending && (
+              <button
+                type="button"
+                onClick={handleUpdateInstall}
+                disabled={updateBusy}
+                className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                重启并安装
+              </button>
+            )}
+          </div>
+        </div>
+        {release && !release.configured && (
+          <p className="mt-3 text-xs text-text-secondary">
+            当前构建未配置签名更新清单。
+          </p>
+        )}
+        {release?.pending && (
+          <p className="mt-3 text-xs text-text-secondary">
+            已暂存版本 {release.pending.version}，重启后由系统安装器完成切换。
+          </p>
+        )}
+        {updateMessage && (
+          <p className="mt-3 text-xs text-text-secondary">{updateMessage}</p>
+        )}
+      </section>
 
       <section className="mt-6 rounded-lg border border-border bg-surface">
         <div className="border-b border-border px-4 py-3">

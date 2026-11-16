@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import threading
 from typing import Protocol
 
 from apps.desktop.config import DesktopConfig
+from release_platform.installer import install_request_path
 
 
 class WindowLike(Protocol):
@@ -44,10 +46,30 @@ class DesktopController:
         self.tray = tray
         self.window: WindowLike | None = None
         self._quitting = False
+        self._update_watcher_stop = threading.Event()
+        self._update_watcher: threading.Thread | None = None
 
     def attach_window(self, window: WindowLike) -> None:
         self.window = window
         self.refresh_status()
+
+    def start_update_watcher(self, interval: float = 1.0) -> None:
+        if self._update_watcher is not None:
+            return
+        marker = install_request_path(self.config.data_dir)
+
+        def watch() -> None:
+            while not self._update_watcher_stop.wait(interval):
+                if marker.is_file() and not self._quitting:
+                    self.request_quit()
+                    return
+
+        self._update_watcher = threading.Thread(
+            target=watch,
+            name="opentalos-update-watcher",
+            daemon=True,
+        )
+        self._update_watcher.start()
 
     def show_main(self) -> None:
         if not self._quitting and self.window is not None:
@@ -80,6 +102,7 @@ class DesktopController:
         if self._quitting:
             return
         self._quitting = True
+        self._update_watcher_stop.set()
         if self.tray is not None:
             self.tray.stop()
         if self.window is not None:
@@ -88,6 +111,7 @@ class DesktopController:
             self.supervisor.stop()
 
     def shutdown(self) -> None:
+        self._update_watcher_stop.set()
         if self.tray is not None:
             self.tray.stop()
         if self.supervisor is not None:

@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
 
+from apps.runtime_paths import is_frozen, resource_root, user_data_dir
+
 
 class DesktopConfigError(RuntimeError):
     """Raised when the desktop app cannot construct a required local command."""
@@ -31,6 +33,9 @@ class DesktopConfig:
     """Resolved paths, ports, and child-process commands for the desktop app."""
 
     root: Path
+    resource_root: Path
+    data_dir: Path
+    frozen: bool
     api_port: int
     gateway_port: int
     web_port: int
@@ -48,6 +53,21 @@ class DesktopConfig:
     ) -> DesktopConfig:
         source = dict(os.environ if env is None else env)
         repo_root = Path(root or Path(__file__).resolve().parents[2]).resolve()
+        frozen = (
+            source.get("OPENTALOS_FROZEN") == "1"
+            if "OPENTALOS_FROZEN" in source
+            else is_frozen()
+        )
+        resources = resource_root(
+            frozen=frozen,
+            source_root=repo_root,
+            env=source,
+        )
+        data = user_data_dir(
+            frozen=frozen,
+            source_root=repo_root,
+            env=source,
+        )
         api_port = _read_int(source, "API_PORT", 8400)
         gateway_port = _read_int(source, "GATEWAY_PORT", 3425)
         web_port = _read_int(source, "WEB_PORT", 3010)
@@ -61,7 +81,7 @@ class DesktopConfig:
         has_build = (repo_root / "apps" / "web" / ".next" / "BUILD_ID").is_file()
         # NEXT_PUBLIC_* values are compiled into a production build. A non-default
         # API port therefore requires the dev server so the URL is not stale.
-        web_mode = (
+        web_mode = "start" if frozen else (
             "start"
             if requested_mode == "auto" and has_build and api_port == 8400
             else "dev"
@@ -71,6 +91,9 @@ class DesktopConfig:
 
         return cls(
             root=repo_root,
+            resource_root=resources,
+            data_dir=data,
+            frozen=frozen,
             api_port=api_port,
             gateway_port=gateway_port,
             web_port=web_port,
@@ -96,9 +119,26 @@ class DesktopConfig:
 
     @property
     def web_executable(self) -> Path:
+        if self.frozen:
+            suffix = ".exe" if os.name == "nt" else ""
+            return self.resource_root / "runtime" / "node" / f"node{suffix}"
         return self.root / "apps" / "web" / "node_modules" / ".bin" / "next"
 
+    @property
+    def bundled_web_server(self) -> Path:
+        return self.resource_root / "runtime" / "web" / "apps" / "web" / "server.js"
+
     def api_command(self) -> tuple[str, ...]:
+        if self.frozen:
+            return (
+                sys.executable,
+                "--internal-service",
+                "api",
+                "--host",
+                self.host,
+                "--port",
+                str(self.api_port),
+            )
         return (
             sys.executable,
             "-m",
@@ -113,6 +153,16 @@ class DesktopConfig:
         )
 
     def web_command(self) -> tuple[str, ...]:
+        if self.frozen:
+            if not self.web_executable.is_file():
+                raise DesktopConfigError(
+                    f"bundled Node runtime not found: {self.web_executable}"
+                )
+            if not self.bundled_web_server.is_file():
+                raise DesktopConfigError(
+                    f"bundled Next.js server not found: {self.bundled_web_server}"
+                )
+            return (str(self.web_executable), str(self.bundled_web_server))
         if not self.web_executable.is_file():
             raise DesktopConfigError(
                 f"next executable not found: {self.web_executable}; run pnpm -C apps/web install"
@@ -131,6 +181,16 @@ class DesktopConfig:
         )
 
     def gateway_command(self) -> tuple[str, ...]:
+        if self.frozen:
+            return (
+                sys.executable,
+                "--internal-service",
+                "gateway",
+                "--host",
+                self.host,
+                "--port",
+                str(self.gateway_port),
+            )
         return (
             sys.executable,
             "-m",
@@ -158,12 +218,18 @@ class DesktopConfig:
             )
         )
         environment["OPENTALOS_GATEWAY_URL"] = f"{self.gateway_url}/v1"
+        environment["OPENTALOS_DATA_DIR"] = str(self.data_dir)
+        environment["OPENTALOS_RESOURCE_ROOT"] = str(self.resource_root)
         return environment
 
     def web_environment(self) -> dict[str, str]:
         environment = os.environ.copy()
         environment["NEXT_PUBLIC_API_URL"] = self.api_url
         environment["NEXT_PUBLIC_GATEWAY_URL"] = self.gateway_url
+        environment["PORT"] = str(self.web_port)
+        environment["HOSTNAME"] = self.host
+        environment["OPENTALOS_DATA_DIR"] = str(self.data_dir)
+        environment["OPENTALOS_RESOURCE_ROOT"] = str(self.resource_root)
         environment.setdefault("NEXT_PUBLIC_AGENTRL_URL", "http://localhost:8420")
         environment.setdefault("NEXT_PUBLIC_DEEPRESEARCH_URL", "http://localhost:8441")
         return environment
@@ -178,6 +244,8 @@ class DesktopConfig:
         environment["GATEWAY_CORS_ORIGINS"] = ",".join(
             (self.web_url, f"http://localhost:{self.web_port}")
         )
+        environment["OPENTALOS_DATA_DIR"] = str(self.data_dir)
+        environment["OPENTALOS_RESOURCE_ROOT"] = str(self.resource_root)
         return environment
 
     def services(self) -> tuple[ServiceSpec, ServiceSpec, ServiceSpec]:
@@ -203,7 +271,11 @@ class DesktopConfig:
             ServiceSpec(
                 name="web",
                 command=self.web_command(),
-                cwd=self.root / "apps" / "web",
+                cwd=(
+                    self.resource_root / "runtime" / "web"
+                    if self.frozen
+                    else self.root / "apps" / "web"
+                ),
                 environment=self.web_environment(),
                 health_url=self.web_url,
                 expect_json=False,

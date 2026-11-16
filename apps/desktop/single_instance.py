@@ -8,17 +8,22 @@ from collections.abc import Callable
 from pathlib import Path
 
 
-def instance_paths(root: Path) -> tuple[Path, Path]:
+def instance_paths(root: Path, *, data_dir: Path | None = None) -> tuple[Path, Path]:
     """Return the stable lock and activation paths for one checkout."""
 
-    data = root.resolve() / ".data"
+    data = Path(data_dir).resolve() if data_dir is not None else root.resolve() / ".data"
     return data / "desktop-instance.lock", data / "desktop-activate"
 
 
-def send_activation(root: Path, message: str = "activate") -> bool:
+def send_activation(
+    root: Path,
+    message: str = "activate",
+    *,
+    data_dir: Path | None = None,
+) -> bool:
     """Notify a running instance, returning false when no lock holder exists."""
 
-    lock_path, activation_path = instance_paths(root)
+    lock_path, activation_path = instance_paths(root, data_dir=data_dir)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     with lock_path.open("a+b") as handle:
         if _lock(handle):
@@ -31,9 +36,9 @@ def send_activation(root: Path, message: str = "activate") -> bool:
 class ActivationListener:
     """Own the single-instance lock and watch for activation requests."""
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, *, data_dir: Path | None = None) -> None:
         self.root = root
-        self.lock_path, self.activation_path = instance_paths(root)
+        self.lock_path, self.activation_path = instance_paths(root, data_dir=data_dir)
         self._lock_file = None
         self._thread: threading.Thread | None = None
         self._stopped = threading.Event()

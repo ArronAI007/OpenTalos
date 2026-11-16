@@ -8,6 +8,8 @@ import os
 import sys
 from pathlib import Path
 
+from apps.runtime_paths import user_data_dir
+
 from .backends import OpenAIImageBackend
 from .service import GeneratedMedia, MediaGenerationService, MediaStore
 
@@ -38,8 +40,9 @@ class MockVideoBackend:
 
 
 def _service() -> MediaGenerationService:
-    database = Path(os.environ.get("OPENTALOS_DB_PATH", ".data/chat.db"))
-    root = Path(os.environ.get("OPENTALOS_MEDIA_ROOT", ".data/media"))
+    data_dir = user_data_dir()
+    database = Path(os.environ.get("OPENTALOS_DB_PATH", data_dir / "chat.db"))
+    root = Path(os.environ.get("OPENTALOS_MEDIA_ROOT", data_dir / "media"))
     if os.environ.get("OPENTALOS_MEDIA_MOCK") == "1":
         image = MockImageBackend()
         video = MockVideoBackend()

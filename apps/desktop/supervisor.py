@@ -100,7 +100,7 @@ class ServiceSupervisor:
         }
 
     def _start_one(self, spec: ServiceSpec) -> None:
-        log_dir = self.config.root / ".data" / "logs"
+        log_dir = self.config.data_dir / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
         log_path = log_dir / f"desktop-{spec.name}.log"
         log = log_path.open("a", encoding="utf-8")

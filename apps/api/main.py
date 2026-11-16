@@ -13,9 +13,11 @@ from fastapi import FastAPI, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel
+from apps.runtime_paths import resource_root, user_data_dir
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-_PACKAGES_DIR = _REPO_ROOT / "packages"
+_RESOURCE_ROOT = resource_root()
+_DATA_ROOT = user_data_dir()
+_PACKAGES_DIR = _RESOURCE_ROOT / "packages"
 if str(_PACKAGES_DIR) not in sys.path:
     sys.path.insert(0, str(_PACKAGES_DIR))
 
@@ -51,6 +53,7 @@ from privacy.engine import PrivacyEngine  # noqa: E402
 from privacy.store import PrivacyStore  # noqa: E402
 from observability import configure_logging, metrics  # noqa: E402
 from observability.run_index import list_run_summaries  # noqa: E402
+from release_routes import create_release_router  # noqa: E402
 from skill.discovery import discover_skills, list_skill_files  # noqa: E402
 from skill.frontmatter import extract_frontmatter_text, parse_frontmatter  # noqa: E402
 from skill.github_import import (  # noqa: E402
@@ -71,10 +74,10 @@ from websearch.tools import WebExtractorTool, WebSearchTool  # noqa: E402
 
 # 技能是仓库 skills/ 下的文件系统目录（pi 式方案，无独立服务）；
 # my_skills/tags/usage 这些可变状态落在 .data/ 下。测试按需 monkeypatch 这几个模块级常量。
-_SKILLS_ROOT = _REPO_ROOT / "skills"
-_MY_SKILLS_PATH = _REPO_ROOT / ".data" / "my_skills.json"
-_SKILL_TAGS_PATH = _REPO_ROOT / ".data" / "skill_tags.json"
-_SKILL_USAGE_PATH = _REPO_ROOT / ".data" / "skill_usage.json"
+_SKILLS_ROOT = _RESOURCE_ROOT / "skills"
+_MY_SKILLS_PATH = _DATA_ROOT / "my_skills.json"
+_SKILL_TAGS_PATH = _DATA_ROOT / "skill_tags.json"
+_SKILL_USAGE_PATH = _DATA_ROOT / "skill_usage.json"
 
 # 进程启动即装好结构化日志（JSON 行到 stderr）；级别取 LOG_LEVEL（默认 INFO）。
 configure_logging()
@@ -230,10 +233,10 @@ def create_app(
 ) -> FastAPI:
     if runtime is None:
         runtime = ChatRuntime(
-            ChatStore(_REPO_ROOT / ".data" / "chat.db"),
+            ChatStore(_DATA_ROOT / "chat.db"),
             tavily_api_key=os.environ.get("TAVILY_API_KEY"),
             a2a_peer_url=os.environ.get("A2A_PEER_URL"),
-            trace_dir=_REPO_ROOT / ".data" / "traces",
+            trace_dir=_DATA_ROOT / "traces",
             # 未设置时传 None（而不是硬编码兜底），让 ChatRuntime._get_agent() 按模型能力目录
             # 算一个默认值（未知模型回退到和改动前相同的 16000，见 model_catalog.py）。
             compaction_token_limit=(
@@ -249,7 +252,7 @@ def create_app(
             bash_requires_approval=os.environ.get("BASH_REQUIRES_APPROVAL", "0") == "1",
         )
     if eval_cases_path is None:
-        eval_cases_path = _REPO_ROOT / ".data" / "eval_cases.json"
+        eval_cases_path = _DATA_ROOT / "eval_cases.json"
 
     @asynccontextmanager
     async def _lifespan(app: FastAPI):
@@ -296,9 +299,9 @@ def create_app(
     subscription_store = subscription_store or SubscriptionStore(runtime.store.path)
     subscriptions = SubscriptionInventory(subscription_store)
     search_key_store = search_key_store or SearchKeyStore(runtime.store.path)
-    plugin_store = plugin_store or PluginStore(_REPO_ROOT / ".data" / "plugins")
+    plugin_store = plugin_store or PluginStore(_DATA_ROOT / "plugins")
     media_service = media_service or MediaGenerationService(
-        MediaStore(runtime.store.path, _REPO_ROOT / ".data" / "media"),
+        MediaStore(runtime.store.path, _DATA_ROOT / "media"),
         image_backend=(
             OpenAIImageBackend(os.environ["OPENAI_API_KEY"])
             if os.environ.get("OPENAI_API_KEY")
@@ -332,6 +335,7 @@ def create_app(
             web_fetch=web_fetch,
         )
     )
+    app.include_router(create_release_router())
 
     @app.middleware("http")
     async def _record_http_metrics(request, call_next):

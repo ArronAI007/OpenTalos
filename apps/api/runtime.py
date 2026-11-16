@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from apps.runtime_paths import resource_root, user_data_dir
 from agents.builder import build_agent
 from agents.subagent_tool import DispatchSubagentTool
 from ai.model import ModelClient
@@ -40,9 +41,10 @@ from suggest import suggest_followups, suggest_skill_usage_examples, suggest_tit
 
 EventSink = Callable[[dict[str, Any]], Awaitable[None]]
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-_DEFAULT_SKILLS_ROOT = _REPO_ROOT / "skills"
-_DEFAULT_MY_SKILLS_PATH = _REPO_ROOT / ".data" / "my_skills.json"
+_RESOURCE_ROOT = resource_root()
+_DATA_ROOT = user_data_dir()
+_DEFAULT_SKILLS_ROOT = _RESOURCE_ROOT / "skills"
+_DEFAULT_MY_SKILLS_PATH = _DATA_ROOT / "my_skills.json"
 
 
 class EventToolRegistry(ToolRegistry):

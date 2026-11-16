@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 import pytest
@@ -66,3 +67,38 @@ def test_config_requires_installed_next_executable(tmp_path: Path) -> None:
 
     with pytest.raises(DesktopConfigError, match="next executable"):
         config.web_command()
+
+
+def test_frozen_config_uses_bundled_node_and_internal_python_services(
+    tmp_path: Path,
+) -> None:
+    resources = tmp_path / "resources"
+    node = resources / "runtime" / "node" / "node"
+    node.parent.mkdir(parents=True)
+    node.write_text("#!/bin/sh\n", encoding="utf-8")
+    node.chmod(0o755)
+    server = resources / "runtime" / "web" / "apps" / "web" / "server.js"
+    server.parent.mkdir(parents=True)
+    server.write_text("console.log('web')\n", encoding="utf-8")
+    data = tmp_path / "user-data"
+
+    config = DesktopConfig.from_env(
+        root=tmp_path,
+        env={
+            "OPENTALOS_FROZEN": "1",
+            "OPENTALOS_RESOURCE_ROOT": str(resources),
+            "OPENTALOS_DATA_DIR": str(data),
+        },
+    )
+
+    assert config.frozen is True
+    assert config.data_dir == data
+    assert config.api_command()[:3] == (
+        sys.executable,
+        "--internal-service",
+        "api",
+    )
+    assert config.gateway_command()[2] == "gateway"
+    assert config.web_command() == (str(node), str(server))
+    assert config.web_environment()["PORT"] == "3010"
+    assert config.api_environment()["OPENTALOS_DATA_DIR"] == str(data)

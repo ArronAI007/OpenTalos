@@ -11,9 +11,11 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
+from apps.runtime_paths import resource_root, user_data_dir
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-_PACKAGES_DIR = _REPO_ROOT / "packages"
+_RESOURCE_ROOT = resource_root()
+_DATA_ROOT = user_data_dir()
+_PACKAGES_DIR = _RESOURCE_ROOT / "packages"
 if str(_PACKAGES_DIR) not in sys.path:
     sys.path.insert(0, str(_PACKAGES_DIR))
 
@@ -73,10 +75,10 @@ def create_app(
     *,
     access_store: GatewayAccessStore | None = None,
 ) -> FastAPI:
-    database = Path(os.environ.get("OPENTALOS_DB_PATH", _REPO_ROOT / ".data" / "chat.db"))
+    database = Path(os.environ.get("OPENTALOS_DB_PATH", _DATA_ROOT / "chat.db"))
     privacy_store = PrivacyStore(database)
     plugin_store = PluginStore(
-        Path(os.environ.get("OPENTALOS_PLUGINS_DIR", _REPO_ROOT / ".data" / "plugins"))
+        Path(os.environ.get("OPENTALOS_PLUGINS_DIR", _DATA_ROOT / "plugins"))
     )
     middleware_plugins = []
     plugin_upstreams = {}
