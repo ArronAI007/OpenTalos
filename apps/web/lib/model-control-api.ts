@@ -46,6 +46,51 @@ export interface ControlPlaneProfile {
   updated_at: string;
 }
 
+export type RoutingMode = "order" | "rotate" | "usage" | "smart" | "pace" | "weight";
+
+export interface RoutingGroupMember {
+  target: string;
+  position: number;
+  weight: number;
+}
+
+export interface RoutingGroup {
+  id: string;
+  name: string;
+  mode: RoutingMode;
+  sticky: boolean;
+  intent_model: string | null;
+  created_at: string;
+  updated_at: string;
+  members: RoutingGroupMember[];
+}
+
+export interface QuotaSnapshot {
+  id: string;
+  account_id: string;
+  window_name: string;
+  remaining: number;
+  limit_value: number;
+  unit: string;
+  reset_at: string | null;
+  read_at: string;
+}
+
+export interface UsageSummary {
+  requests: number;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  accounts: Array<{
+    provider: string;
+    account_name: string;
+    input_tokens: number;
+    output_tokens: number;
+    total_tokens: number;
+    requests: number;
+  }>;
+}
+
 export interface CreateProviderAccountInput {
   provider: string;
   name: string;
@@ -83,6 +128,14 @@ export function modelControlModelsUrl(
   if (query) params.set("q", query);
   const suffix = params.size ? `?${params.toString()}` : "";
   return `${apiUrl.replace(/\/$/, "")}/api/model-control/models${suffix}`;
+}
+
+export function parseRoutingTargets(text: string): Array<{ target: string; weight: number }> {
+  return text
+    .split(/[\n,]/)
+    .map((target) => target.trim())
+    .filter(Boolean)
+    .map((target) => ({ target, weight: 1 }));
 }
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -190,4 +243,61 @@ export async function deleteControlPlaneProfile(profileId: string): Promise<void
     method: "DELETE",
   });
   if (!response.ok) throw new Error(`API ${response.status} ${response.statusText}`);
+}
+
+export async function listRoutingGroups(): Promise<RoutingGroup[]> {
+  return fetchJson<{ groups: RoutingGroup[] }>(
+    `${API_URL}/api/model-control/routing-groups`,
+    { cache: "no-store" }
+  ).then((data) => data.groups);
+}
+
+export async function createRoutingGroup(input: {
+  name: string;
+  mode: RoutingMode;
+  members: Array<{ target: string; weight: number }>;
+  sticky: boolean;
+}): Promise<RoutingGroup> {
+  return fetchJson<RoutingGroup>(`${API_URL}/api/model-control/routing-groups`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+export async function deleteRoutingGroup(groupId: string): Promise<void> {
+  const response = await fetch(
+    `${API_URL}/api/model-control/routing-groups/${groupId}`,
+    { method: "DELETE" }
+  );
+  if (!response.ok) throw new Error(`API ${response.status} ${response.statusText}`);
+}
+
+export async function listQuotaSnapshots(accountId?: string): Promise<QuotaSnapshot[]> {
+  const suffix = accountId ? `?account_id=${encodeURIComponent(accountId)}` : "";
+  return fetchJson<{ quotas: QuotaSnapshot[] }>(
+    `${API_URL}/api/model-control/quotas${suffix}`,
+    { cache: "no-store" }
+  ).then((data) => data.quotas);
+}
+
+export async function recordQuotaSnapshot(input: {
+  account_id: string;
+  window_name: string;
+  remaining: number;
+  limit_value: number;
+  unit: string;
+  reset_at?: string;
+}): Promise<QuotaSnapshot> {
+  return fetchJson<QuotaSnapshot>(`${API_URL}/api/model-control/quotas`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+export async function fetchUsageSummary(): Promise<UsageSummary> {
+  return fetchJson<UsageSummary>(`${API_URL}/api/model-control/usage`, {
+    cache: "no-store",
+  });
 }

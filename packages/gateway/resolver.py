@@ -29,6 +29,14 @@ class ModelResolver:
         self.store = store
 
     def resolve(self, requested_model: str) -> ResolvedModel:
+        candidates = self.candidates(requested_model)
+        if len(candidates) > 1 and "/" not in requested_model:
+            raise ModelResolutionError(
+                f"model {requested_model!r} is ambiguous; use provider/account/model"
+            )
+        return candidates[0]
+
+    def candidates(self, requested_model: str) -> list[ResolvedModel]:
         requested = requested_model.strip()
         if not requested:
             raise ModelResolutionError("model is required")
@@ -36,37 +44,44 @@ class ModelResolver:
         if not records:
             raise ModelResolutionError("no enabled account has discovered models")
 
-        for identity in (
-            lambda row: f"{row['provider']}/{row['account_name']}/{row['model_id']}",
-            lambda row: f"{row['provider']}/{row['model_id']}",
-            lambda row: row["model_id"],
-        ):
-            matches = [row for row in records if identity(row) == requested]
-            if len(matches) == 1:
-                return _resolved(matches[0])
-            if len(matches) > 1:
-                if identity is not None and requested.startswith(f"{matches[0]['provider']}/"):
-                    return _resolved(matches[0])
-                raise ModelResolutionError(
-                    f"model {requested!r} is ambiguous; use provider/account/model"
-                )
+        account_matches = [
+            row
+            for row in records
+            if f"{row['provider']}/{row['account_name']}/{row['model_id']}" == requested
+        ]
+        if account_matches:
+            return [_resolved(row) for row in account_matches]
+
+        provider_matches = [
+            row
+            for row in records
+            if f"{row['provider']}/{row['model_id']}" == requested
+        ]
+        if provider_matches:
+            return [_resolved(row) for row in provider_matches]
+
+        bare_matches = [row for row in records if row["model_id"] == requested]
+        if bare_matches:
+            return [_resolved(row) for row in bare_matches]
 
         if "/" in requested:
             provider, model_id = requested.split("/", 1)
             provider_accounts = [row for row in records if row["provider"] == provider]
             if provider_accounts:
-                chosen = provider_accounts[0]
-                return ResolvedModel(
-                    account_id=chosen["account_id"],
-                    provider=chosen["provider"],
-                    account_name=chosen["account_name"],
-                    backend=chosen["backend"],
-                    base_url=chosen["base_url"],
-                    api_key=chosen["api_key"],
-                    proxy_url=chosen["proxy_url"],
-                    model_id=model_id,
-                    protocol=chosen["protocol"],
-                )
+                return [
+                    ResolvedModel(
+                        account_id=chosen["account_id"],
+                        provider=chosen["provider"],
+                        account_name=chosen["account_name"],
+                        backend=chosen["backend"],
+                        base_url=chosen["base_url"],
+                        api_key=chosen["api_key"],
+                        proxy_url=chosen["proxy_url"],
+                        model_id=model_id,
+                        protocol=chosen["protocol"],
+                    )
+                    for chosen in provider_accounts
+                ]
 
         raise ModelResolutionError(f"no enabled account can serve model {requested!r}")
 

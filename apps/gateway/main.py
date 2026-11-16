@@ -18,6 +18,7 @@ if str(_PACKAGES_DIR) not in sys.path:
     sys.path.insert(0, str(_PACKAGES_DIR))
 
 from gateway.resolver import ModelResolutionError  # noqa: E402
+from gateway.routing import RoutingError  # noqa: E402
 from gateway.service import GatewayService  # noqa: E402
 from gateway.upstream import GatewayUpstreamError  # noqa: E402
 from model_platform.control_plane import ControlPlaneStore  # noqa: E402
@@ -86,12 +87,14 @@ def create_app(service: GatewayService | None = None) -> FastAPI:
     async def chat_completions(body: ChatCompletionBody, request: Request):
         payload = body.model_dump(exclude_none=True)
         client = request.client.host if request.client else None
+        session_key = _session_key(request)
         try:
             if body.stream:
                 stream = await gateway.stream(
                     payload,
                     client=client,
                     protocol="openai-chat",
+                    session_key=session_key,
                 )
                 return StreamingResponse(
                     stream.body,
@@ -105,8 +108,11 @@ def create_app(service: GatewayService | None = None) -> FastAPI:
                 payload,
                 client=client,
                 protocol="openai-chat",
+                session_key=session_key,
             )
         except ModelResolutionError as error:
+            raise HTTPException(404, str(error)) from error
+        except RoutingError as error:
             raise HTTPException(404, str(error)) from error
         except GatewayUpstreamError as error:
             raise HTTPException(error.status_code, error.detail) from error
@@ -115,12 +121,14 @@ def create_app(service: GatewayService | None = None) -> FastAPI:
     async def responses(body: ResponsesBody, request: Request):
         payload = body.model_dump(exclude_none=True)
         client = request.client.host if request.client else None
+        session_key = _session_key(request)
         try:
             if body.stream:
                 stream = await gateway.stream(
                     payload,
                     client=client,
                     protocol="openai-responses",
+                    session_key=session_key,
                 )
                 return StreamingResponse(
                     stream.body,
@@ -131,8 +139,11 @@ def create_app(service: GatewayService | None = None) -> FastAPI:
                 payload,
                 client=client,
                 protocol="openai-responses",
+                session_key=session_key,
             )
         except ModelResolutionError as error:
+            raise HTTPException(404, str(error)) from error
+        except RoutingError as error:
             raise HTTPException(404, str(error)) from error
         except GatewayUpstreamError as error:
             raise HTTPException(error.status_code, error.detail) from error
@@ -141,12 +152,14 @@ def create_app(service: GatewayService | None = None) -> FastAPI:
     async def anthropic_messages(body: AnthropicMessagesBody, request: Request):
         payload = body.model_dump(exclude_none=True)
         client = request.client.host if request.client else None
+        session_key = _session_key(request)
         try:
             if body.stream:
                 stream = await gateway.stream(
                     payload,
                     client=client,
                     protocol="anthropic-messages",
+                    session_key=session_key,
                 )
                 return StreamingResponse(
                     stream.body,
@@ -157,8 +170,11 @@ def create_app(service: GatewayService | None = None) -> FastAPI:
                 payload,
                 client=client,
                 protocol="anthropic-messages",
+                session_key=session_key,
             )
         except ModelResolutionError as error:
+            raise HTTPException(404, str(error)) from error
+        except RoutingError as error:
             raise HTTPException(404, str(error)) from error
         except GatewayUpstreamError as error:
             raise HTTPException(error.status_code, error.detail) from error
@@ -181,12 +197,14 @@ def create_app(service: GatewayService | None = None) -> FastAPI:
         payload["model"] = model
         payload["stream"] = stream_request
         client = request.client.host if request.client else None
+        session_key = _session_key(request)
         try:
             if stream_request:
                 stream = await gateway.stream(
                     payload,
                     client=client,
                     protocol="gemini",
+                    session_key=session_key,
                 )
                 return StreamingResponse(
                     stream.body,
@@ -197,8 +215,11 @@ def create_app(service: GatewayService | None = None) -> FastAPI:
                 payload,
                 client=client,
                 protocol="gemini",
+                session_key=session_key,
             )
         except ModelResolutionError as error:
+            raise HTTPException(404, str(error)) from error
+        except RoutingError as error:
             raise HTTPException(404, str(error)) from error
         except GatewayUpstreamError as error:
             raise HTTPException(error.status_code, error.detail) from error
@@ -207,7 +228,18 @@ def create_app(service: GatewayService | None = None) -> FastAPI:
     async def requests(limit: int = 50) -> dict:
         return {"requests": gateway.list_requests(limit=limit)}
 
+    @app.get("/v1/magpie/usage")
+    async def usage() -> dict:
+        return gateway.usage_summary()
+
     return app
+
+
+def _session_key(request: Request) -> str | None:
+    return (
+        request.headers.get("x-magpie-session")
+        or request.headers.get("x-session-id")
+    )
 
 
 app = create_app()

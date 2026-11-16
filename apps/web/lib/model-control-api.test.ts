@@ -1,5 +1,9 @@
 import { describe, expect, test } from "vitest";
-import { modelControlPresetDefaults, modelControlModelsUrl } from "./model-control-api";
+import {
+  modelControlModelsUrl,
+  modelControlPresetDefaults,
+  parseRoutingTargets,
+} from "./model-control-api";
 
 describe("modelControlPresetDefaults", () => {
   test("keeps custom compatible providers blank", () => {
@@ -37,5 +41,15 @@ describe("modelControlModelsUrl", () => {
     expect(modelControlModelsUrl("http://localhost:8400", "account 1", "gpt 4")).toBe(
       "http://localhost:8400/api/model-control/models?account_id=account+1&q=gpt+4"
     );
+  });
+});
+
+describe("parseRoutingTargets", () => {
+  test("parses comma and newline separated routing targets", () => {
+    expect(parseRoutingTargets("openai/gpt-4o, group/backup\nanthropic/claude")).toEqual([
+      { target: "openai/gpt-4o", weight: 1 },
+      { target: "group/backup", weight: 1 },
+      { target: "anthropic/claude", weight: 1 },
+    ]);
   });
 });

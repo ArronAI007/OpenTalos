@@ -21,9 +21,14 @@ def test_gateway_request_log_records_and_lists_requests(tmp_path: Path) -> None:
         input_tokens=10,
         output_tokens=5,
     )
+    log.set_routing_trace(
+        created["id"],
+        {"mode": "order", "attempts": [{"account": "Primary", "status": 429}]},
+    )
 
     entries = log.list(limit=10)
     assert entries[0]["id"] == created["id"]
     assert entries[0]["model_requested"] == "openai/gpt-4o"
     assert entries[0]["input_tokens"] == 10
     assert entries[0]["total_tokens"] == 15
+    assert entries[0]["routing_trace"]["mode"] == "order"

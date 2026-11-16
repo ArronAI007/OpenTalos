@@ -47,7 +47,46 @@ CREATE TABLE IF NOT EXISTS control_profiles (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS routing_groups (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  mode TEXT NOT NULL,
+  sticky INTEGER NOT NULL DEFAULT 1,
+  intent_model TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS routing_group_members (
+  id TEXT PRIMARY KEY,
+  group_id TEXT NOT NULL,
+  target TEXT NOT NULL,
+  position INTEGER NOT NULL,
+  weight REAL NOT NULL DEFAULT 1,
+  FOREIGN KEY(group_id) REFERENCES routing_groups(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS quota_snapshots (
+  id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL,
+  window_name TEXT NOT NULL,
+  remaining REAL NOT NULL,
+  limit_value REAL NOT NULL,
+  unit TEXT NOT NULL,
+  reset_at TEXT,
+  read_at TEXT NOT NULL,
+  FOREIGN KEY(account_id) REFERENCES control_provider_accounts(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS routing_state (
+  key TEXT PRIMARY KEY,
+  value INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS routing_session_bindings (
+  session_key TEXT PRIMARY KEY,
+  target TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 """
+
+_ROUTING_MODES = {"order", "rotate", "usage", "smart", "pace", "weight"}
 
 
 class ControlPlaneValidationError(ValueError):
@@ -355,6 +394,242 @@ class ControlPlaneStore:
                 "DELETE FROM control_profiles WHERE id = ?", (profile_id,)
             )
             return cursor.rowcount > 0
+
+    def create_routing_group(
+        self,
+        *,
+        name: str,
+        mode: str,
+        members: list[dict[str, Any]],
+        sticky: bool = True,
+        intent_model: str | None = None,
+    ) -> dict[str, Any]:
+        self._validate_routing_group(name, mode, members)
+        group_id = uuid.uuid4().hex
+        now = _now()
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO routing_groups"
+                " (id, name, mode, sticky, intent_model, created_at, updated_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (group_id, name.strip(), mode, int(sticky), intent_model, now, now),
+            )
+            self._replace_group_members(connection, group_id, members)
+        group = self.get_routing_group(name.strip())
+        if group is None:
+            raise RuntimeError("created routing group could not be read")
+        return group
+
+    def update_routing_group(
+        self,
+        group_id_or_name: str,
+        *,
+        mode: str | None = None,
+        members: list[dict[str, Any]] | None = None,
+        sticky: bool | None = None,
+        intent_model: str | None = None,
+    ) -> dict[str, Any] | None:
+        group = self.get_routing_group(group_id_or_name)
+        if group is None:
+            return None
+        next_mode = mode or group["mode"]
+        next_members = members or group["members"]
+        self._validate_routing_group(group["name"], next_mode, next_members)
+        fields = ["mode = ?", "sticky = ?", "intent_model = ?", "updated_at = ?"]
+        values: list[Any] = [
+            next_mode,
+            int(group["sticky"] if sticky is None else sticky),
+            group["intent_model"] if intent_model is None else intent_model,
+            _now(),
+            group["id"],
+        ]
+        with self._connect() as connection:
+            connection.execute(
+                f"UPDATE routing_groups SET {', '.join(fields)} WHERE id = ?",
+                values,
+            )
+            if members is not None:
+                self._replace_group_members(connection, group["id"], members)
+        return self.get_routing_group(group["id"])
+
+    def get_routing_group(self, group_id_or_name: str) -> dict[str, Any] | None:
+        clean = group_id_or_name.removeprefix("group/")
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM routing_groups WHERE id = ? OR name = ?",
+                (clean, clean),
+            ).fetchone()
+            if row is None:
+                return None
+            members = connection.execute(
+                "SELECT target, position, weight FROM routing_group_members"
+                " WHERE group_id = ? ORDER BY position",
+                (row["id"],),
+            ).fetchall()
+        return {
+            "id": row["id"],
+            "name": row["name"],
+            "mode": row["mode"],
+            "sticky": bool(row["sticky"]),
+            "intent_model": row["intent_model"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "members": [
+                {
+                    "target": member["target"],
+                    "position": member["position"],
+                    "weight": member["weight"],
+                }
+                for member in members
+            ],
+        }
+
+    def list_routing_groups(self) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT id FROM routing_groups ORDER BY created_at DESC, rowid DESC"
+            ).fetchall()
+        return [
+            group
+            for row in rows
+            if (group := self.get_routing_group(row["id"])) is not None
+        ]
+
+    def delete_routing_group(self, group_id_or_name: str) -> bool:
+        group = self.get_routing_group(group_id_or_name)
+        if group is None:
+            return False
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM routing_groups WHERE id = ?", (group["id"],)
+            )
+            return cursor.rowcount > 0
+
+    def record_quota_snapshot(
+        self,
+        account_id: str,
+        *,
+        window_name: str,
+        remaining: float,
+        limit_value: float,
+        unit: str,
+        reset_at: str | None,
+    ) -> dict[str, Any]:
+        if self.get_account(account_id) is None:
+            raise ControlPlaneValidationError("account not found")
+        snapshot_id = uuid.uuid4().hex
+        read_at = _now()
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO quota_snapshots"
+                " (id, account_id, window_name, remaining, limit_value, unit, reset_at, read_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    snapshot_id,
+                    account_id,
+                    window_name,
+                    remaining,
+                    limit_value,
+                    unit,
+                    reset_at,
+                    read_at,
+                ),
+            )
+            row = connection.execute(
+                "SELECT * FROM quota_snapshots WHERE id = ?", (snapshot_id,)
+            ).fetchone()
+        return dict(row)
+
+    def latest_quota_snapshots(
+        self,
+        account_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        where = "WHERE q.account_id = ?" if account_id else ""
+        values = [account_id] if account_id else []
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT q.* FROM quota_snapshots q"
+                " JOIN ("
+                "   SELECT account_id, window_name, MAX(read_at) AS read_at"
+                "   FROM quota_snapshots GROUP BY account_id, window_name"
+                " ) latest ON latest.account_id = q.account_id"
+                " AND latest.window_name = q.window_name"
+                " AND latest.read_at = q.read_at"
+                f" {where}"
+                " ORDER BY q.account_id, q.window_name",
+                values,
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def next_routing_counter(self, key: str) -> int:
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO routing_state (key, value) VALUES (?, 1)"
+                " ON CONFLICT(key) DO UPDATE SET value = value + 1",
+                (key,),
+            )
+            row = connection.execute(
+                "SELECT value FROM routing_state WHERE key = ?", (key,)
+            ).fetchone()
+        return int(row["value"])
+
+    def get_session_binding(self, session_key: str) -> str | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT target FROM routing_session_bindings WHERE session_key = ?",
+                (session_key,),
+            ).fetchone()
+        return row["target"] if row else None
+
+    def set_session_binding(self, session_key: str, target: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO routing_session_bindings (session_key, target, updated_at)"
+                " VALUES (?, ?, ?)"
+                " ON CONFLICT(session_key) DO UPDATE SET"
+                " target = excluded.target, updated_at = excluded.updated_at",
+                (session_key, target, _now()),
+            )
+
+    @staticmethod
+    def _replace_group_members(
+        connection: sqlite3.Connection,
+        group_id: str,
+        members: list[dict[str, Any]],
+    ) -> None:
+        connection.execute(
+            "DELETE FROM routing_group_members WHERE group_id = ?", (group_id,)
+        )
+        for position, member in enumerate(members):
+            connection.execute(
+                "INSERT INTO routing_group_members"
+                " (id, group_id, target, position, weight) VALUES (?, ?, ?, ?, ?)",
+                (
+                    uuid.uuid4().hex,
+                    group_id,
+                    str(member["target"]).strip(),
+                    position,
+                    float(member.get("weight", 1)),
+                ),
+            )
+
+    @staticmethod
+    def _validate_routing_group(
+        name: str,
+        mode: str,
+        members: list[dict[str, Any]],
+    ) -> None:
+        if not name.strip():
+            raise ControlPlaneValidationError("routing group name is required")
+        if mode not in _ROUTING_MODES:
+            raise ControlPlaneValidationError(f"unsupported routing mode: {mode}")
+        if not members:
+            raise ControlPlaneValidationError("routing group needs at least one member")
+        for member in members:
+            if not str(member.get("target", "")).strip():
+                raise ControlPlaneValidationError("routing member target is required")
+            if float(member.get("weight", 1)) <= 0:
+                raise ControlPlaneValidationError("routing member weight must be positive")
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path)

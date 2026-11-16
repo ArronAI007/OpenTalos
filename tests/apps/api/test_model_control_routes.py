@@ -148,3 +148,71 @@ async def test_control_plane_profiles(control_api) -> None:
         f"/api/model-control/profiles/{created.json()['id']}"
     )
     assert deleted.status_code == 204
+
+
+async def test_control_plane_routing_groups(control_api) -> None:
+    created = await control_api.post(
+        "/api/model-control/routing-groups",
+        json={
+            "name": "coding",
+            "mode": "order",
+            "sticky": True,
+            "members": [
+                {"target": "openai/gpt-4o", "weight": 1},
+                {"target": "group/backup", "weight": 2},
+            ],
+        },
+    )
+
+    assert created.status_code == 201
+    group = created.json()
+    assert group["name"] == "coding"
+    listed = await control_api.get("/api/model-control/routing-groups")
+    assert listed.json()["groups"][0]["members"][1]["weight"] == 2
+
+    updated = await control_api.patch(
+        f"/api/model-control/routing-groups/{group['id']}",
+        json={"mode": "smart", "members": [{"target": "openai/gpt-4o"}]},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["mode"] == "smart"
+    assert len(updated.json()["members"]) == 1
+
+    deleted = await control_api.delete(
+        f"/api/model-control/routing-groups/{group['id']}"
+    )
+    assert deleted.status_code == 204
+
+
+async def test_control_plane_quota_and_usage_routes(control_api) -> None:
+    account = (
+        await control_api.post(
+            "/api/model-control/accounts",
+            json={
+                "provider": "openai",
+                "name": "Primary",
+                "backend": "openai-compatible",
+                "api_key": "secret",
+            },
+        )
+    ).json()
+    quota = await control_api.post(
+        "/api/model-control/quotas",
+        json={
+            "account_id": account["id"],
+            "window_name": "weekly",
+            "remaining": 77,
+            "limit_value": 100,
+            "unit": "requests",
+            "reset_at": "2026-11-20T00:00:00",
+        },
+    )
+    assert quota.status_code == 201
+    listed = await control_api.get(
+        "/api/model-control/quotas", params={"account_id": account["id"]}
+    )
+    assert listed.json()["quotas"][0]["remaining"] == 77
+
+    usage = await control_api.get("/api/model-control/usage")
+    assert usage.status_code == 200
+    assert usage.json()["total_tokens"] == 0

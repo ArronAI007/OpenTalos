@@ -3,21 +3,32 @@
 import { useEffect, useState } from "react";
 import {
   createProviderAccount,
+  createRoutingGroup,
   deleteControlPlaneProfile,
   deleteProviderAccount,
+  deleteRoutingGroup,
   discoverProviderModels,
+  fetchUsageSummary,
   importLegacyProviderConfigs,
   listControlPlaneModels,
   listControlPlaneProfiles,
   listModelControlPresets,
   listProviderAccounts,
+  listQuotaSnapshots,
+  listRoutingGroups,
   modelControlPresetDefaults,
+  parseRoutingTargets,
+  recordQuotaSnapshot,
   saveControlPlaneProfile,
   updateProviderAccount,
   type ControlPlaneProfile,
   type ModelDescriptor,
   type ProviderAccount,
   type ProviderPreset,
+  type QuotaSnapshot,
+  type RoutingGroup,
+  type RoutingMode,
+  type UsageSummary,
 } from "@/lib/model-control-api";
 import { TrashIcon } from "@/components/ui/icons";
 
@@ -46,9 +57,21 @@ export function ModelControlPlane() {
   const [presets, setPresets] = useState<ProviderPreset[]>([]);
   const [accounts, setAccounts] = useState<ProviderAccount[]>([]);
   const [profiles, setProfiles] = useState<ControlPlaneProfile[]>([]);
+  const [groups, setGroups] = useState<RoutingGroup[]>([]);
+  const [quotas, setQuotas] = useState<QuotaSnapshot[]>([]);
+  const [usage, setUsage] = useState<UsageSummary | null>(null);
   const [models, setModels] = useState<Record<string, ModelDescriptor[]>>({});
   const [form, setForm] = useState<AccountForm>(EMPTY_FORM);
   const [profileName, setProfileName] = useState("");
+  const [groupName, setGroupName] = useState("");
+  const [groupMode, setGroupMode] = useState<RoutingMode>("order");
+  const [groupTargets, setGroupTargets] = useState("");
+  const [groupSticky, setGroupSticky] = useState(true);
+  const [quotaAccount, setQuotaAccount] = useState("");
+  const [quotaWindow, setQuotaWindow] = useState("weekly");
+  const [quotaRemaining, setQuotaRemaining] = useState("");
+  const [quotaLimit, setQuotaLimit] = useState("");
+  const [quotaReset, setQuotaReset] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -69,11 +92,17 @@ export function ModelControlPlane() {
       listModelControlPresets(),
       listProviderAccounts(),
       listControlPlaneProfiles(),
+      listRoutingGroups(),
+      listQuotaSnapshots(),
+      fetchUsageSummary(),
     ])
-      .then(async ([nextPresets, nextAccounts, nextProfiles]) => {
+      .then(async ([nextPresets, nextAccounts, nextProfiles, nextGroups, nextQuotas, nextUsage]) => {
         setPresets(nextPresets);
         setAccounts(nextAccounts);
         setProfiles(nextProfiles);
+        setGroups(nextGroups);
+        setQuotas(nextQuotas);
+        setUsage(nextUsage);
         const entries = await Promise.all(
           nextAccounts.map(async (account) => [
             account.id,
@@ -193,6 +222,65 @@ export function ModelControlPlane() {
   const handleDeleteProfile = async (profileId: string) => {
     await deleteControlPlaneProfile(profileId);
     setProfiles((current) => current.filter((profile) => profile.id !== profileId));
+  };
+
+  const handleCreateGroup = async () => {
+    const members = parseRoutingTargets(groupTargets);
+    if (!groupName.trim() || members.length === 0) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const created = await createRoutingGroup({
+        name: groupName.trim(),
+        mode: groupMode,
+        members,
+        sticky: groupSticky,
+      });
+      setGroups((current) => [created, ...current]);
+      setGroupName("");
+      setGroupTargets("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "创建路由组失败");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDeleteGroup = async (groupId: string) => {
+    await deleteRoutingGroup(groupId);
+    setGroups((current) => current.filter((group) => group.id !== groupId));
+  };
+
+  const handleRecordQuota = async () => {
+    const accountId = quotaAccount || accounts[0]?.id;
+    if (!accountId || !quotaWindow.trim() || !quotaRemaining || !quotaLimit) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const created = await recordQuotaSnapshot({
+        account_id: accountId,
+        window_name: quotaWindow.trim(),
+        remaining: Number(quotaRemaining),
+        limit_value: Number(quotaLimit),
+        unit: "requests",
+        reset_at: quotaReset || undefined,
+      });
+      setQuotas((current) => [
+        created,
+        ...current.filter(
+          (quota) =>
+            quota.account_id !== created.account_id ||
+            quota.window_name !== created.window_name
+        ),
+      ]);
+      setQuotaRemaining("");
+      setQuotaLimit("");
+      setQuotaReset("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "记录配额失败");
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -352,6 +440,153 @@ export function ModelControlPlane() {
               )}
             </div>
           ))
+        )}
+      </div>
+
+      <div className="mt-6">
+        <div className="mb-2 flex items-center justify-between">
+          <h3 className="text-sm font-medium">路由组</h3>
+          <span className="text-xs text-text-secondary">
+            {usage ? `${usage.requests} requests · ${usage.total_tokens} tokens` : ""}
+          </span>
+        </div>
+        <div className="grid gap-2 md:grid-cols-2">
+          <input
+            value={groupName}
+            onChange={(event) => setGroupName(event.target.value)}
+            placeholder="路由组名称"
+            className="rounded-lg border border-border px-3 py-1.5 text-sm"
+          />
+          <select
+            value={groupMode}
+            onChange={(event) => setGroupMode(event.target.value as RoutingMode)}
+            className="rounded-lg border border-border px-3 py-1.5 text-sm"
+          >
+            <option value="order">order</option>
+            <option value="rotate">rotate</option>
+            <option value="usage">usage</option>
+            <option value="smart">smart</option>
+            <option value="pace">pace</option>
+            <option value="weight">weight</option>
+          </select>
+          <textarea
+            value={groupTargets}
+            onChange={(event) => setGroupTargets(event.target.value)}
+            placeholder={"模型或嵌套组，每行一个\nexample: openai/gpt-4o\ngroup/backup"}
+            className="min-h-20 rounded-lg border border-border px-3 py-1.5 font-mono text-xs md:col-span-2"
+          />
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={groupSticky}
+              onChange={(event) => setGroupSticky(event.target.checked)}
+            />
+            会话粘性
+          </label>
+          <button
+            type="button"
+            onClick={() => void handleCreateGroup()}
+            disabled={busy || !groupName.trim() || !groupTargets.trim()}
+            className="rounded-lg bg-text px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+          >
+            创建路由组
+          </button>
+        </div>
+        {groups.length > 0 && (
+          <div className="mt-2 space-y-2">
+            {groups.map((group) => (
+              <div
+                key={group.id}
+                className="flex flex-wrap items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm"
+              >
+                <span className="font-medium">{group.name}</span>
+                <span className="text-xs text-text-secondary">
+                  {group.mode} · {group.sticky ? "sticky" : "turn"}
+                </span>
+                <span className="flex-1" />
+                <span className="font-mono text-xs text-text-secondary">
+                  {group.members.map((member) => member.target).join(" → ")}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void handleDeleteGroup(group.id)}
+                  aria-label={`删除路由组：${group.name}`}
+                  className="text-text-secondary hover:text-red-500"
+                >
+                  <TrashIcon width={14} height={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="mt-6">
+        <h3 className="mb-2 text-sm font-medium">配额快照</h3>
+        <div className="grid gap-2 md:grid-cols-5">
+          <select
+            value={quotaAccount || accounts[0]?.id || ""}
+            onChange={(event) => setQuotaAccount(event.target.value)}
+            className="rounded-lg border border-border px-3 py-1.5 text-sm md:col-span-2"
+          >
+            {accounts.map((account) => (
+              <option key={account.id} value={account.id}>
+                {account.name}
+              </option>
+            ))}
+          </select>
+          <input
+            value={quotaWindow}
+            onChange={(event) => setQuotaWindow(event.target.value)}
+            placeholder="窗口"
+            className="rounded-lg border border-border px-3 py-1.5 text-sm"
+          />
+          <input
+            value={quotaRemaining}
+            onChange={(event) => setQuotaRemaining(event.target.value)}
+            type="number"
+            min="0"
+            placeholder="剩余"
+            className="rounded-lg border border-border px-3 py-1.5 text-sm"
+          />
+          <input
+            value={quotaLimit}
+            onChange={(event) => setQuotaLimit(event.target.value)}
+            type="number"
+            min="1"
+            placeholder="总量"
+            className="rounded-lg border border-border px-3 py-1.5 text-sm"
+          />
+          <input
+            value={quotaReset}
+            onChange={(event) => setQuotaReset(event.target.value)}
+            type="datetime-local"
+            className="rounded-lg border border-border px-3 py-1.5 text-sm md:col-span-3"
+          />
+          <button
+            type="button"
+            onClick={() => void handleRecordQuota()}
+            disabled={busy || !accounts.length || !quotaRemaining || !quotaLimit}
+            className="rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-sidebar disabled:opacity-50 md:col-span-2"
+          >
+            记录配额
+          </button>
+        </div>
+        {quotas.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-2">
+            {quotas.map((quota) => {
+              const account = accounts.find((item) => item.id === quota.account_id);
+              return (
+                <span
+                  key={quota.id}
+                  className="rounded-lg border border-border px-2 py-1 text-xs text-text-secondary"
+                >
+                  {account?.name ?? quota.account_id} · {quota.window_name} ·{" "}
+                  {quota.remaining}/{quota.limit_value} {quota.unit}
+                </span>
+              );
+            })}
+          </div>
         )}
       </div>
 
