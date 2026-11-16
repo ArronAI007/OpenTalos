@@ -123,6 +123,16 @@ export interface PluginRecord {
   description: string;
 }
 
+export interface DiscoveredPlugin {
+  id: string;
+  name: string;
+  version: string;
+  type: string;
+  description: string;
+  installed: boolean;
+  path: string;
+}
+
 export interface MediaJob {
   id: string;
   job_id: string;
@@ -344,6 +354,19 @@ export async function listPlugins(): Promise<PluginRecord[]> {
   return fetchJson<{ plugins: PluginRecord[] }>(
     `${M7_API_URL}/api/m7/plugins`,
     { cache: "no-store" }
+  ).then((data) => data.plugins);
+}
+
+export async function discoverPlugins(
+  repository: string
+): Promise<DiscoveredPlugin[]> {
+  return fetchJson<{ plugins: DiscoveredPlugin[] }>(
+    `${M7_API_URL}/api/m7/plugins/discover`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ repository }),
+    }
   ).then((data) => data.plugins);
 }
 

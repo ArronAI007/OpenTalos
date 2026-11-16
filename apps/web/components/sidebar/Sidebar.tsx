@@ -1,23 +1,34 @@
 "use client";
 
 import { useState } from "react";
+import type { ComponentType, SVGProps } from "react";
 import Link from "next/link";
-import { NewTaskButton, SidebarRail, TaskList, useCreateTask } from "./SidebarClient";
-import { SidebarHeader } from "./SidebarHeader";
+import { usePathname } from "next/navigation";
+
 import { SearchModal } from "@/components/search/SearchModal";
 import {
-  ActivityIcon,
-  BeakerIcon,
-  BrainIcon,
   ChartBarIcon,
   KeyIcon,
-  PlugIcon,
+  LayoutGridIcon,
+  LibraryIcon,
+  MessageSquareIcon,
   PuzzleIcon,
+  RouteIcon,
+  ServerIcon,
+  SettingsIcon,
   ShieldIcon,
-  SparklesIcon,
-  TelescopeIcon,
+  TerminalIcon,
   XIcon,
 } from "@/components/ui/icons";
+import {
+  NAVIGATION_GROUPS,
+  SETTINGS_NAV_ITEM,
+  type NavigationIcon,
+} from "@/lib/navigation";
+
+import { SidebarRail, useCreateTask } from "./SidebarClient";
+import { SidebarGatewayStatus } from "./SidebarGatewayStatus";
+import { SidebarHeader } from "./SidebarHeader";
 
 interface SidebarProps {
   collapsed: boolean;
@@ -26,37 +37,56 @@ interface SidebarProps {
   onCloseMobile: () => void;
 }
 
-const navLinkCls = "flex items-center gap-2 rounded-lg px-3 py-2 text-sm hover:bg-surface";
+const navLinkCls =
+  "flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors";
 
-export function Sidebar({ collapsed, mobileOpen, onToggleCollapse, onCloseMobile }: SidebarProps) {
+const ICONS: Record<NavigationIcon, ComponentType<SVGProps<SVGSVGElement>>> = {
+  agent: TerminalIcon,
+  conversation: MessageSquareIcon,
+  library: LibraryIcon,
+  provider: KeyIcon,
+  route: RouteIcon,
+  routeGroups: LayoutGridIcon,
+  gateway: ServerIcon,
+  usage: ChartBarIcon,
+  privacy: ShieldIcon,
+  plugins: PuzzleIcon,
+};
+
+export function Sidebar({
+  collapsed,
+  mobileOpen,
+  onToggleCollapse,
+  onCloseMobile,
+}: SidebarProps) {
+  const pathname = usePathname();
   const [searchOpen, setSearchOpen] = useState(false);
   const { busy, error, create } = useCreateTask();
 
-  // 窄栏只在折叠态渲染，此时 onToggleCollapse 等价于「展开」。
-  const handleExpand = onToggleCollapse;
   const openSearch = () => setSearchOpen(true);
   const closeSearch = () => setSearchOpen(false);
   const handleRailCreate = async () => {
     const ok = await create();
-    // 失败自动展开，行内报错由展开后的 NewTaskButton 展示。
     if (!ok) onToggleCollapse();
   };
 
   return (
     <>
-      {/* 折叠态窄栏：仅桌面显示（移动端用抽屉里的完整导航）。 */}
       {collapsed && (
         <SidebarRail
           className="hidden md:flex"
           busy={busy}
           onCreate={handleRailCreate}
-          onExpand={handleExpand}
+          onExpand={onToggleCollapse}
           onOpenSearch={openSearch}
         />
       )}
-      {/* 移动端遮罩：点击关闭抽屉。 */}
       {mobileOpen && (
-        <div className="fixed inset-0 z-30 bg-black/40 md:hidden" onClick={onCloseMobile} aria-hidden="true" />
+        <div
+          className="fixed inset-0 z-30 bg-black/40 md:hidden"
+          onClick={onCloseMobile}
+          aria-hidden="true"
+        />
       )}
       <nav
         aria-label="主导航"
@@ -75,49 +105,58 @@ export function Sidebar({ collapsed, mobileOpen, onToggleCollapse, onCloseMobile
           </button>
         </div>
         <SidebarHeader onOpenSearch={openSearch} onToggleCollapse={onToggleCollapse} />
-        <NewTaskButton busy={busy} error={error} onCreate={() => void create()} />
-        <Link href="/agents" onClick={onCloseMobile} className={navLinkCls}>
-          <SparklesIcon />
-          Agent
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-0.5">
+          {NAVIGATION_GROUPS.map((group, groupIndex) => (
+            <div
+              key={group.id}
+              className={groupIndex === 0 ? "pb-2" : "border-t border-border/70 pb-2 pt-3"}
+            >
+              {group.label && (
+                <p className="mb-1 px-2 text-[11px] font-medium text-text-secondary">
+                  {group.label}
+                </p>
+              )}
+              <div className="space-y-0.5">
+                {group.items.map((item) => {
+                  const Icon = ICONS[item.icon];
+                  const active =
+                    pathname === item.href || pathname.startsWith(`${item.href}/`);
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      onClick={onCloseMobile}
+                      className={`${navLinkCls} ${
+                        active
+                          ? "bg-surface font-medium text-text shadow-sm"
+                          : "text-text-secondary hover:bg-surface hover:text-text"
+                      }`}
+                    >
+                      <Icon width={16} height={16} />
+                      {item.label}
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <Link
+          href={SETTINGS_NAV_ITEM.href}
+          onClick={onCloseMobile}
+          className={`${navLinkCls} mb-2 border-t border-border pt-3 ${
+            pathname === SETTINGS_NAV_ITEM.href
+              ? "bg-surface font-medium text-text"
+              : "text-text-secondary hover:bg-surface hover:text-text"
+          }`}
+        >
+          <SettingsIcon width={16} height={16} />
+          {SETTINGS_NAV_ITEM.label}
         </Link>
-        <Link href="/skills" onClick={onCloseMobile} className={navLinkCls}>
-          <PuzzleIcon />
-          技能
-        </Link>
-        <Link href="/eval" onClick={onCloseMobile} className={navLinkCls}>
-          <ChartBarIcon />
-          Agent 评估
-        </Link>
-        <Link href="/agentrl" onClick={onCloseMobile} className={navLinkCls}>
-          <BeakerIcon />
-          AgentRL
-        </Link>
-        <Link href="/deepresearch" onClick={onCloseMobile} className={navLinkCls}>
-          <TelescopeIcon />
-          DeepResearch
-        </Link>
-        <Link href="/mcp" onClick={onCloseMobile} className={navLinkCls}>
-          <PlugIcon />
-          MCP
-        </Link>
-        <Link href="/providers" onClick={onCloseMobile} className={navLinkCls}>
-          <KeyIcon />
-          Provider
-        </Link>
-        <Link href="/security" onClick={onCloseMobile} className={navLinkCls}>
-          <ShieldIcon />
-          安全与共享
-        </Link>
-        <Link href="/memory" onClick={onCloseMobile} className={navLinkCls}>
-          <BrainIcon />
-          记忆
-        </Link>
-        <Link href="/runs" onClick={onCloseMobile} className={navLinkCls}>
-          <ActivityIcon />
-          运行记录
-        </Link>
-        <hr className="my-3 border-border" />
-        <TaskList />
+        <SidebarGatewayStatus onNavigate={onCloseMobile} />
+        {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
       </nav>
       <SearchModal open={searchOpen} onClose={closeSearch} />
     </>

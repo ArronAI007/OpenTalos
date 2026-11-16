@@ -8,7 +8,7 @@ import { copyText } from "@/lib/clipboard";
 import { sortTasks } from "@/lib/task-sort";
 import { partitionTasks, visibleUngrouped } from "@/lib/task-projects";
 import { TASK_TITLE_UPDATED_EVENT, type TaskTitleUpdatedDetail } from "@/lib/task-events";
-import { ActivityIcon, BeakerIcon, BrainIcon, ChartBarIcon, ClockIcon, KeyIcon, PencilSquareIcon, PinIcon, PlugIcon, PuzzleIcon, SearchIcon, ShieldIcon, SparklesIcon, StarIcon, TelescopeIcon } from "@/components/ui/icons";
+import { ChartBarIcon, KeyIcon, LayoutGridIcon, LibraryIcon, MessageSquareIcon, PencilSquareIcon, PinIcon, PuzzleIcon, RouteIcon, SearchIcon, ServerIcon, SettingsIcon, ShieldIcon, StarIcon, TerminalIcon } from "@/components/ui/icons";
 import { LogoMark } from "./Logo";
 import { TaskListMenu } from "./TaskListMenu";
 import { ArchivedSection } from "./ArchivedSection";
@@ -90,38 +90,38 @@ export function SidebarRail({ busy, onCreate, onExpand, onOpenSearch, className 
         <SearchIcon />
       </button>
       <Link href="/agents" aria-label="Agent" title="Agent" className={iconBtn}>
-        <SparklesIcon />
+        <TerminalIcon />
       </Link>
-      <Link href="/skills" aria-label="技能" title="技能" className={iconBtn}>
-        <PuzzleIcon />
+      <Link href="/conversations" aria-label="会话" title="会话" className={iconBtn}>
+        <MessageSquareIcon />
       </Link>
-      <Link href="/eval" aria-label="Agent 评估" title="Agent 评估" className={iconBtn}>
-        <ChartBarIcon />
+      <Link href="/resources" aria-label="资源库" title="资源库" className={iconBtn}>
+        <LibraryIcon />
       </Link>
-      <Link href="/agentrl" aria-label="AgentRL" title="AgentRL" className={iconBtn}>
-        <BeakerIcon />
-      </Link>
-      <Link href="/deepresearch" aria-label="DeepResearch" title="DeepResearch" className={iconBtn}>
-        <TelescopeIcon />
-      </Link>
-      <Link href="/mcp" aria-label="MCP" title="MCP" className={iconBtn}>
-        <PlugIcon />
-      </Link>
-      <Link href="/providers" aria-label="Provider" title="Provider" className={iconBtn}>
+      <Link href="/providers" aria-label="供应商" title="供应商" className={iconBtn}>
         <KeyIcon />
       </Link>
-      <Link href="/security" aria-label="安全与共享" title="安全与共享" className={iconBtn}>
+      <Link href="/routing" aria-label="路由" title="路由" className={iconBtn}>
+        <RouteIcon />
+      </Link>
+      <Link href="/routing-groups" aria-label="路由组" title="路由组" className={iconBtn}>
+        <LayoutGridIcon />
+      </Link>
+      <Link href="/gateway" aria-label="网关" title="网关" className={iconBtn}>
+        <ServerIcon />
+      </Link>
+      <Link href="/usage" aria-label="用量" title="用量" className={iconBtn}>
+        <ChartBarIcon />
+      </Link>
+      <Link href="/privacy" aria-label="脱敏" title="脱敏" className={iconBtn}>
         <ShieldIcon />
       </Link>
-      <Link href="/memory" aria-label="记忆" title="记忆" className={iconBtn}>
-        <BrainIcon />
+      <Link href="/plugins" aria-label="插件" title="插件" className={iconBtn}>
+        <PuzzleIcon />
       </Link>
-      <Link href="/runs" aria-label="运行记录" title="运行记录" className={iconBtn}>
-        <ActivityIcon />
+      <Link href="/settings" aria-label="设置" title="设置" className={iconBtn}>
+        <SettingsIcon />
       </Link>
-      <button type="button" aria-label="任务历史" title="任务历史" onClick={onExpand} className={iconBtn}>
-        <ClockIcon />
-      </button>
     </nav>
   );
 }

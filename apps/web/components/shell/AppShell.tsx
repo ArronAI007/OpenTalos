@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { TopBar } from "@/components/TopBar";
 import { MenuIcon } from "@/components/ui/icons";
+import { RouteBreadcrumb } from "./RouteBreadcrumb";
 
 const SIDEBAR_COLLAPSED_KEY = "opentalos.sidebarCollapsed";
 
@@ -70,6 +71,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </button>
           <span className="text-sm font-semibold tracking-tight">OpenTalos</span>
         </header>
+        <RouteBreadcrumb />
         {showTopBar && <TopBar />}
         <main className="flex-1 overflow-y-auto">{children}</main>
       </div>

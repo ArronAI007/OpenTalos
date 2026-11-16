@@ -194,7 +194,7 @@ export default function ProvidersPage() {
 
   return (
     <section className="p-6">
-      <h1 className="mb-4 text-xl font-semibold">Provider</h1>
+      <h1 className="mb-4 text-xl font-semibold">供应商</h1>
       <p className="mb-4 text-sm text-text-secondary">
         统一管理聊天模型和 embedding 模型的 provider 配置。改动对下一个新建的任务/embedding 调用立刻生效，不需要重启。
       </p>

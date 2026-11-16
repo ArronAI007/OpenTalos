@@ -12,6 +12,7 @@ import {
 import { TrashIcon } from "@/components/ui/icons";
 import { PageSkeleton } from "@/components/ui/PageSkeleton";
 import { AgentPlatformPanel } from "@/components/agents/AgentPlatformPanel";
+import { AgentQuickStart } from "@/components/agents/AgentQuickStart";
 
 const EXAMPLES = ["帮我把零散笔记整理成结构清晰的周报", "做一个严谨的代码审查员，只指出真正的问题", "一个耐心的英语口语陪练"];
 
@@ -78,11 +79,10 @@ export default function AgentsPage() {
   return (
     <section className="p-6">
       <h1 className="mb-4 text-xl font-semibold">Agent</h1>
-      <p className="mb-4 text-sm text-text-secondary">
-        用一句话描述你想要的 Agent，自动生成名称、角色设定和可用技能；之后可以随时用它开启新任务。
-      </p>
+      <AgentQuickStart />
 
       <div className="mb-6 rounded-xl border border-border bg-surface p-4">
+        <h2 className="mb-2 text-sm font-medium">创建自建 Agent</h2>
         <textarea
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}

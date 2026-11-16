@@ -138,6 +138,23 @@ export function parseRoutingTargets(text: string): Array<{ target: string; weigh
     .map((target) => ({ target, weight: 1 }));
 }
 
+export function parseWeightedRoutingTargets(
+  text: string
+): Array<{ target: string; weight: number }> {
+  return text
+    .split(/[\n,]/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const match = line.match(/^(.*?)(?:\s*[|@]\s*(\d+(?:\.\d+)?))?$/);
+      return {
+        target: (match?.[1] ?? line).trim(),
+        weight: Number(match?.[2] ?? 1),
+      };
+    })
+    .filter((item) => item.target && item.weight > 0);
+}
+
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
   if (!response.ok) {
@@ -263,6 +280,24 @@ export async function createRoutingGroup(input: {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
   });
+}
+
+export async function updateRoutingGroup(
+  groupId: string,
+  input: {
+    mode?: RoutingMode;
+    members?: Array<{ target: string; weight: number }>;
+    sticky?: boolean;
+  }
+): Promise<RoutingGroup> {
+  return fetchJson<RoutingGroup>(
+    `${API_URL}/api/model-control/routing-groups/${groupId}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    }
+  );
 }
 
 export async function deleteRoutingGroup(groupId: string): Promise<void> {

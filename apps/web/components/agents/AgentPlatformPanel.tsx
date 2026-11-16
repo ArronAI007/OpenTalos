@@ -625,7 +625,11 @@ export function AgentPlatformPanel() {
               <option value="instructions">Instructions</option>
               <option value="mcp">MCP Server</option>
               <option value="skills">Skill</option>
+              <option value="hooks">Hook</option>
+              <option value="env">Environment</option>
               <option value="subagents">Subagent</option>
+              <option value="commands">Slash command</option>
+              <option value="plugins">Claude plugin</option>
             </select>
             <input
               value={libraryDraft.name}

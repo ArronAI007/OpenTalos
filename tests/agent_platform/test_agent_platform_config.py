@@ -180,3 +180,33 @@ def test_library_mcp_server_is_merged_and_removed_from_json(tmp_path: Path) -> N
 
     manager.remove_library_item(definition, item["id"])
     assert json.loads(config.read_text(encoding="utf-8")) == {"owned": True}
+
+
+def test_library_command_is_written_to_a_namespaced_native_file(
+    tmp_path: Path,
+) -> None:
+    config = tmp_path / "settings.json"
+    config.write_text("{}\n", encoding="utf-8")
+    store = AgentPlatformStore(tmp_path / "platform.db")
+    manager = AgentConfigManager(store, gateway_url="http://127.0.0.1:3425/v1")
+    base = _definition(tmp_path)
+    definition = AgentDefinition(
+        **{
+            **base.__dict__,
+            "resource_paths": {
+                "commands": str(tmp_path / "commands" / "{name}.md")
+            },
+        }
+    )
+    item = store.create_library_item(
+        kind="commands",
+        name="review-pr",
+        content="Review the current pull request.",
+    )
+
+    manager.apply_library_item(definition, item)
+
+    target = tmp_path / "commands" / "review-pr.md"
+    assert target.read_text(encoding="utf-8") == "Review the current pull request."
+    manager.remove_library_item(definition, item["id"])
+    assert not target.exists()

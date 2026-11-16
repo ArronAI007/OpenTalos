@@ -83,7 +83,16 @@ CREATE TABLE IF NOT EXISTS agent_platform_library_bindings (
 );
 """
 
-_LIBRARY_KINDS = {"instructions", "mcp", "skills", "subagents"}
+_LIBRARY_KINDS = {
+    "instructions",
+    "mcp",
+    "skills",
+    "hooks",
+    "env",
+    "subagents",
+    "commands",
+    "plugins",
+}
 
 
 class AgentPlatformValidationError(ValueError):

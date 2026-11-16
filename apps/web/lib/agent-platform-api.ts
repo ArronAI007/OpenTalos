@@ -2,7 +2,15 @@ export const AGENT_PLATFORM_API_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8400";
 
 export type AgentCompatibility = "native" | "manual";
-export type AgentLibraryKind = "instructions" | "mcp" | "skills" | "subagents";
+export type AgentLibraryKind =
+  | "instructions"
+  | "mcp"
+  | "skills"
+  | "hooks"
+  | "env"
+  | "subagents"
+  | "commands"
+  | "plugins";
 
 export interface AgentBinding {
   agent_id: string;

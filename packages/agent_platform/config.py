@@ -322,7 +322,7 @@ class AgentConfigManager:
             raise AgentConfigError(
                 f"{definition.name} does not support the {kind} library"
             )
-        if kind in {"skills", "subagents"}:
+        if kind in {"skills", "hooks", "env", "subagents", "commands", "plugins"}:
             template = template.format(name=_safe_name(item["name"]))
         return Path(template).expanduser()
 
@@ -452,7 +452,7 @@ def _render_library_item(
         )
     if kind == "instructions":
         return _upsert_markdown_block(before, item)
-    if kind in {"skills", "subagents"}:
+    if kind in {"skills", "hooks", "env", "subagents", "commands", "plugins"}:
         return str(item["content"])
     raise AgentConfigError(f"unsupported library kind: {kind}")
 
@@ -475,7 +475,7 @@ def _remove_library_item(
             if not servers:
                 payload.pop("mcpServers", None)
         return json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
-    if kind in {"skills", "subagents"}:
+    if kind in {"skills", "hooks", "env", "subagents", "commands", "plugins"}:
         return None
     raise AgentConfigError(f"unsupported library kind: {kind}")
 

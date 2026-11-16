@@ -3,6 +3,7 @@ import {
   modelControlModelsUrl,
   modelControlPresetDefaults,
   parseRoutingTargets,
+  parseWeightedRoutingTargets,
 } from "./model-control-api";
 
 describe("modelControlPresetDefaults", () => {
@@ -50,6 +51,15 @@ describe("parseRoutingTargets", () => {
       { target: "openai/gpt-4o", weight: 1 },
       { target: "group/backup", weight: 1 },
       { target: "anthropic/claude", weight: 1 },
+    ]);
+  });
+
+  test("parses explicit routing weights", () => {
+    expect(
+      parseWeightedRoutingTargets("openai/gpt-5 | 3, group/backup @ 2")
+    ).toEqual([
+      { target: "openai/gpt-5", weight: 3 },
+      { target: "group/backup", weight: 2 },
     ]);
   });
 });

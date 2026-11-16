@@ -7,6 +7,7 @@ import {
   deletePlugin,
   deletePrivacyRule,
   deleteSearchKey,
+  discoverPlugins,
   discoverSubscriptions,
   generateImage,
   getPrivacySettings,
@@ -33,6 +34,7 @@ import {
   updateSharingConfig,
   verifyPlugin,
   type GatewayKey,
+  type DiscoveredPlugin,
   type MediaJob,
   type PluginRecord,
   type PrivacyAuditEntry,
@@ -45,8 +47,14 @@ import {
 import { CheckIcon, CopyIcon, ExternalLinkIcon, TrashIcon } from "@/components/ui/icons";
 import { copyText } from "@/lib/clipboard";
 
-type Tab = "privacy" | "sharing" | "subscriptions" | "tools" | "plugins" | "media";
-const TABS: Array<{ id: Tab; label: string }> = [
+export type SecurityTab =
+  | "privacy"
+  | "sharing"
+  | "subscriptions"
+  | "tools"
+  | "plugins"
+  | "media";
+const TABS: Array<{ id: SecurityTab; label: string }> = [
   { id: "privacy", label: "隐私" },
   { id: "sharing", label: "共享" },
   { id: "subscriptions", label: "订阅" },
@@ -55,8 +63,20 @@ const TABS: Array<{ id: Tab; label: string }> = [
   { id: "media", label: "媒体" },
 ];
 
-export function SecurityCenter() {
-  const [tab, setTab] = useState<Tab>("privacy");
+export function SecurityCenter({
+  initialTab = "privacy",
+  visibleTabs,
+  title = "安全与共享",
+  description = "隐私脱敏、Gateway 访问、订阅账号与工具运行时。",
+  embedded = false,
+}: {
+  initialTab?: SecurityTab;
+  visibleTabs?: SecurityTab[];
+  title?: string;
+  description?: string;
+  embedded?: boolean;
+}) {
+  const [tab, setTab] = useState<SecurityTab>(initialTab);
   const [privacy, setPrivacy] = useState<PrivacySettings | null>(null);
   const [rules, setRules] = useState<PrivacyRule[]>([]);
   const [audit, setAudit] = useState<PrivacyAuditEntry[]>([]);
@@ -83,6 +103,8 @@ export function SecurityCenter() {
   });
   const [searchDraft, setSearchDraft] = useState({ name: "", key: "" });
   const [pluginPath, setPluginPath] = useState("");
+  const [pluginRepository, setPluginRepository] = useState("");
+  const [discoveredPlugins, setDiscoveredPlugins] = useState<DiscoveredPlugin[]>([]);
   const [imagePrompt, setImagePrompt] = useState("");
   const [videoPrompt, setVideoPrompt] = useState("");
   const [busy, setBusy] = useState(false);
@@ -146,19 +168,24 @@ export function SecurityCenter() {
     }
   };
 
+  const shownTabs = visibleTabs
+    ? TABS.filter((item) => visibleTabs.includes(item.id))
+    : TABS;
+
   return (
-    <section className="p-6">
+    <section className={embedded ? "" : "p-6"}>
       <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold">安全与共享</h1>
-          <p className="mt-1 text-sm text-text-secondary">
-            隐私脱敏、Gateway 访问、订阅账号与工具运行时。
-          </p>
+          <h1 className={embedded ? "text-base font-semibold" : "text-xl font-semibold"}>
+            {title}
+          </h1>
+          <p className="mt-1 text-sm text-text-secondary">{description}</p>
         </div>
       </div>
 
-      <div className="mb-5 flex flex-wrap gap-1 border-b border-border pb-2">
-        {TABS.map((item) => (
+      {shownTabs.length > 1 && (
+        <div className="mb-5 flex flex-wrap gap-1 border-b border-border pb-2">
+        {shownTabs.map((item) => (
           <button
             key={item.id}
             type="button"
@@ -170,7 +197,8 @@ export function SecurityCenter() {
             {item.label}
           </button>
         ))}
-      </div>
+        </div>
+      )}
 
       {error && <p className="mb-3 text-sm text-red-500">{error}</p>}
       {notice && <p className="mb-3 text-sm text-emerald-600">{notice}</p>}
@@ -719,6 +747,66 @@ export function SecurityCenter() {
 
       {tab === "plugins" && (
         <div className="space-y-5">
+          <div className="flex gap-2">
+            <input
+              value={pluginRepository}
+              onChange={(event) => setPluginRepository(event.target.value)}
+              placeholder="插件仓库目录"
+              className="min-w-0 flex-1 rounded-lg border border-border px-3 py-1.5 font-mono text-sm"
+            />
+            <button
+              type="button"
+              onClick={() =>
+                void run(async () => {
+                  setDiscoveredPlugins(await discoverPlugins(pluginRepository));
+                }, "插件目录已扫描")
+              }
+              disabled={busy || !pluginRepository}
+              className="rounded-lg border border-border px-3 py-1.5 text-sm disabled:opacity-40"
+            >
+              发现
+            </button>
+          </div>
+          {discoveredPlugins.length > 0 && (
+            <div className="overflow-hidden rounded-lg border border-border bg-surface">
+              {discoveredPlugins.map((plugin, index) => (
+                <div
+                  key={plugin.id}
+                  className={`flex flex-wrap items-center gap-2 px-4 py-3 ${
+                    index ? "border-t border-border" : ""
+                  }`}
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium">{plugin.name}</p>
+                    <p className="mt-0.5 truncate text-xs text-text-secondary">
+                      {plugin.version} · {plugin.type} · {plugin.description}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={busy || plugin.installed}
+                    onClick={() =>
+                      void run(async () => {
+                        const installed = await installPlugin(plugin.path, true);
+                        setPlugins((current) => [
+                          installed,
+                          ...current.filter((item) => item.id !== installed.id),
+                        ]);
+                        setDiscoveredPlugins((current) =>
+                          current.map((item) =>
+                            item.id === plugin.id ? { ...item, installed: true } : item
+                          )
+                        );
+                      }, "插件已安装")
+                    }
+                    className="rounded-lg border border-border px-2 py-1 text-xs disabled:opacity-40"
+                  >
+                    {plugin.installed ? "已安装" : "安装"}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           <div className="flex gap-2">
             <input
               value={pluginPath}
