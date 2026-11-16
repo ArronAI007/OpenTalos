@@ -157,6 +157,7 @@ class DesktopConfig:
                 f"http://localhost:{self.web_port}",
             )
         )
+        environment["OPENTALOS_GATEWAY_URL"] = f"{self.gateway_url}/v1"
         return environment
 
     def web_environment(self) -> dict[str, str]:

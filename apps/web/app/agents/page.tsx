@@ -11,6 +11,7 @@ import {
 } from "@/lib/api";
 import { TrashIcon } from "@/components/ui/icons";
 import { PageSkeleton } from "@/components/ui/PageSkeleton";
+import { AgentPlatformPanel } from "@/components/agents/AgentPlatformPanel";
 
 const EXAMPLES = ["帮我把零散笔记整理成结构清晰的周报", "做一个严谨的代码审查员，只指出真正的问题", "一个耐心的英语口语陪练"];
 
@@ -157,6 +158,7 @@ export default function AgentsPage() {
           ))}
         </ul>
       )}
+      <AgentPlatformPanel />
     </section>
   );
 }

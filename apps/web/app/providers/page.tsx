@@ -11,13 +11,10 @@ import {
 import { TrashIcon } from "@/components/ui/icons";
 import { PageSkeleton } from "@/components/ui/PageSkeleton";
 import { ModelControlPlane } from "@/components/providers/ModelControlPlane";
-
-interface ChatProviderPreset {
-  key: string;
-  label: string;
-  backend: "anthropic" | "openai-compatible";
-  baseUrl?: string;
-}
+import {
+  applyChatPreset,
+  type ChatProviderPreset,
+} from "@/lib/provider-form";
 
 const CHAT_PROVIDER_PRESETS: ChatProviderPreset[] = [
   { key: "anthropic", label: "Anthropic", backend: "anthropic" },
@@ -25,10 +22,6 @@ const CHAT_PROVIDER_PRESETS: ChatProviderPreset[] = [
   { key: "deepseek", label: "DeepSeek", backend: "openai-compatible", baseUrl: "https://api.deepseek.com" },
   { key: "moonshot", label: "Moonshot (Kimi)", backend: "openai-compatible", baseUrl: "https://api.moonshot.cn/v1" },
 ];
-
-export function applyChatPreset(preset: ChatProviderPreset): { backend: "anthropic" | "openai-compatible"; baseUrl: string } {
-  return { backend: preset.backend, baseUrl: preset.baseUrl ?? "" };
-}
 
 function ConfirmDeleteProviderDialog({
   open,

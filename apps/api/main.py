@@ -19,6 +19,13 @@ if str(_PACKAGES_DIR) not in sys.path:
     sys.path.insert(0, str(_PACKAGES_DIR))
 
 from agentgen import AgentGenerationError, generate_agent_spec  # noqa: E402
+from agent_platform import (  # noqa: E402
+    AgentDiscovery,
+    AgentPlatformService,
+    AgentPlatformStore,
+    load_catalog,
+)
+from agent_platform_routes import create_agent_platform_router  # noqa: E402
 from db import ChatStore  # noqa: E402
 from mcp.client import MCPClient, MCPConnectionError, MCPServerConfig  # noqa: E402
 from mcp.oauth.callback import PendingCallbackRegistry  # noqa: E402
@@ -182,6 +189,8 @@ def create_app(
     eval_cases_path: Path | None = None,
     model_control_store: ControlPlaneStore | None = None,
     model_discovery: ModelDiscovery | None = None,
+    agent_platform_service: AgentPlatformService | None = None,
+    gateway_url: str | None = None,
 ) -> FastAPI:
     if runtime is None:
         runtime = ChatRuntime(
@@ -219,6 +228,21 @@ def create_app(
     control_store = model_control_store or ControlPlaneStore(runtime.store.path)
     app.state.model_control_store = control_store
     app.include_router(create_model_control_router(control_store, model_discovery))
+    if agent_platform_service is None:
+        catalog = load_catalog()
+        agent_platform_service = AgentPlatformService(
+            AgentPlatformStore(runtime.store.path),
+            control_store,
+            catalog=catalog,
+            discovery=AgentDiscovery(catalog),
+            gateway_url=(
+                gateway_url
+                or os.environ.get("OPENTALOS_GATEWAY_URL")
+                or "http://127.0.0.1:3425/v1"
+            ),
+        )
+    app.state.agent_platform_service = agent_platform_service
+    app.include_router(create_agent_platform_router(agent_platform_service))
 
     @app.middleware("http")
     async def _record_http_metrics(request, call_next):

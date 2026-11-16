@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { formatDuration, statusLabel } from "./page";
+import { formatDuration, statusLabel } from "@/lib/run-format";
 
 describe("statusLabel", () => {
   test("renders a checkmark for completed runs", () => {

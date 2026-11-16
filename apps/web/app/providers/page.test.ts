@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { applyChatPreset } from "./page";
+import { applyChatPreset } from "@/lib/provider-form";
 
 describe("applyChatPreset", () => {
   test("anthropic preset has no default base url", () => {

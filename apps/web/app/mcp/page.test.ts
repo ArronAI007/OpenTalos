@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { parseEnvLines } from "./page";
+import { parseEnvLines } from "@/lib/mcp-form";
 
 describe("parseEnvLines", () => {
   test("parses multiple KEY=VALUE lines", () => {

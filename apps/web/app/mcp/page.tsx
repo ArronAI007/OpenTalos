@@ -11,19 +11,7 @@ import {
 } from "@/lib/mcp-api";
 import { TrashIcon } from "@/components/ui/icons";
 import { PageSkeleton } from "@/components/ui/PageSkeleton";
-
-export function parseEnvLines(text: string): Record<string, string> | undefined {
-  const entries = text
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const idx = line.indexOf("=");
-      return idx > 0 ? [line.slice(0, idx), line.slice(idx + 1)] : null;
-    })
-    .filter((pair): pair is [string, string] => pair !== null);
-  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
-}
+import { parseEnvLines } from "@/lib/mcp-form";
 
 interface CommonMCPServer {
   name: string;
