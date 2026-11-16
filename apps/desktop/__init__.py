@@ -1,0 +1,1 @@
+"""OpenTalos desktop application."""
