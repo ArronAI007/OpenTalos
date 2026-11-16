@@ -30,6 +30,9 @@ from evaluation import (  # noqa: E402
     run_case,
 )
 from runtime import ChatRuntime  # noqa: E402
+from model_control import create_model_control_router  # noqa: E402
+from model_platform.control_plane import ControlPlaneStore  # noqa: E402
+from model_platform.discovery import ModelDiscovery  # noqa: E402
 from observability import configure_logging, metrics  # noqa: E402
 from observability.run_index import list_run_summaries  # noqa: E402
 from skill.discovery import discover_skills, list_skill_files  # noqa: E402
@@ -174,7 +177,12 @@ def _sse(event: dict) -> str:
     return f"{prefix}data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
-def create_app(runtime: ChatRuntime | None = None, eval_cases_path: Path | None = None) -> FastAPI:
+def create_app(
+    runtime: ChatRuntime | None = None,
+    eval_cases_path: Path | None = None,
+    model_control_store: ControlPlaneStore | None = None,
+    model_discovery: ModelDiscovery | None = None,
+) -> FastAPI:
     if runtime is None:
         runtime = ChatRuntime(
             ChatStore(_REPO_ROOT / ".data" / "chat.db"),
@@ -208,6 +216,9 @@ def create_app(runtime: ChatRuntime | None = None, eval_cases_path: Path | None 
 
     app = FastAPI(title="OpenTalos Chat API", lifespan=_lifespan)
     app.state.runtime = runtime
+    control_store = model_control_store or ControlPlaneStore(runtime.store.path)
+    app.state.model_control_store = control_store
+    app.include_router(create_model_control_router(control_store, model_discovery))
 
     @app.middleware("http")
     async def _record_http_metrics(request, call_next):

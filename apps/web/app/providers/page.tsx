@@ -10,6 +10,7 @@ import {
 } from "@/lib/providers-api";
 import { TrashIcon } from "@/components/ui/icons";
 import { PageSkeleton } from "@/components/ui/PageSkeleton";
+import { ModelControlPlane } from "@/components/providers/ModelControlPlane";
 
 interface ChatProviderPreset {
   key: string;
@@ -204,6 +205,8 @@ export default function ProvidersPage() {
       <p className="mb-4 text-sm text-text-secondary">
         统一管理聊天模型和 embedding 模型的 provider 配置。改动对下一个新建的任务/embedding 调用立刻生效，不需要重启。
       </p>
+
+      <ModelControlPlane />
 
       <div className="mb-6 rounded-xl border border-border bg-surface p-4">
         <h2 className="mb-3 text-sm font-medium">常用聊天 Provider</h2>

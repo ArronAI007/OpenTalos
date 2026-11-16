@@ -92,6 +92,10 @@ class ChatStore:
         embedder_factory = (lambda: embedder) if embedder is not None else (lambda: _resolve_embedding_client(self))
         self.semantic = SemanticMemory(self._path, embedder_factory)
 
+    @property
+    def path(self) -> Path:
+        return self._path
+
     # 轻量迁移清单：CREATE TABLE IF NOT EXISTS 不会改造既有表，旧库缺列时逐条 ALTER 补上。
     # 仅列级变更需要登记在此；新表（如 projects）由 _SCHEMA 的 CREATE TABLE IF NOT EXISTS
     # 在既有库连上时直接补建，不需要进本清单。
