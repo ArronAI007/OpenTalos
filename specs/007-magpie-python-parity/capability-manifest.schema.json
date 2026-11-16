@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OpenTalos Magpie parity manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "baseline_id",
+    "upstream",
+    "open_talos",
+    "policy",
+    "capabilities"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "baseline_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "upstream": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "commit", "captured_at", "license"],
+      "properties": {
+        "repository": {
+          "const": "https://github.com/yetone/magpie"
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "captured_at": {
+          "type": "string",
+          "format": "date"
+        },
+        "license": {
+          "const": "MIT"
+        }
+      }
+    },
+    "open_talos": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit", "captured_at"],
+      "properties": {
+        "commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "captured_at": {
+          "type": "string",
+          "format": "date"
+        }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "immutable_baseline",
+        "definition",
+        "upstream_change_rule"
+      ],
+      "properties": {
+        "immutable_baseline": {
+          "const": true
+        },
+        "definition": {
+          "type": "string",
+          "minLength": 20
+        },
+        "upstream_change_rule": {
+          "type": "string",
+          "minLength": 20
+        }
+      }
+    },
+    "capabilities": {
+      "type": "array",
+      "minItems": 50,
+      "items": {
+        "$ref": "#/$defs/capability"
+      }
+    }
+  },
+  "$defs": {
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "area",
+        "title",
+        "status",
+        "priority",
+        "milestone",
+        "acceptance",
+        "source_refs"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*(\\.[a-z0-9_]+)+$"
+        },
+        "area": {
+          "enum": [
+            "accounts",
+            "agents",
+            "control_plane",
+            "desktop",
+            "gateway",
+            "operations",
+            "privacy",
+            "release",
+            "routing",
+            "sharing",
+            "tools",
+            "usage"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 3
+        },
+        "status": {
+          "enum": ["gap", "partial", "implemented"]
+        },
+        "priority": {
+          "enum": ["P0", "P1", "P2", "P3"]
+        },
+        "milestone": {
+          "enum": ["M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8"]
+        },
+        "acceptance": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 10
+          }
+        },
+        "source_refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 3
+          }
+        },
+        "open_talos_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 3
+          }
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

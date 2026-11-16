@@ -150,7 +150,7 @@ function ConfirmDeleteTaskDialog({
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
       <div className="absolute inset-0 bg-black/50" onClick={onCancel} aria-hidden="true" />
       <div role="alertdialog" aria-modal="true" className="relative z-10 w-full max-w-sm rounded-2xl bg-surface p-5 shadow-2xl">
-        <h2 className="text-sm font-semibold">删除任务"{taskTitle}"？</h2>
+        <h2 className="text-sm font-semibold">删除任务“{taskTitle}”？</h2>
         <p className="mt-1.5 text-sm text-text-secondary">此操作不可撤销。</p>
         <div className="mt-4 flex justify-end gap-2">
           <button type="button" autoFocus onClick={onCancel} className="rounded-lg border border-border px-3 py-1.5 text-sm hover:bg-sidebar">

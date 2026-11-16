@@ -43,7 +43,7 @@ export default function RunsPage() {
     <section className="p-6">
       <h1 className="mb-4 text-xl font-semibold">运行记录</h1>
       <p className="mb-4 text-sm text-text-secondary">
-        最近的 Agent 运行轨迹，点击"查看报告"打开该次运行已生成的详细报告。
+        最近的 Agent 运行轨迹，点击“查看报告”打开该次运行已生成的详细报告。
       </p>
 
       <div className="rounded-xl border border-border bg-surface p-4">
