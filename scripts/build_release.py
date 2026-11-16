@@ -488,7 +488,12 @@ def _copy_tree(source: Path, target: Path, *, replace: bool = False) -> None:
     if replace:
         _remove(target)
     target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(source, target, dirs_exist_ok=True, symlinks=True)
+    shutil.copytree(
+        source,
+        target,
+        dirs_exist_ok=True,
+        symlinks=os.name != "nt",
+    )
 
 
 def _replace_tree(source: Path, target: Path) -> None:
