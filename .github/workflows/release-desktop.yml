@@ -88,6 +88,18 @@ jobs:
         with:
           version: "0.9.2"
 
+      - name: Install Linux WebView build dependencies
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libcairo2-dev \
+            libgirepository-2.0-dev \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            pkg-config
+
       - name: Install Python dependencies
         shell: bash
         run: |
@@ -119,18 +131,6 @@ jobs:
         if: matrix.platform == 'win32'
         shell: powershell
         run: choco install innosetup --no-progress -y
-
-      - name: Install Linux WebView build dependencies
-        if: matrix.platform == 'linux'
-        shell: bash
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libcairo2-dev \
-            libgirepository-2.0-dev \
-            libgtk-3-dev \
-            libwebkit2gtk-4.1-dev \
-            pkg-config
 
       - name: Require Apple signing credentials for release
         if: matrix.signing == 'apple' && env.ALLOW_UNSIGNED != 'true'
