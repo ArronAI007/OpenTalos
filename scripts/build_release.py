@@ -135,7 +135,26 @@ def _prepare_web(args: argparse.Namespace, resources: Path) -> None:
             "and run pnpm -C apps/web build -- --webpack"
         )
     target = resources / "runtime" / "web"
-    _replace_tree(standalone, target)
+    if sys.platform == "win32":
+        _remove(target)
+        shutil.copytree(
+            standalone,
+            target,
+            ignore=shutil.ignore_patterns("node_modules"),
+        )
+        _run(
+            [
+                "npm",
+                "install",
+                "--omit=dev",
+                "--no-audit",
+                "--no-fund",
+                "--package-lock=false",
+            ],
+            cwd=target / "apps" / "web",
+        )
+    else:
+        _replace_tree(standalone, target)
     _copy_tree(web_root / ".next" / "static", target / "apps" / "web" / ".next" / "static")
     public = web_root / "public"
     if public.is_dir():
