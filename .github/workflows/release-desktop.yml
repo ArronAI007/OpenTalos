@@ -48,6 +48,7 @@ jobs:
 
   build:
     needs: validate
+    if: env.ALLOW_UNSIGNED != 'true' || (matrix.platform == 'darwin' && matrix.arch == 'x86_64')
     strategy:
       fail-fast: false
       matrix:
