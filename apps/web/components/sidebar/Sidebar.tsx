@@ -13,6 +13,7 @@ import {
   KeyIcon,
   PlugIcon,
   PuzzleIcon,
+  ShieldIcon,
   SparklesIcon,
   TelescopeIcon,
   XIcon,
@@ -102,6 +103,10 @@ export function Sidebar({ collapsed, mobileOpen, onToggleCollapse, onCloseMobile
         <Link href="/providers" onClick={onCloseMobile} className={navLinkCls}>
           <KeyIcon />
           Provider
+        </Link>
+        <Link href="/security" onClick={onCloseMobile} className={navLinkCls}>
+          <ShieldIcon />
+          安全与共享
         </Link>
         <Link href="/memory" onClick={onCloseMobile} className={navLinkCls}>
           <BrainIcon />

@@ -31,7 +31,7 @@ async def demo_peer():
     )
     url = f"http://127.0.0.1:{port}/"
     try:
-        for _ in range(30):
+        for _ in range(100):
             try:
                 async with httpx.AsyncClient() as http:
                     resp = await http.get(f"http://127.0.0.1:{port}/health", timeout=1.0)

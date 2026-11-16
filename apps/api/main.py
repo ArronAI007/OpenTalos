@@ -1,5 +1,6 @@
 """聊天会话 API：浏览器前端（apps/web）的唯一后端。启动方式见 scripts/start.sh。"""
 import asyncio
+import contextlib
 import json
 import os
 import re
@@ -27,7 +28,12 @@ from agent_platform import (  # noqa: E402
 )
 from agent_platform_routes import create_agent_platform_router  # noqa: E402
 from db import ChatStore  # noqa: E402
+from gateway_access.store import GatewayAccessStore  # noqa: E402
 from mcp.client import MCPClient, MCPConnectionError, MCPServerConfig  # noqa: E402
+from media_platform.backends import OpenAIImageBackend  # noqa: E402
+from media_platform.service import MediaGenerationService, MediaStore  # noqa: E402
+from media_platform.tools import ImageGenerationTool  # noqa: E402
+from m7_routes import create_m7_router  # noqa: E402
 from mcp.oauth.callback import PendingCallbackRegistry  # noqa: E402
 from evaluation import (  # noqa: E402
     EVAL_AGENT_TYPES,
@@ -40,6 +46,9 @@ from runtime import ChatRuntime  # noqa: E402
 from model_control import create_model_control_router  # noqa: E402
 from model_platform.control_plane import ControlPlaneStore  # noqa: E402
 from model_platform.discovery import ModelDiscovery  # noqa: E402
+from plugin_platform.store import PluginStore  # noqa: E402
+from privacy.engine import PrivacyEngine  # noqa: E402
+from privacy.store import PrivacyStore  # noqa: E402
 from observability import configure_logging, metrics  # noqa: E402
 from observability.run_index import list_run_summaries  # noqa: E402
 from skill.discovery import discover_skills, list_skill_files  # noqa: E402
@@ -54,6 +63,11 @@ from skill.my_skills import add_my_skill, load_my_skills, remove_my_skill  # noq
 from skill.skill_tags import load_tags  # noqa: E402
 from skill.skill_upload import SkillUploadError, extract_uploaded_skill  # noqa: E402
 from skill.skill_usage import load_usage  # noqa: E402
+from subscriptions.service import SubscriptionInventory  # noqa: E402
+from subscriptions.store import SubscriptionStore  # noqa: E402
+from websearch.fetch import WebFetchService, WebFetchTool  # noqa: E402
+from websearch.key_rotation import RotatingTavilyClient, SearchKeyStore  # noqa: E402
+from websearch.tools import WebExtractorTool, WebSearchTool  # noqa: E402
 
 # 技能是仓库 skills/ 下的文件系统目录（pi 式方案，无独立服务）；
 # my_skills/tags/usage 这些可变状态落在 .data/ 下。测试按需 monkeypatch 这几个模块级常量。
@@ -172,6 +186,22 @@ _FLAG_FIELDS = ("pinned", "starred", "archived")
 _SESSION_ID_PATTERN = re.compile(r"^run-\d{8}-\d{6}-[0-9a-f]{4}$")
 
 
+async def _warmup_loop(subscriptions: SubscriptionInventory) -> None:
+    interval = max(
+        5.0,
+        float(os.environ.get("OPENTALOS_WARMUP_INTERVAL_SECONDS", "60")),
+    )
+    while True:
+        try:
+            async def refresh(account):
+                await asyncio.to_thread(subscriptions.refresh, account["id"])
+
+            await subscriptions.run_due_warmups(warm=refresh)
+        except Exception:
+            pass
+        await asyncio.sleep(interval)
+
+
 def _sse(event: dict) -> str:
     # ping 只是探活不是聊天事件：编成 SSE comment 帧，前端 parseSseBlock 天然忽略。
     # 唯二作用：保持连接、让客户端断开在下次写时暴露（uvicorn 只在写响应时发现断开）。
@@ -191,6 +221,12 @@ def create_app(
     model_discovery: ModelDiscovery | None = None,
     agent_platform_service: AgentPlatformService | None = None,
     gateway_url: str | None = None,
+    privacy_store: PrivacyStore | None = None,
+    gateway_access_store: GatewayAccessStore | None = None,
+    subscription_store: SubscriptionStore | None = None,
+    search_key_store: SearchKeyStore | None = None,
+    plugin_store: PluginStore | None = None,
+    media_service: MediaGenerationService | None = None,
 ) -> FastAPI:
     if runtime is None:
         runtime = ChatRuntime(
@@ -217,9 +253,16 @@ def create_app(
 
     @asynccontextmanager
     async def _lifespan(app: FastAPI):
+        warmup_task = None
+        if os.environ.get("OPENTALOS_WARMUP_SCHEDULER", "1") == "1":
+            warmup_task = asyncio.create_task(_warmup_loop(subscriptions))
         try:
             yield
         finally:
+            if warmup_task is not None:
+                warmup_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await warmup_task
             # 进程关闭时释放 runtime 懒构造的模型客户端（httpx 连接池）。
             await app.state.runtime.aclose()
 
@@ -243,6 +286,52 @@ def create_app(
         )
     app.state.agent_platform_service = agent_platform_service
     app.include_router(create_agent_platform_router(agent_platform_service))
+
+    privacy_store = privacy_store or PrivacyStore(runtime.store.path)
+    privacy_engine = PrivacyEngine(
+        privacy_store,
+        settings_loader=privacy_store.get_settings,
+    )
+    gateway_access_store = gateway_access_store or GatewayAccessStore(runtime.store.path)
+    subscription_store = subscription_store or SubscriptionStore(runtime.store.path)
+    subscriptions = SubscriptionInventory(subscription_store)
+    search_key_store = search_key_store or SearchKeyStore(runtime.store.path)
+    plugin_store = plugin_store or PluginStore(_REPO_ROOT / ".data" / "plugins")
+    media_service = media_service or MediaGenerationService(
+        MediaStore(runtime.store.path, _REPO_ROOT / ".data" / "media"),
+        image_backend=(
+            OpenAIImageBackend(os.environ["OPENAI_API_KEY"])
+            if os.environ.get("OPENAI_API_KEY")
+            else None
+        ),
+    )
+    web_fetch = WebFetchService(privacy=privacy_engine)
+    runtime.add_extra_tools([WebFetchTool(web_fetch)])
+    if search_key_store.list_keys("tavily"):
+        rotating_search = RotatingTavilyClient(search_key_store)
+        runtime.add_extra_tools(
+            [WebSearchTool(rotating_search), WebExtractorTool(rotating_search)]
+        )
+    if media_service.image_backend is not None:
+        runtime.add_extra_tools([ImageGenerationTool(media_service)])
+    app.state.privacy_store = privacy_store
+    app.state.gateway_access_store = gateway_access_store
+    app.state.subscription_store = subscription_store
+    app.state.search_key_store = search_key_store
+    app.state.plugin_store = plugin_store
+    app.state.media_service = media_service
+    app.include_router(
+        create_m7_router(
+            privacy_store=privacy_store,
+            privacy_engine=privacy_engine,
+            access_store=gateway_access_store,
+            subscriptions=subscriptions,
+            search_keys=search_key_store,
+            plugins=plugin_store,
+            media=media_service,
+            web_fetch=web_fetch,
+        )
+    )
 
     @app.middleware("http")
     async def _record_http_metrics(request, call_next):

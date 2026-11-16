@@ -4,8 +4,14 @@ from __future__ import annotations
 
 import time
 from collections.abc import AsyncIterator
+from collections.abc import Callable
+from dataclasses import replace
 from typing import Any, Protocol
 
+from gateway.middleware import (
+    GatewayMiddlewarePipeline,
+    transform_chat_sse,
+)
 from gateway.request_log import GatewayRequestLog
 from gateway.routing import RoutingEngine
 from gateway.inbound_anthropic import (
@@ -30,6 +36,11 @@ from gateway.upstream import (
     OpenAIResponsesUpstream,
 )
 from model_platform.control_plane import ControlPlaneStore
+from privacy.engine import (
+    PrivacyBlockedError,
+    PrivacyEngine,
+    PrivacyUnavailableError,
+)
 
 
 class Upstream(Protocol):
@@ -45,17 +56,22 @@ class GatewayService:
         *,
         upstreams: dict[str, Upstream] | None = None,
         request_log: GatewayRequestLog | None = None,
+        privacy: PrivacyEngine | None = None,
+        middleware: GatewayMiddlewarePipeline | None = None,
     ) -> None:
         self.store = store
-        self.upstreams = upstreams or {
+        self.upstreams = {
             "openai-compatible": OpenAICompatibleUpstream(),
             "openai-responses": OpenAIResponsesUpstream(),
             "anthropic": AnthropicUpstream(),
             "gemini": GeminiUpstream(),
             "mock": MockUpstream(),
         }
+        self.upstreams.update(upstreams or {})
         self.request_log = request_log or GatewayRequestLog(store.path)
         self.routing = RoutingEngine(store, request_log=self.request_log)
+        self.privacy = privacy
+        self.middleware = middleware or GatewayMiddlewarePipeline()
 
     def models(self) -> list[dict[str, Any]]:
         models: dict[str, dict[str, Any]] = {}
@@ -83,6 +99,7 @@ class GatewayService:
         client: str | None,
         protocol: str = "openai-chat",
         session_key: str | None = None,
+        candidate_filter: Callable[[Any], bool] | None = None,
     ) -> dict[str, Any]:
         started = time.monotonic()
         requested_model = str(payload.get("model") or "")
@@ -94,8 +111,33 @@ class GatewayService:
         )
         attempts: list[dict[str, Any]] = []
         decision = None
+        privacy_scope = session_key or logged["id"]
         try:
+            context = _middleware_context(logged, client=client, protocol=protocol)
+            canonical = await self.middleware.before_request(canonical, context)
+            if self.privacy is not None:
+                canonical = self.privacy.mask_payload(
+                    canonical,
+                    scope=privacy_scope,
+                    request_id=logged["id"],
+                ).payload
             decision = self.routing.decide(requested_model, session_key=session_key)
+            if candidate_filter is not None:
+                decision = replace(
+                    decision,
+                    candidates=[
+                        candidate
+                        for candidate in decision.candidates
+                        if candidate_filter(candidate)
+                    ],
+                )
+                if not decision.candidates:
+                    from gateway.upstream import GatewayUpstreamError
+
+                    raise GatewayUpstreamError(
+                        403,
+                        "Gateway key cannot access any routed account",
+                    )
             last_error: Exception | None = None
             for resolved in decision.candidates:
                 try:
@@ -107,6 +149,12 @@ class GatewayService:
                     if not _retryable(error):
                         raise
                     continue
+                response = await self.middleware.after_response(response, context)
+                if self.privacy is not None:
+                    response = self.privacy.restore_payload(
+                        response,
+                        scope=privacy_scope,
+                    )
                 response = _response_from_chat(response, protocol, requested_model)
                 attempts.append(_attempt(resolved))
                 self._remember_session(decision, resolved, session_key)
@@ -130,6 +178,19 @@ class GatewayService:
             if last_error is not None:
                 raise last_error
             raise RuntimeError("no routing candidate was available")
+        except (PrivacyBlockedError, PrivacyUnavailableError) as error:
+            error = _privacy_gateway_error(error)
+            self.request_log.set_routing_trace(
+                logged["id"],
+                _routing_trace(decision, attempts, None, error),
+            )
+            self.request_log.finish(
+                logged["id"],
+                status="error",
+                duration_ms=int((time.monotonic() - started) * 1000),
+                error=str(error),
+            )
+            raise error
         except Exception as error:
             self.request_log.set_routing_trace(
                 logged["id"],
@@ -150,6 +211,7 @@ class GatewayService:
         client: str | None,
         protocol: str = "openai-chat",
         session_key: str | None = None,
+        candidate_filter: Callable[[Any], bool] | None = None,
     ) -> GatewayStream:
         started = time.monotonic()
         requested_model = str(payload.get("model") or "")
@@ -161,8 +223,33 @@ class GatewayService:
         )
         attempts: list[dict[str, Any]] = []
         decision = None
+        privacy_scope = session_key or logged["id"]
         try:
+            context = _middleware_context(logged, client=client, protocol=protocol)
+            canonical = await self.middleware.before_request(canonical, context)
+            if self.privacy is not None:
+                canonical = self.privacy.mask_payload(
+                    canonical,
+                    scope=privacy_scope,
+                    request_id=logged["id"],
+                ).payload
             decision = self.routing.decide(requested_model, session_key=session_key)
+            if candidate_filter is not None:
+                decision = replace(
+                    decision,
+                    candidates=[
+                        candidate
+                        for candidate in decision.candidates
+                        if candidate_filter(candidate)
+                    ],
+                )
+                if not decision.candidates:
+                    from gateway.upstream import GatewayUpstreamError
+
+                    raise GatewayUpstreamError(
+                        403,
+                        "Gateway key cannot access any routed account",
+                    )
             stream = None
             resolved = None
             last_error: Exception | None = None
@@ -188,6 +275,19 @@ class GatewayService:
                 logged["id"],
                 _routing_trace(decision, attempts, resolved),
             )
+        except (PrivacyBlockedError, PrivacyUnavailableError) as error:
+            error = _privacy_gateway_error(error)
+            self.request_log.set_routing_trace(
+                logged["id"],
+                _routing_trace(decision, attempts, None, error),
+            )
+            self.request_log.finish(
+                logged["id"],
+                status="error",
+                duration_ms=int((time.monotonic() - started) * 1000),
+                error=str(error),
+            )
+            raise error
         except Exception as error:
             self.request_log.set_routing_trace(
                 logged["id"],
@@ -224,6 +324,10 @@ class GatewayService:
                 )
 
         body = upstream_body()
+        if self.middleware.middleware:
+            body = transform_chat_sse(body, self.middleware, context)
+        if self.privacy is not None:
+            body = self.privacy.restore_sse(body, scope=privacy_scope)
         if protocol != "openai-chat":
             body = convert_chat_sse(
                 body,
@@ -308,6 +412,26 @@ def _request_to_chat(payload: dict[str, Any], protocol: str) -> dict[str, Any]:
     if protocol == "gemini":
         return gemini_request_to_chat(payload, str(payload["model"]))
     raise ValueError(f"unsupported inbound protocol: {protocol}")
+
+
+def _middleware_context(
+    logged: dict[str, Any],
+    *,
+    client: str | None,
+    protocol: str,
+) -> dict[str, Any]:
+    return {
+        "request_id": logged["id"],
+        "client": client,
+        "protocol": protocol,
+    }
+
+
+def _privacy_gateway_error(error: Exception):
+    from gateway.upstream import GatewayUpstreamError
+
+    status = int(getattr(error, "status_code", 503))
+    return GatewayUpstreamError(status, str(error))
 
 
 def _response_from_chat(

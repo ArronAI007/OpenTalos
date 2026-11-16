@@ -139,6 +139,10 @@ class StdioTransport(TransportEventsMixin):
             os.killpg(self._pgid, sig)
         except ProcessLookupError:
             pass
+        except OSError:
+            # The child may already be gone or owned by a different process group
+            # after sandbox handoff; close() falls back to process.terminate().
+            pass
 
     async def close(self) -> None:
         if self._closed:

@@ -115,7 +115,13 @@ class ControlPlaneStore:
         api_key = api_key.strip()
         if not provider or not name or not api_key:
             raise ControlPlaneValidationError("provider, name, and api_key are required")
-        if backend not in {"openai-compatible", "openai-responses", "anthropic", "gemini", "mock"}:
+        if backend not in {
+            "openai-compatible",
+            "openai-responses",
+            "anthropic",
+            "gemini",
+            "mock",
+        } and not backend.startswith("plugin:"):
             raise ControlPlaneValidationError(f"unsupported backend: {backend}")
         base_url = _validated_url(base_url, "base_url")
         proxy_url = _validated_url(proxy_url, "proxy_url", allow_socks=True)

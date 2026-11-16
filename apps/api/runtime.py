@@ -201,6 +201,7 @@ class ChatRuntime:
         self._websearch_tools: list[Any] = []
         self._mcp_tools: list[Any] = []
         self._a2a_tools: list[Any] = [A2ATool(a2a_peer_url)] if a2a_peer_url else []
+        self._extra_tools: list[Any] = []
         self._search_client: TavilyClient | None = None
         if tavily_api_key:
             self._search_client = TavilyClient(tavily_api_key)
@@ -314,6 +315,11 @@ class ChatRuntime:
             registry.register(tool)
         for tool in self._a2a_tools:
             registry.register(tool)
+        for tool in self._extra_tools:
+            registry.register(tool)
+
+    def add_extra_tools(self, tools: list[Any]) -> None:
+        self._extra_tools.extend(tools)
 
     def _build_registry(self, task_id: str) -> ToolRegistry:
         # subagent_tools 必须是和 main_tools 物理上不同的 ToolRegistry 实例——dispatch_subagent

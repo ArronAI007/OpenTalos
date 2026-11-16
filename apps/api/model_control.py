@@ -21,13 +21,7 @@ class CreateAccountBody(BaseModel):
 
     provider: str = Field(min_length=1)
     name: str = Field(min_length=1)
-    backend: Literal[
-        "openai-compatible",
-        "openai-responses",
-        "anthropic",
-        "gemini",
-        "mock",
-    ]
+    backend: str = Field(min_length=1)
     base_url: str | None = None
     api_key: str = Field(min_length=1)
     proxy_url: str | None = None
