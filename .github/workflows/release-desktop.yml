@@ -114,9 +114,7 @@ jobs:
           fi
 
       - name: Install web dependencies
-        env:
-          npm_config_node_linker: hoisted
-        run: pnpm -C apps/web install --frozen-lockfile --force
+        run: pnpm -C apps/web install --frozen-lockfile
 
       - name: Verify runner architecture
         shell: bash

@@ -488,12 +488,42 @@ def _copy_tree(source: Path, target: Path, *, replace: bool = False) -> None:
     if replace:
         _remove(target)
     target.parent.mkdir(parents=True, exist_ok=True)
+    if os.name == "nt":
+        _copy_tree_windows(source, target)
+        return
     shutil.copytree(
         source,
         target,
         dirs_exist_ok=True,
-        symlinks=os.name != "nt",
+        symlinks=True,
     )
+
+
+def _copy_tree_windows(
+    source: Path,
+    target: Path,
+    seen: set[Path] | None = None,
+) -> None:
+    resolved_source = source.resolve()
+    visited = set() if seen is None else set(seen)
+    if resolved_source in visited:
+        raise RuntimeError(f"junction cycle detected while copying {source}")
+    visited.add(resolved_source)
+    target.mkdir(parents=True, exist_ok=True)
+    with os.scandir(source) as entries:
+        for entry in entries:
+            item = Path(entry.path)
+            destination = target / entry.name
+            if entry.is_symlink() or item.is_junction():
+                linked = item.resolve(strict=True)
+                if linked.is_dir():
+                    _copy_tree_windows(linked, destination, visited)
+                else:
+                    shutil.copy2(linked, destination)
+            elif entry.is_dir(follow_symlinks=False):
+                _copy_tree_windows(item, destination, visited)
+            else:
+                shutil.copy2(item, destination)
 
 
 def _replace_tree(source: Path, target: Path) -> None:
