@@ -245,18 +245,15 @@ jobs:
           OPENTALOS_UPDATE_PUBLIC_KEY_FILE: ${{ github.workspace }}\release\update-public-key.pem
         run: |
           $log = Join-Path $env:RUNNER_TEMP "windows-build.log"
-          $uvArgs = @(
-            "run", "python", "scripts/build_release.py",
-            "--version", $env:RELEASE_VERSION,
-            "--platform", "win32",
-            "--arch", "${{ matrix.arch }}"
-          )
-          & uv @uvArgs 2>&1 | Tee-Object -FilePath $log
-          if ($LASTEXITCODE -ne 0) {
+          $command = "uv run python scripts/build_release.py --version $env:RELEASE_VERSION --platform win32 --arch ${{ matrix.arch }} > `"$log`" 2>&1"
+          & cmd.exe /d /s /c $command
+          $exitCode = $LASTEXITCODE
+          Get-Content $log
+          if ($exitCode -ne 0) {
             $tail = (Get-Content $log -Tail 20 | Out-String).Trim()
             $tail = $tail.Replace("%", "%25").Replace("`r", "%0D").Replace("`n", "%0A")
             Write-Output "::error title=Windows build failure::$tail"
-            exit $LASTEXITCODE
+            exit $exitCode
           }
 
       - name: Build Linux DEB
