@@ -108,6 +108,22 @@ def main() -> int:
     return 0
 
 
+def _npm_command() -> list[str]:
+    node = Path(shutil.which("node") or "")
+    if not node.is_file():
+        raise SystemExit("Node.js executable not found while preparing Windows runtime")
+    npm_cli = node.parent / "node_modules" / "npm" / "bin" / "npm-cli.js"
+    if npm_cli.is_file():
+        return [str(node), str(npm_cli)]
+    npm_cmd = node.parent / "npm.cmd"
+    if npm_cmd.is_file():
+        return [str(npm_cmd)]
+    npm_executable = shutil.which("npm")
+    if npm_executable:
+        return [npm_executable]
+    raise SystemExit("npm executable not found while preparing Windows runtime")
+
+
 def normalize_arch(value: str) -> str:
     normalized = value.lower()
     return {
@@ -143,8 +159,8 @@ def _prepare_web(args: argparse.Namespace, resources: Path) -> None:
             ignore=shutil.ignore_patterns("node_modules"),
         )
         _run(
-            [
-                "npm",
+            _npm_command()
+            + [
                 "install",
                 "--omit=dev",
                 "--no-audit",
