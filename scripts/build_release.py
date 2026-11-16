@@ -515,11 +515,19 @@ def _copy_tree_windows(
             item = Path(entry.path)
             destination = target / entry.name
             if entry.is_symlink() or item.is_junction():
-                linked = item.resolve(strict=True)
-                if linked.is_dir():
-                    _copy_tree_windows(linked, destination, visited)
-                else:
-                    shutil.copy2(linked, destination)
+                try:
+                    link_target = Path(os.readlink(item))
+                    linked = (
+                        link_target
+                        if link_target.is_absolute()
+                        else item.parent / link_target
+                    )
+                    if linked.is_dir():
+                        _copy_tree_windows(linked, destination, visited)
+                    elif linked.is_file():
+                        shutil.copy2(linked, destination)
+                except OSError as error:
+                    print(f"warning: skipping inaccessible link {item}: {error}")
             elif entry.is_dir(follow_symlinks=False):
                 _copy_tree_windows(item, destination, visited)
             else:
