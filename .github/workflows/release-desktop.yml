@@ -25,7 +25,8 @@ env:
   NODE_VERSION: "24"
   PYTHON_VERSION: "3.12"
   RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
-  ALLOW_UNSIGNED: ${{ inputs.unsigned || false }}
+  ALLOW_UNSIGNED: ${{ inputs.unsigned || contains(github.ref_name, '-unsigned.') }}
+  UNSIGNED_NOTICE: "WARNING: This community preview is not code-signed or notarized. Gatekeeper and SmartScreen may block it. Verify the included SHA-256 checksums before running."
 
 jobs:
   validate:
@@ -152,7 +153,7 @@ jobs:
           done
 
       - name: Import Apple signing certificate
-        if: matrix.signing == 'apple'
+        if: matrix.signing == 'apple' && env.ALLOW_UNSIGNED != 'true'
         shell: bash
         env:
           APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
@@ -199,7 +200,7 @@ jobs:
             --public-key-out release/update-public-key.pem
 
       - name: Import Windows signing certificate
-        if: matrix.signing == 'windows'
+        if: matrix.signing == 'windows' && env.ALLOW_UNSIGNED != 'true'
         shell: powershell
         env:
           OPENTALOS_WINDOWS_CERT_PFX_BASE64: ${{ secrets.OPENTALOS_WINDOWS_CERT_PFX_BASE64 }}
@@ -314,6 +315,9 @@ jobs:
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           name: OpenTalos ${{ env.RELEASE_TAG }}
+          body: "${{ env.ALLOW_UNSIGNED == 'true' && env.UNSIGNED_NOTICE || '' }}"
+          append_body: true
+          prerelease: ${{ env.ALLOW_UNSIGNED == 'true' }}
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: dist/releases/*
