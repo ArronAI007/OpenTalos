@@ -3,7 +3,7 @@ import { API_URL } from "./api";
 export interface ProviderPreset {
   id: string;
   label: string;
-  backend: "openai-compatible" | "anthropic" | "mock";
+  backend: "openai-compatible" | "openai-responses" | "anthropic" | "gemini" | "mock";
   default_base_url: string | null;
   api_key_label: string;
   supports_model_discovery: boolean;
@@ -15,7 +15,7 @@ export interface ProviderAccount {
   updated_at: string;
   provider: string;
   name: string;
-  backend: "openai-compatible" | "anthropic" | "mock";
+  backend: "openai-compatible" | "openai-responses" | "anthropic" | "gemini" | "mock";
   base_url: string | null;
   api_key_masked: string;
   proxy_url: string | null;

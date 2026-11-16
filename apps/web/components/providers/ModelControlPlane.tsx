@@ -215,8 +215,11 @@ export function ModelControlPlane() {
       </div>
 
       <div className="mb-5 rounded-lg border border-border bg-sidebar px-3 py-2 font-mono text-xs">
-        <div className="text-text-secondary">OpenAI-compatible gateway</div>
+        <div className="text-text-secondary">Gateway endpoints</div>
         <div className="mt-1 select-all text-text">{GATEWAY_URL}/v1</div>
+        <div className="mt-1 text-text-secondary">
+          /chat/completions · /responses · /messages · /v1beta/models/...
+        </div>
       </div>
 
       <div className="mb-5 grid gap-2 sm:grid-cols-2">

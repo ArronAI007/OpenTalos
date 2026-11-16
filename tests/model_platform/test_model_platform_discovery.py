@@ -81,3 +81,34 @@ def test_discovery_rejects_provider_errors() -> None:
         assert "bad key" in str(error)
     else:
         raise AssertionError("discovery should fail")
+
+
+def test_gemini_discovery_uses_native_models_endpoint() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url == "https://example.test/v1beta/models?key=gemini-key"
+        return httpx.Response(
+            200,
+            json={
+                "models": [
+                    {
+                        "name": "models/gemini-test",
+                        "displayName": "Gemini Test",
+                    }
+                ]
+            },
+        )
+
+    models = asyncio.run(
+        ModelDiscovery().discover(
+            {
+                "provider": "google-gemini-native",
+                "backend": "gemini",
+                "base_url": "https://example.test/v1beta",
+                "api_key": "gemini-key",
+            },
+            transport=httpx.MockTransport(handler),
+        )
+    )
+
+    assert models[0].model_id == "gemini-test"
+    assert models[0].protocol == "gemini"

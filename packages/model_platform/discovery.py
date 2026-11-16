@@ -53,7 +53,12 @@ class ModelDiscovery:
         base_url = account.get("base_url") or (
             preset.default_base_url if preset is not None else None
         )
-        if backend == "anthropic":
+        if backend == "gemini":
+            gemini_base = (base_url or "https://generativelanguage.googleapis.com/v1beta").rstrip("/")
+            endpoint = f"{gemini_base}/models?key={account['api_key']}"
+            headers = {}
+            protocol = "gemini"
+        elif backend == "anthropic":
             anthropic_base = (base_url or "https://api.anthropic.com").rstrip("/")
             endpoint = (
                 f"{anthropic_base}/models"
@@ -98,7 +103,14 @@ class ModelDiscovery:
             payload = response.json()
         except ValueError as error:
             raise RuntimeError("model discovery returned invalid JSON") from error
-        entries = payload.get("data", []) if isinstance(payload, dict) else payload
+        if backend == "gemini" and isinstance(payload, dict):
+            entries = [
+                {**model, "id": model.get("name", "")}
+                for model in payload.get("models", [])
+                if isinstance(model, dict)
+            ]
+        else:
+            entries = payload.get("data", []) if isinstance(payload, dict) else payload
         if not isinstance(entries, list):
             raise RuntimeError("model discovery response has no model list")
 

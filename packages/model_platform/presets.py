@@ -27,6 +27,18 @@ _PRESETS = (
         "openai-compatible",
         "https://generativelanguage.googleapis.com/v1beta/openai",
     ),
+    ProviderPreset(
+        "google-gemini-native",
+        "Google Gemini Native",
+        "gemini",
+        "https://generativelanguage.googleapis.com/v1beta",
+    ),
+    ProviderPreset(
+        "openai-responses",
+        "OpenAI Responses",
+        "openai-responses",
+        "https://api.openai.com/v1",
+    ),
     ProviderPreset("deepseek", "DeepSeek", "openai-compatible", "https://api.deepseek.com"),
     ProviderPreset("moonshot", "Kimi / Moonshot", "openai-compatible", "https://api.moonshot.cn/v1"),
     ProviderPreset("zhipu", "Zhipu GLM", "openai-compatible", "https://open.bigmodel.cn/api/paas/v4"),

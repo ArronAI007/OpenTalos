@@ -11,6 +11,15 @@ from typing import Any
 import httpx
 
 from gateway.resolver import ResolvedModel
+from gateway.inbound_gemini import (
+    chat_request_to_gemini,
+    gemini_response_to_chat,
+    gemini_stream_to_chat,
+)
+from gateway.inbound_responses import (
+    chat_request_to_responses,
+    responses_response_to_chat,
+)
 from gateway.translation import (
     AnthropicStreamTranslator,
     anthropic_to_openai_response,
@@ -255,6 +264,174 @@ class AnthropicUpstream(OpenAICompatibleUpstream):
         base = resolved.base_url or (preset.default_base_url if preset else None) or "https://api.anthropic.com"
         base = base.rstrip("/")
         return f"{base}/messages" if base.endswith("/v1") else f"{base}/v1/messages"
+
+
+class GeminiUpstream(OpenAICompatibleUpstream):
+    async def complete(
+        self,
+        resolved: ResolvedModel,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        translated = chat_request_to_gemini(payload)
+        async with self._client(resolved) as client:
+            response = await client.post(self._endpoint(resolved), json=translated)
+        self._raise_for_status(response)
+        return gemini_response_to_chat(response.json(), str(payload.get("model")))
+
+    async def stream(
+        self,
+        resolved: ResolvedModel,
+        payload: dict[str, Any],
+    ) -> GatewayStream:
+        translated = chat_request_to_gemini(payload)
+        client = self._client(resolved)
+        response = await client.send(
+            client.build_request("POST", self._stream_endpoint(resolved), json=translated),
+            stream=True,
+        )
+        if response.status_code >= 400:
+            detail = await _response_detail(response)
+            await response.aclose()
+            await client.aclose()
+            raise GatewayUpstreamError(response.status_code, detail)
+
+        async def iterator() -> AsyncIterator[str]:
+            try:
+                async for line in response.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    raw = line[5:].strip()
+                    if not raw:
+                        continue
+                    chunk = gemini_stream_to_chat(
+                        json.loads(raw),
+                        str(payload.get("model")),
+                    )
+                    yield f"data: {json.dumps(chunk, separators=(',', ':'))}\n\n"
+                yield "data: [DONE]\n\n"
+            finally:
+                await response.aclose()
+                await client.aclose()
+
+        return GatewayStream(status_code=response.status_code, body=iterator())
+
+    @staticmethod
+    def _base(resolved: ResolvedModel) -> str:
+        preset = get_preset(resolved.provider)
+        base = resolved.base_url or (preset.default_base_url if preset else None)
+        if not base:
+            raise GatewayUpstreamError(400, "Gemini provider requires a base_url")
+        return base.rstrip("/")
+
+    def _endpoint(self, resolved: ResolvedModel) -> str:
+        return (
+            f"{self._base(resolved)}/models/{resolved.model_id}:generateContent"
+            f"?key={resolved.api_key}"
+        )
+
+    def _stream_endpoint(self, resolved: ResolvedModel) -> str:
+        return (
+            f"{self._base(resolved)}/models/{resolved.model_id}:streamGenerateContent"
+            f"?alt=sse&key={resolved.api_key}"
+        )
+
+
+class OpenAIResponsesUpstream(OpenAICompatibleUpstream):
+    async def complete(
+        self,
+        resolved: ResolvedModel,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        translated = chat_request_to_responses(payload)
+        translated["model"] = resolved.model_id
+        translated["stream"] = False
+        async with self._client(resolved) as client:
+            response = await client.post(
+                self._endpoint(resolved),
+                json=translated,
+                headers={"Authorization": f"Bearer {resolved.api_key}"},
+            )
+        self._raise_for_status(response)
+        return responses_response_to_chat(response.json())
+
+    async def stream(
+        self,
+        resolved: ResolvedModel,
+        payload: dict[str, Any],
+    ) -> GatewayStream:
+        translated = chat_request_to_responses(payload)
+        translated["model"] = resolved.model_id
+        translated["stream"] = True
+        client = self._client(resolved)
+        response = await client.send(
+            client.build_request(
+                "POST",
+                self._endpoint(resolved),
+                json=translated,
+                headers={"Authorization": f"Bearer {resolved.api_key}"},
+            ),
+            stream=True,
+        )
+        if response.status_code >= 400:
+            detail = await _response_detail(response)
+            await response.aclose()
+            await client.aclose()
+            raise GatewayUpstreamError(response.status_code, detail)
+
+        async def iterator() -> AsyncIterator[str]:
+            try:
+                async for line in response.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    raw = line[5:].strip()
+                    if not raw or raw == "[DONE]":
+                        continue
+                    event = json.loads(raw)
+                    event_type = event.get("type")
+                    delta: dict[str, Any] = {}
+                    finish_reason = None
+                    if event_type == "response.output_text.delta":
+                        delta["content"] = event.get("delta", "")
+                    elif event_type == "response.function_call_arguments.delta":
+                        delta["tool_calls"] = [
+                            {
+                                "index": int(event.get("output_index", 0)),
+                                "id": event.get("item_id"),
+                                "type": "function",
+                                "function": {"arguments": event.get("delta", "")},
+                            }
+                        ]
+                    elif event_type == "response.completed":
+                        finish_reason = "stop"
+                    else:
+                        continue
+                    chunk = {
+                        "id": event.get("response", {}).get("id", "chatcmpl-responses"),
+                        "object": "chat.completion.chunk",
+                        "model": payload.get("model"),
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": delta,
+                                "finish_reason": finish_reason,
+                            }
+                        ],
+                    }
+                    yield f"data: {json.dumps(chunk, separators=(',', ':'))}\n\n"
+                yield "data: [DONE]\n\n"
+            finally:
+                await response.aclose()
+                await client.aclose()
+
+        return GatewayStream(status_code=response.status_code, body=iterator())
+
+    @staticmethod
+    def _endpoint(resolved: ResolvedModel) -> str:
+        preset = get_preset(resolved.provider)
+        base = resolved.base_url or (preset.default_base_url if preset else None)
+        if not base:
+            raise GatewayUpstreamError(400, "Responses provider requires a base_url")
+        return f"{base.rstrip('/')}/responses"
 
 
 async def _response_detail(response: httpx.Response) -> str:

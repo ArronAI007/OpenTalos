@@ -31,6 +31,29 @@ class ChatCompletionBody(BaseModel):
     stream: bool = False
 
 
+class ResponsesBody(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    model: str = Field(min_length=1)
+    input: str | list[dict[str, Any]]
+    stream: bool = False
+
+
+class AnthropicMessagesBody(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    model: str = Field(min_length=1)
+    messages: list[dict[str, Any]] = Field(min_length=1)
+    max_tokens: int = Field(default=4096, ge=1)
+    stream: bool = False
+
+
+class GeminiGenerateBody(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    contents: list[dict[str, Any]] = Field(min_length=1)
+
+
 def create_app(service: GatewayService | None = None) -> FastAPI:
     database = Path(os.environ.get("OPENTALOS_DB_PATH", _REPO_ROOT / ".data" / "chat.db"))
     gateway = service or GatewayService(ControlPlaneStore(database))
@@ -65,7 +88,11 @@ def create_app(service: GatewayService | None = None) -> FastAPI:
         client = request.client.host if request.client else None
         try:
             if body.stream:
-                stream = await gateway.stream(payload, client=client)
+                stream = await gateway.stream(
+                    payload,
+                    client=client,
+                    protocol="openai-chat",
+                )
                 return StreamingResponse(
                     stream.body,
                     media_type="text/event-stream",
@@ -74,7 +101,103 @@ def create_app(service: GatewayService | None = None) -> FastAPI:
                         "X-Accel-Buffering": "no",
                     },
                 )
-            return await gateway.complete(payload, client=client)
+            return await gateway.complete(
+                payload,
+                client=client,
+                protocol="openai-chat",
+            )
+        except ModelResolutionError as error:
+            raise HTTPException(404, str(error)) from error
+        except GatewayUpstreamError as error:
+            raise HTTPException(error.status_code, error.detail) from error
+
+    @app.post("/v1/responses")
+    async def responses(body: ResponsesBody, request: Request):
+        payload = body.model_dump(exclude_none=True)
+        client = request.client.host if request.client else None
+        try:
+            if body.stream:
+                stream = await gateway.stream(
+                    payload,
+                    client=client,
+                    protocol="openai-responses",
+                )
+                return StreamingResponse(
+                    stream.body,
+                    media_type="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+                )
+            return await gateway.complete(
+                payload,
+                client=client,
+                protocol="openai-responses",
+            )
+        except ModelResolutionError as error:
+            raise HTTPException(404, str(error)) from error
+        except GatewayUpstreamError as error:
+            raise HTTPException(error.status_code, error.detail) from error
+
+    @app.post("/v1/messages")
+    async def anthropic_messages(body: AnthropicMessagesBody, request: Request):
+        payload = body.model_dump(exclude_none=True)
+        client = request.client.host if request.client else None
+        try:
+            if body.stream:
+                stream = await gateway.stream(
+                    payload,
+                    client=client,
+                    protocol="anthropic-messages",
+                )
+                return StreamingResponse(
+                    stream.body,
+                    media_type="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+                )
+            return await gateway.complete(
+                payload,
+                client=client,
+                protocol="anthropic-messages",
+            )
+        except ModelResolutionError as error:
+            raise HTTPException(404, str(error)) from error
+        except GatewayUpstreamError as error:
+            raise HTTPException(error.status_code, error.detail) from error
+
+    @app.post("/v1beta/models/{model_path:path}")
+    async def gemini_generate(
+        model_path: str,
+        body: GeminiGenerateBody,
+        request: Request,
+    ):
+        if model_path.endswith(":streamGenerateContent"):
+            model = model_path[: -len(":streamGenerateContent")]
+            stream_request = True
+        elif model_path.endswith(":generateContent"):
+            model = model_path[: -len(":generateContent")]
+            stream_request = False
+        else:
+            raise HTTPException(404, "unknown Gemini endpoint")
+        payload = body.model_dump(exclude_none=True)
+        payload["model"] = model
+        payload["stream"] = stream_request
+        client = request.client.host if request.client else None
+        try:
+            if stream_request:
+                stream = await gateway.stream(
+                    payload,
+                    client=client,
+                    protocol="gemini",
+                )
+                return StreamingResponse(
+                    stream.body,
+                    media_type="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+                )
+            return await gateway.complete(
+                payload,
+                client=client,
+                protocol="gemini",
+            )
         except ModelResolutionError as error:
             raise HTTPException(404, str(error)) from error
         except GatewayUpstreamError as error:
