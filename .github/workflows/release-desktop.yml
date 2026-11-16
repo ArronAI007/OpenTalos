@@ -253,7 +253,9 @@ jobs:
           )
           & uv @uvArgs 2>&1 | Tee-Object -FilePath $log
           if ($LASTEXITCODE -ne 0) {
-            Get-Content $log -Tail 20 | ForEach-Object { Write-Output "::error::$_" }
+            $tail = (Get-Content $log -Tail 20 | Out-String).Trim()
+            $tail = $tail.Replace("%", "%25").Replace("`r", "%0D").Replace("`n", "%0A")
+            Write-Output "::error title=Windows build failure::$tail"
             exit $LASTEXITCODE
           }
 
