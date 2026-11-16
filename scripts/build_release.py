@@ -163,6 +163,7 @@ def _prepare_web(args: argparse.Namespace, resources: Path) -> None:
             + [
                 "install",
                 "--omit=dev",
+                "--legacy-peer-deps",
                 "--no-audit",
                 "--no-fund",
                 "--package-lock=false",
