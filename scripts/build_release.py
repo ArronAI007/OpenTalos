@@ -143,6 +143,13 @@ def _prepare_web(args: argparse.Namespace, resources: Path) -> None:
         if not next_bin.is_file():
             raise SystemExit("Next.js executable is missing; install apps/web dependencies")
         _run([next_bin, "build", "--webpack"], cwd=web_root)
+        node_bin = shutil.which("node")
+        if not node_bin:
+            raise SystemExit("Node.js executable is missing; install Node.js")
+        _run(
+            [node_bin, "scripts/transpile-webview.mjs"],
+            cwd=web_root,
+        )
     standalone = web_root / ".next" / "standalone"
     server = standalone / "apps" / "web" / "server.js"
     if not server.is_file():

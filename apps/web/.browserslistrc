@@ -1,0 +1,6 @@
+# pywebview uses the host macOS WebKit version. Keep the production bundle
+# compatible with the WebKit shipped on supported Intel macOS releases.
+Safari >= 15
+Chrome >= 100
+Firefox >= 100
+Edge >= 100

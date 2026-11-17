@@ -48,9 +48,10 @@ export default function RoutingGroupsPage() {
         setGroups(nextGroups);
         setModels(nextModels);
       })
-      .catch((reason) =>
-        setError(reason instanceof Error ? reason.message : "无法加载路由组")
-      );
+      .catch((reason) => {
+        setError(reason instanceof Error ? reason.message : "无法加载路由组");
+        setGroups([]);
+      });
   }, []);
 
   const suggestions = useMemo(

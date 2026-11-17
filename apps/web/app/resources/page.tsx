@@ -80,9 +80,12 @@ export default function ResourcesPage() {
         setExternalAgents(nextExternal);
         setLibrary(nextLibrary);
       })
-      .catch((reason) =>
-        setError(reason instanceof Error ? reason.message : "无法加载资源库")
-      );
+      .catch((reason) => {
+        const message =
+          reason instanceof Error ? reason.message : "无法加载资源库";
+        setError(message);
+        setSkills({ reachable: false, skills: [], error: message });
+      });
   }, []);
 
   const counts = {

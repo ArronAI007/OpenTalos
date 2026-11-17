@@ -21,7 +21,8 @@
 
 ### Install From A Published Release
 
-- **macOS**：打开 `.dmg`，将 `OpenTalos.app` 拖入 `Applications`。官方 CI
+- **macOS**：打开 `.dmg`，将 `OpenTalos.app` 拖入 `Applications`。升级时先把
+  `Applications` 中的旧版移到废纸篓，再拖入新版，避免旧静态资源残留。官方 CI
   构建会执行 Developer ID 签名和 Apple notarization。
 - **Windows**：运行 `OpenTalos-windows-x86_64-setup.exe`，安装器会创建开始菜单
   和桌面入口。

@@ -55,9 +55,10 @@ export default function RoutingPage() {
         setUsage(nextUsage);
         setTraces(nextTraces);
       })
-      .catch((reason) =>
-        setError(reason instanceof Error ? reason.message : "无法加载路由")
-      );
+      .catch((reason) => {
+        setError(reason instanceof Error ? reason.message : "无法加载路由");
+        setAccounts([]);
+      });
   }, []);
 
   const needle = query.trim().toLowerCase();
