@@ -117,6 +117,15 @@ class AgentPlatformService:
             raise AgentNotFoundError(agent_id)
         return item
 
+    def list_resources(self) -> dict[str, Any]:
+        from .resources import discover_resources
+
+        return discover_resources(
+            self.catalog,
+            self.list_agents(installed_only=True),
+            home=Path(getattr(self.discovery, "home", Path.home())),
+        )
+
     def definition(self, agent_id: str) -> AgentDefinition:
         definition = self._definitions.get(agent_id)
         if definition is None:

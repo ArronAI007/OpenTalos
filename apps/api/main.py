@@ -180,6 +180,11 @@ class ForgetMemoriesBody(BaseModel):
     max_count: int = 1000
 
 
+class CreateMemoryBody(BaseModel):
+    content: str
+    importance: float = 0.5
+
+
 class ConsolidateMemoriesBody(BaseModel):
     similarity_threshold: float = 0.9
 
@@ -824,6 +829,19 @@ def create_app(
             {k: v for k, v in m.items() if k != "embedding"} for m in store.semantic.list_memories()
         ]
         return {"memories": memories}
+
+    @app.post("/api/memories", status_code=201)
+    async def create_memory_route(request: CreateMemoryBody) -> dict:
+        content = request.content.strip()
+        if not content:
+            raise HTTPException(400, "memory content is required")
+        importance = min(1.0, max(0.0, request.importance))
+        memory = await asyncio.to_thread(
+            store.semantic.remember_manual,
+            content,
+            importance,
+        )
+        return {key: value for key, value in memory.items() if key != "embedding"}
 
     @app.delete("/api/memories/{memory_id}", status_code=204)
     async def delete_memory_route(memory_id: int) -> None:

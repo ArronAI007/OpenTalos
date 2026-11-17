@@ -794,6 +794,20 @@ async def test_list_memories_returns_empty_when_none_remembered(api) -> None:
     assert resp.json() == {"memories": []}
 
 
+async def test_create_memory_adds_manual_memory(api) -> None:
+    created = await api.post(
+        "/api/memories",
+        json={"content": "用户偏好在周末处理开源项目", "importance": 0.8},
+    )
+
+    assert created.status_code == 201
+    assert created.json()["content"] == "用户偏好在周末处理开源项目"
+    assert created.json()["importance"] == 0.8
+
+    listed = await api.get("/api/memories")
+    assert listed.json()["memories"][0]["content"] == "用户偏好在周末处理开源项目"
+
+
 async def test_delete_missing_memory_returns_404(api) -> None:
     resp = await api.delete("/api/memories/999999")
     assert resp.status_code == 404

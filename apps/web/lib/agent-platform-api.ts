@@ -100,6 +100,33 @@ export interface AgentUpdatePlan {
   automatic: boolean;
 }
 
+export interface AgentLocalResource {
+  id: string;
+  kind: AgentLibraryKind;
+  name: string;
+  description: string;
+  content: string;
+  agent_id: string;
+  agent_name: string;
+  path: string;
+  source: "local";
+  metadata: Record<string, unknown>;
+}
+
+export interface AgentResourceIndex {
+  home: string;
+  resources: AgentLocalResource[];
+  agents: Array<{
+    id: string;
+    name: string;
+    version: string | null;
+    compatibility: string | null;
+    configuration_ready: boolean;
+    capabilities: string[];
+    resource_paths: Record<string, string>;
+  }>;
+}
+
 export function agentCatalogUrl(
   baseUrl: string,
   options?: { installedOnly?: boolean; query?: string }
@@ -137,6 +164,13 @@ export async function discoverAgents(): Promise<AgentPlatformAgent[]> {
     `${AGENT_PLATFORM_API_URL}/api/agent-platform/discover`,
     { method: "POST" }
   ).then((data) => data.agents);
+}
+
+export async function listAgentResources(): Promise<AgentResourceIndex> {
+  return fetchJson<AgentResourceIndex>(
+    `${AGENT_PLATFORM_API_URL}/api/agent-platform/resources`,
+    { cache: "no-store" }
+  );
 }
 
 export async function listAgentModels(agentId: string): Promise<AgentModelOption[]> {

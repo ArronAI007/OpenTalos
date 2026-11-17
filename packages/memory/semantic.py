@@ -76,6 +76,22 @@ class SemanticMemory:
         embedding = await self._embedder().embed(content)
         return await asyncio.to_thread(self._insert_or_touch, content, embedding, importance)
 
+    def remember_manual(self, content: str, importance: float = 0.5) -> dict:
+        """Store a user-authored memory without requiring an embedding provider."""
+        now = _now()
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO memories (content, created_at, updated_at, embedding, importance)"
+                " VALUES (?, ?, ?, NULL, ?)"
+                " ON CONFLICT(content) DO UPDATE SET"
+                " updated_at = excluded.updated_at, importance = excluded.importance",
+                (content, now, now, importance),
+            )
+            row = conn.execute(
+                "SELECT * FROM memories WHERE content = ?", (content,)
+            ).fetchone()
+        return dict(row)
+
     def list_memories(self) -> list[dict]:
         # 新在前：召回同分时优先保留更新的记忆。纯同步——不涉及 embedding 调用，供 recall()
         # 用 asyncio.to_thread 包一层调用，也供测试/其它同步上下文直接调用。

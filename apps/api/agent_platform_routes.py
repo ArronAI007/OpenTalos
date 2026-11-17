@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -47,6 +49,10 @@ def create_agent_platform_router(service: AgentPlatformService) -> APIRouter:
     @router.post("/discover")
     async def discover() -> dict:
         return {"agents": service.refresh_installations()}
+
+    @router.get("/resources")
+    async def resources() -> dict:
+        return await asyncio.to_thread(service.list_resources)
 
     @router.get("/agents")
     async def agents(installed_only: bool = True) -> dict:

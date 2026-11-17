@@ -98,6 +98,9 @@ type, so it still shows several agent types side by side.)
   rather than replacing it, so the `finish` contract still holds; deleting an agent makes its
   existing tasks fall back to the default agent. Generation failures (model error or unparsable
   output) are reported to you instead of saving an empty agent.
+- **Unified resource library** (`/resources`) — manage Agents, instructions, memory, MCP,
+  skills, hooks, environment entries, subagents, commands, Claude plugins, Pi packages, and
+  Agent-specific resources discovered from local configuration directories.
 - **Skills marketplace** (`/skills`) — browse built-in skills, add/remove them to your own
   toolbox (only added skills are ever advertised to the agent), import skills from any public
   GitHub repository, or upload a `.zip`/`.skill` package with a YAML-frontmatter `SKILL.md`.

@@ -1,6 +1,6 @@
 import type { SVGProps } from "react";
 
-type IconProps = SVGProps<SVGSVGElement>;
+export type IconProps = SVGProps<SVGSVGElement>;
 
 // 手写内联 lucide 风格线条图标：stroke=currentColor，颜色随按钮的 text-* 类继承。
 function Icon({ children, ...props }: IconProps) {

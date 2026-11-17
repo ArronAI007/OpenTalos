@@ -108,6 +108,10 @@ async def test_agent_platform_catalog_discovery_and_model_picker(
     discovered = await agent_platform_api.post("/api/agent-platform/discover")
     assert discovered.json()["agents"][0]["version"] == "1.2.3"
 
+    resources = await agent_platform_api.get("/api/agent-platform/resources")
+    assert resources.status_code == 200
+    assert resources.json()["agents"][0]["id"] == "codex"
+
     models = await agent_platform_api.get(
         "/api/agent-platform/agents/codex/models"
     )

@@ -30,6 +30,17 @@ export async function listMemories(): Promise<Memory[]> {
   );
 }
 
+export async function createMemory(
+  content: string,
+  importance = 0.5
+): Promise<Memory> {
+  return fetchJson<Memory>(`${API_URL}/api/memories`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content, importance }),
+  });
+}
+
 export async function deleteMemory(id: number): Promise<void> {
   const res = await fetch(`${API_URL}/api/memories/${id}`, { method: "DELETE" });
   if (!res.ok) throw new Error(`API ${res.status} ${res.statusText}`);
