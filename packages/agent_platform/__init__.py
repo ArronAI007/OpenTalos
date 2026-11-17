@@ -4,6 +4,7 @@ from .catalog import AgentDefinition, load_catalog
 from .config import AgentConfigError, AgentConfigManager
 from .discovery import AgentDiscovery
 from .service import AgentPlatformService
+from .sessions import LocalSessionNotFoundError, LocalSessionService
 from .store import AgentPlatformStore
 
 __all__ = [
@@ -13,5 +14,7 @@ __all__ = [
     "AgentDiscovery",
     "AgentPlatformService",
     "AgentPlatformStore",
+    "LocalSessionNotFoundError",
+    "LocalSessionService",
     "load_catalog",
 ]

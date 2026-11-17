@@ -107,6 +107,9 @@ type, so it still shows several agent types side by side.)
   mid-conversation, with per-source failure reporting instead of silent gaps.
 - **Streaming chat** — SSE-driven replies with live tool-call bubbles, a reasoning trace,
   stop/resume, and model-generated follow-up question suggestions.
+- **Local Agent sessions** (`/conversations`) — aggregate OpenTalos tasks with read-only
+  histories from Codex, Claude Code, and Pi found on this computer. Filter by Agent, search
+  titles and project paths, inspect the latest turns, and copy the native resume command.
 - **Agent evaluation** (`/eval`) — author test cases (a task instruction plus an optional
   reference answer), and run them. Each reply is scored by an LLM judge (correctness/completeness/clarity, 1-5)
   with a written comment; the report shows averages and pass rates plus a full per-case

@@ -26,6 +26,7 @@ from agent_platform import (  # noqa: E402
     AgentDiscovery,
     AgentPlatformService,
     AgentPlatformStore,
+    LocalSessionService,
     load_catalog,
 )
 from agent_platform_routes import create_agent_platform_router  # noqa: E402
@@ -48,6 +49,7 @@ from runtime import ChatRuntime  # noqa: E402
 from model_control import create_model_control_router  # noqa: E402
 from model_platform.control_plane import ControlPlaneStore  # noqa: E402
 from model_platform.discovery import ModelDiscovery  # noqa: E402
+from local_session_routes import create_local_session_router  # noqa: E402
 from plugin_platform.store import PluginStore  # noqa: E402
 from privacy.engine import PrivacyEngine  # noqa: E402
 from privacy.store import PrivacyStore  # noqa: E402
@@ -230,6 +232,7 @@ def create_app(
     search_key_store: SearchKeyStore | None = None,
     plugin_store: PluginStore | None = None,
     media_service: MediaGenerationService | None = None,
+    local_session_service: LocalSessionService | None = None,
 ) -> FastAPI:
     if runtime is None:
         runtime = ChatRuntime(
@@ -289,6 +292,9 @@ def create_app(
         )
     app.state.agent_platform_service = agent_platform_service
     app.include_router(create_agent_platform_router(agent_platform_service))
+    local_session_service = local_session_service or LocalSessionService()
+    app.state.local_session_service = local_session_service
+    app.include_router(create_local_session_router(local_session_service))
 
     privacy_store = privacy_store or PrivacyStore(runtime.store.path)
     privacy_engine = PrivacyEngine(
